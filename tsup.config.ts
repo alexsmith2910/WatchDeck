@@ -8,7 +8,4 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   shims: false,
-  banner: {
-    js: '#!/usr/bin/env node',
-  },
 })
