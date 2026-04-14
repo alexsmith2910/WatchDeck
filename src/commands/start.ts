@@ -2,7 +2,7 @@ import { createRequire } from 'node:module'
 import chalk from 'chalk'
 import ora, { type Ora } from 'ora'
 import { initConfig } from '../config/index.js'
-import { eventBus } from '../core/eventBus.js'
+import { eventBus, initEventBus } from '../core/eventBus.js'
 import type { EventMap } from '../core/eventTypes.js'
 import { MongoDBAdapter } from '../storage/mongodb.js'
 import { formatWarning } from '../utils/errors.js'
@@ -81,6 +81,10 @@ export async function runStart(options: StartOptions): Promise<void> {
   }
 
   const { config, warnings, configFound, configPath } = result
+
+  // Apply config-driven event bus settings before any subscribers are registered.
+  initEventBus(config)
+
   const port = options.port !== undefined ? parseInt(options.port, 10) : config.port
 
   if (!silent) {
@@ -116,20 +120,20 @@ export async function runStart(options: StartOptions): Promise<void> {
   const adapter = new MongoDBAdapter(dbUri, dbPrefix, config)
 
   // Runtime reconnect listeners — stay active for the lifetime of the process.
-  eventBus.on('db:reconnecting', ({ attempt, maxAttempts, nextRetryInSeconds }) => {
+  eventBus.subscribe('db:reconnecting', ({ attempt, maxAttempts, nextRetryInSeconds }) => {
     if (silent) return
     const max = maxAttempts === 0 ? '∞' : String(maxAttempts)
     warn(`Reconnecting  attempt ${attempt}/${max}  ·  next in ${nextRetryInSeconds}s`)
-  })
-  eventBus.on('db:reconnected', ({ outageDurationSeconds }) => {
+  }, 'standard')
+  eventBus.subscribe('db:reconnected', ({ outageDurationSeconds }) => {
     if (silent) return
     ok(`Reconnected`, `after ${outageDurationSeconds}s outage`)
-  })
-  eventBus.on('db:fatal', ({ totalAttempts, totalOutageDuration }) => {
+  }, 'standard')
+  eventBus.subscribe('db:fatal', ({ totalAttempts, totalOutageDuration }) => {
     console.log(`  ${chalk.red('✗')}  Connection lost permanently`)
     console.log(`       ${chalk.dim(`${totalAttempts} attempts  ·  ${totalOutageDuration}s outage`)}`)
     process.exit(1)
-  })
+  }, 'critical')
 
   // Connect
   const dbSpinner = spinner('Connecting to database...', silent).start()
