@@ -1,0 +1,49 @@
+{
+  "name": "watchdeck",
+  "version": "0.1.0",
+  "description": "Self-hosted endpoint monitoring toolkit for solo devs and small teams",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "watchdeck": "dist/bin/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "build:dashboard": "vite build",
+    "dev": "tsup --watch",
+    "start": "node dist/bin/cli.js start",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write src"
+  },
+  "keywords": [
+    "monitoring",
+    "uptime",
+    "endpoint",
+    "self-hosted"
+  ],
+  "author": "",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "fastify": "^5.8.4",
+    "mongodb": "^7.1.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.58.2",
+    "@typescript-eslint/parser": "^8.58.2",
+    "eslint": "^10.2.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "prettier": "^3.8.2",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.58.2"
+  }
+}
