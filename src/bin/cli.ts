@@ -9,7 +9,7 @@ const program = new Command()
 program
   .name('watchdeck')
   .description('Self-hosted endpoint monitoring toolkit')
-  .version('0.1.0')
+  .version('0.1.0', '-v, --version', 'output the current version')
 
 program
   .command('init')
