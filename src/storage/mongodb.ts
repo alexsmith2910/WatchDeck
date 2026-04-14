@@ -1,8 +1,9 @@
-import { MongoClient, type Db } from 'mongodb'
+import { MongoClient, ObjectId, type Db } from 'mongodb'
 import { eventBus } from '../core/eventBus.js'
 import type { WatchDeckConfig } from '../config/types.js'
 import { StorageAdapter, type HealthCheckResult } from './adapter.js'
 import { runMigrations } from './migrations.js'
+import type { CheckDoc, CheckWritePayload, SystemEventDoc } from './types.js'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -239,6 +240,67 @@ export class MongoDBAdapter extends StorageAdapter {
       this.client = null
       this.db = null
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Buffer pipeline
+  // ---------------------------------------------------------------------------
+
+  async saveCheck(payload: CheckWritePayload): Promise<void> {
+    const db = this.getDb()
+    const doc: CheckDoc = {
+      _id: new ObjectId(),
+      endpointId: new ObjectId(payload.endpointId),
+      timestamp: payload.timestamp instanceof Date ? payload.timestamp : new Date(payload.timestamp),
+      responseTime: payload.responseTime,
+      status: payload.status,
+      duringMaintenance: false,
+      createdAt: new Date(),
+    }
+    if (payload.statusCode !== null) doc.statusCode = payload.statusCode
+    if (payload.errorMessage !== null) doc.errorMessage = payload.errorMessage
+    await db.collection<CheckDoc>(`${this.dbPrefix}checks`).insertOne(doc)
+  }
+
+  async saveManyChecks(payloads: CheckWritePayload[]): Promise<void> {
+    if (payloads.length === 0) return
+    const db = this.getDb()
+    const docs: CheckDoc[] = payloads.map((p) => {
+      const doc: CheckDoc = {
+        _id: new ObjectId(),
+        endpointId: new ObjectId(p.endpointId),
+        timestamp: p.timestamp instanceof Date ? p.timestamp : new Date(p.timestamp),
+        responseTime: p.responseTime,
+        status: p.status,
+        duringMaintenance: false,
+        createdAt: new Date(),
+      }
+      if (p.statusCode !== null) doc.statusCode = p.statusCode
+      if (p.errorMessage !== null) doc.errorMessage = p.errorMessage
+      return doc
+    })
+    await db.collection<CheckDoc>(`${this.dbPrefix}checks`).insertMany(docs)
+  }
+
+  // ---------------------------------------------------------------------------
+  // System events
+  // ---------------------------------------------------------------------------
+
+  async saveSystemEvent(event: Omit<SystemEventDoc, '_id'>): Promise<void> {
+    const db = this.getDb()
+    await db
+      .collection<SystemEventDoc>(`${this.dbPrefix}system_events`)
+      .insertOne({ _id: new ObjectId(), ...event })
+  }
+
+  async getSystemEvents(limit = 50): Promise<SystemEventDoc[]> {
+    if (!this.db) return []
+    return this.db
+      .collection<SystemEventDoc>(`${this.dbPrefix}system_events`)
+      .find()
+      .sort({ startedAt: -1 })
+      .limit(limit)
+      .toArray()
   }
 
   // ---------------------------------------------------------------------------

@@ -1,6 +1,24 @@
 import type { ObjectId } from 'mongodb'
 
 // ---------------------------------------------------------------------------
+// Buffer pipeline types
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape stored in the check buffer and accepted by StorageAdapter.saveCheck().
+ * timestamp is Date | string because disk-serialised entries arrive as strings
+ * after JSON.parse — the adapter normalises it before writing to MongoDB.
+ */
+export interface CheckWritePayload {
+  timestamp: Date | string
+  endpointId: string
+  status: 'healthy' | 'degraded' | 'down'
+  responseTime: number
+  statusCode: number | null
+  errorMessage: string | null
+}
+
+// ---------------------------------------------------------------------------
 // Shared sub-types
 // ---------------------------------------------------------------------------
 

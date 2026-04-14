@@ -1,3 +1,5 @@
+import type { CheckWritePayload, SystemEventDoc } from './types.js'
+
 /**
  * Abstract storage adapter.
  *
@@ -46,4 +48,34 @@ export abstract class StorageAdapter {
    * Should be called once after a successful connect().
    */
   abstract migrate(): Promise<void>
+
+  // ---------------------------------------------------------------------------
+  // Buffer pipeline
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Persist a single check result.
+   * Called by the buffer pipeline during live (DB-connected) operation.
+   */
+  abstract saveCheck(payload: CheckWritePayload): Promise<void>
+
+  /**
+   * Persist multiple check results in one operation.
+   * Called during buffer replay (reconnect and startup).
+   */
+  abstract saveManyChecks(payloads: CheckWritePayload[]): Promise<void>
+
+  // ---------------------------------------------------------------------------
+  // System events
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Persist a system event record (e.g. a DB outage summary).
+   */
+  abstract saveSystemEvent(event: Omit<SystemEventDoc, '_id'>): Promise<void>
+
+  /**
+   * Retrieve recent system event records, newest first.
+   */
+  abstract getSystemEvents(limit?: number): Promise<SystemEventDoc[]>
 }
