@@ -734,11 +734,12 @@ export class MongoDBAdapter extends StorageAdapter {
       }
     }
 
-    const [items, total] = await Promise.all([
+    const [rawItems, total] = await Promise.all([
       coll.find(q as Parameters<typeof coll.find>[0]).sort(sort).limit(limit + 1).toArray(),
       coll.countDocuments(filter as Parameters<typeof coll.countDocuments>[0]),
     ])
 
+    const items = rawItems as unknown as T[]
     const hasMore = items.length > limit
     if (hasMore) items.pop()
 
