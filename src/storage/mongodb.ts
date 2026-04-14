@@ -3,7 +3,7 @@ import { eventBus } from '../core/eventBus.js'
 import type { WatchDeckConfig } from '../config/types.js'
 import { StorageAdapter, type HealthCheckResult } from './adapter.js'
 import { runMigrations } from './migrations.js'
-import type { CheckDoc, CheckWritePayload, SystemEventDoc } from './types.js'
+import type { CheckDoc, CheckWritePayload, EndpointDoc, SystemEventDoc } from './types.js'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -301,6 +301,38 @@ export class MongoDBAdapter extends StorageAdapter {
       .sort({ startedAt: -1 })
       .limit(limit)
       .toArray()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Check engine
+  // ---------------------------------------------------------------------------
+
+  async listEnabledEndpoints(): Promise<EndpointDoc[]> {
+    if (!this.db) return []
+    return this.db
+      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+      .find({ status: { $in: ['active', 'paused'] } })
+      .toArray()
+  }
+
+  async updateEndpointAfterCheck(
+    endpointId: string,
+    status: 'healthy' | 'degraded' | 'down',
+    timestamp: Date,
+    consecutiveFailures: number,
+  ): Promise<void> {
+    const db = this.getDb()
+    await db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`).updateOne(
+      { _id: new ObjectId(endpointId) },
+      {
+        $set: {
+          lastCheckAt: timestamp,
+          lastStatus: status,
+          consecutiveFailures,
+          updatedAt: new Date(),
+        },
+      },
+    )
   }
 
   // ---------------------------------------------------------------------------

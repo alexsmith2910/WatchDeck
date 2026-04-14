@@ -1,4 +1,4 @@
-import type { CheckWritePayload, SystemEventDoc } from './types.js'
+import type { CheckWritePayload, EndpointDoc, SystemEventDoc } from './types.js'
 
 /**
  * Abstract storage adapter.
@@ -78,4 +78,26 @@ export abstract class StorageAdapter {
    * Retrieve recent system event records, newest first.
    */
   abstract getSystemEvents(limit?: number): Promise<SystemEventDoc[]>
+
+  // ---------------------------------------------------------------------------
+  // Check engine
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return all endpoints with status 'active' or 'paused'.
+   * Used by the scheduler on boot to populate the min-heap.
+   */
+  abstract listEnabledEndpoints(): Promise<EndpointDoc[]>
+
+  /**
+   * Persist an endpoint's runtime state after a check completes.
+   * Updates lastCheckAt, lastStatus, consecutiveFailures, and updatedAt.
+   * Called by the scheduler as a fire-and-forget after each check:complete event.
+   */
+  abstract updateEndpointAfterCheck(
+    endpointId: string,
+    status: 'healthy' | 'degraded' | 'down',
+    timestamp: Date,
+    consecutiveFailures: number,
+  ): Promise<void>
 }
