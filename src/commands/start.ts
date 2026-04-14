@@ -46,12 +46,25 @@ function warn(text: string): void {
 }
 
 function subItem(text: string): void {
+  console.log(`       ${chalk.dim(text)}`)
+}
+
+function warnSubItem(text: string): void {
   console.log(`       ${text}`)
 }
 
 /** Create an ora spinner pre-configured to align with ok()/warn() items. */
 function spinner(text: string, silent: boolean): Ora {
   return ora({ text, indent: 2, isSilent: silent })
+}
+
+/** Extract just the host from a MongoDB URI without exposing credentials. */
+function hostFromUri(uri: string): string {
+  try {
+    return new URL(uri).host
+  } catch {
+    return 'unknown host'
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +80,7 @@ interface StartOptions {
 }
 
 export async function runStart(options: StartOptions): Promise<void> {
-  const silent = options.silent
+  const { silent, verbose } = options
 
   if (!silent) header()
 
@@ -99,6 +112,22 @@ export async function runStart(options: StartOptions): Promise<void> {
     const dashboardMode = options.apiOnly ? 'api-only' : config.dashboardMode
     ok('Config loaded', `port ${port}  ·  ${dashboardMode}`)
 
+    if (verbose) {
+      subItem(`file     ${configFound ? configPath : 'not found — using defaults'}`)
+      subItem(`api      ${config.apiBasePath}`)
+      subItem(`dashboard  ${config.dashboardRoute}`)
+      subItem(`check interval  ${config.defaults.checkInterval}s  ·  timeout ${config.defaults.timeout / 1000}s`)
+      subItem(`retention  ${config.retention.detailedDays}d checks  ·  ${config.retention.hourlyDays}d hourly  ·  ${config.retention.daily} daily`)
+    }
+
+    // Event bus init confirmation (verbose only)
+    if (verbose) {
+      ok(
+        'Event bus',
+        `maxListeners ${config.rateLimits.maxEventListeners}  ·  history ${config.eventHistorySize}`,
+      )
+    }
+
     // Collect notices: missing config file + module token warnings.
     const notices: string[] = []
 
@@ -114,7 +143,7 @@ export async function runStart(options: StartOptions): Promise<void> {
     } else {
       warn(`${notices.length} warning${notices.length === 1 ? '' : 's'}`)
       for (const n of notices) {
-        subItem(n)
+        warnSubItem(n)
       }
     }
   }
@@ -162,6 +191,11 @@ export async function runStart(options: StartOptions): Promise<void> {
   // db:connected fires synchronously inside connect() — succeed the spinner there.
   eventBus.once('db:connected', ({ latencyMs }) => {
     dbSpinner.succeed(`${chalk.bold('Connected')}  ${chalk.dim(`${latencyMs}ms`)}`)
+    if (!silent && verbose) {
+      subItem(`host     ${hostFromUri(dbUri)}`)
+      subItem(`prefix   ${dbPrefix}  ·  pool ${config.rateLimits.dbPoolSize}`)
+      subItem(`reconnect  max ${config.rateLimits.dbReconnectAttempts === 0 ? '∞' : config.rateLimits.dbReconnectAttempts} attempts  ·  30s→5min backoff`)
+    }
   })
 
   try {
@@ -190,6 +224,9 @@ export async function runStart(options: StartOptions): Promise<void> {
   try {
     await adapter.migrate()
     migSpinner.succeed(chalk.bold('Migrations complete'))
+    if (!silent && verbose) {
+      subItem('9 collections ensured')
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     migSpinner.fail(chalk.bold('Migrations failed'))
@@ -197,7 +234,9 @@ export async function runStart(options: StartOptions): Promise<void> {
     process.exit(1)
   }
 
-  // ── Buffer pipeline ───────────────────────────────────────────────────────
+  // ── Buffer ───────────────────────────────────────────────────────────────
+
+  if (!silent) section('Buffer')
 
   const diskBufferPath = path.join(os.homedir(), '.watchdeck', 'buffer.jsonl')
   const memBuffer = new MemoryBuffer<CheckWritePayload>(config.buffer.memoryCapacity)
@@ -207,6 +246,15 @@ export async function runStart(options: StartOptions): Promise<void> {
 
   outageTracker.register()
   pipeline.register()
+
+  if (!silent) {
+    ok('Pipeline active', `memory ${config.buffer.memoryCapacity}  ·  disk ${diskBufferPath}`)
+    if (verbose) {
+      subItem('outage tracker registered')
+      subItem('check:complete subscriber registered (critical priority)')
+      subItem('db:disconnected / db:reconnected subscribers registered')
+    }
+  }
 
   // Replay any checks buffered during a previous process run.
   if (!(await diskBuffer.isEmpty())) {
@@ -229,6 +277,8 @@ export async function runStart(options: StartOptions): Promise<void> {
     } else {
       replaySpinner.stop()
     }
+  } else if (!silent && verbose) {
+    subItem('no buffered data on disk')
   }
 
   // ── Server ───────────────────────────────────────────────────────────────
