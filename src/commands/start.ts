@@ -18,5 +18,7 @@ export async function runStart(options: StartOptions): Promise<void> {
   }
 
   // TODO: Step 7 — wire up engine, config loader, and Fastify server
-  console.log(chalk.yellow('Start command not yet implemented.'))
+  if (!options.silent) {
+    console.log(chalk.yellow('Start command not yet implemented.'))
+  }
 }
