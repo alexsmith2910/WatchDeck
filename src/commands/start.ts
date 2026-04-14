@@ -1,10 +1,54 @@
+import { createRequire } from 'node:module'
 import chalk from 'chalk'
-import ora from 'ora'
+import ora, { type Ora } from 'ora'
 import { initConfig } from '../config/index.js'
 import { eventBus } from '../core/eventBus.js'
 import type { EventMap } from '../core/eventTypes.js'
 import { MongoDBAdapter } from '../storage/mongodb.js'
 import { formatWarning } from '../utils/errors.js'
+
+const require = createRequire(import.meta.url)
+const { version } = require('../../package.json') as { version: string }
+
+// ---------------------------------------------------------------------------
+// Layout helpers
+// ---------------------------------------------------------------------------
+
+const SECTION_WIDTH = 50
+
+function header(): void {
+  console.log('')
+  console.log(chalk.cyan.bold('  WatchDeck') + chalk.dim(`  v${version}`))
+}
+
+function section(title: string): void {
+  const dashes = chalk.dim('─'.repeat(Math.max(0, SECTION_WIDTH - title.length - 1)))
+  console.log('')
+  console.log(chalk.dim('  ── ') + chalk.bold(title) + ' ' + dashes)
+  console.log('')
+}
+
+function ok(text: string, detail?: string): void {
+  const line = `  ${chalk.green('✓')}  ${text}`
+  console.log(detail ? line + '  ' + chalk.dim(detail) : line)
+}
+
+function warn(text: string): void {
+  console.log(`  ${chalk.yellow('⚠')}  ${text}`)
+}
+
+function subItem(text: string): void {
+  console.log(`       ${text}`)
+}
+
+/** Create an ora spinner pre-configured to align with ok()/warn() items. */
+function spinner(text: string, silent: boolean): Ora {
+  return ora({ text, indent: 2, isSilent: silent })
+}
+
+// ---------------------------------------------------------------------------
+// Start command
+// ---------------------------------------------------------------------------
 
 interface StartOptions {
   port?: string
@@ -14,49 +58,36 @@ interface StartOptions {
   apiOnly: boolean
 }
 
-const SEPARATOR = chalk.dim('  ' + '─'.repeat(50))
-
-function printStartupWarnings(notices: string[]): void {
-  if (notices.length === 0) return
-  console.log('')
-  console.log(
-    chalk.dim('  ── ') +
-    chalk.yellow.bold('Startup warnings') +
-    chalk.dim(' ' + '─'.repeat(30)),
-  )
-  for (const n of notices) {
-    console.log(n)
-  }
-  console.log(SEPARATOR)
-  console.log('')
-}
-
 export async function runStart(options: StartOptions): Promise<void> {
-  if (!options.silent) {
-    console.log(chalk.cyan('WatchDeck') + ' starting...')
-    if (options.verbose) {
-      console.log('Options:', options)
-    }
-  }
+  const silent = options.silent
 
-  // -------------------------------------------------------------------------
-  // Config
-  // -------------------------------------------------------------------------
+  if (!silent) header()
+
+  // ── Startup ──────────────────────────────────────────────────────────────
+
+  if (!silent) section('Startup')
+
   let result
   try {
     result = await initConfig(options.config)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    process.stderr.write(
-      ['', chalk.red.bold('  ✗  WatchDeck failed to start'), '', msg].join('\n') + '\n',
-    )
+    if (!silent) {
+      console.log(`  ${chalk.red('✗')}  Config failed`)
+      console.log('')
+    }
+    process.stderr.write(msg + '\n')
     process.exit(1)
   }
 
   const { config, warnings, configFound, configPath } = result
   const port = options.port !== undefined ? parseInt(options.port, 10) : config.port
 
-  if (!options.silent) {
+  if (!silent) {
+    const dashboardMode = options.apiOnly ? 'api-only' : config.dashboardMode
+    ok('Config loaded', `port ${port}  ·  ${dashboardMode}`)
+
+    // Collect notices: missing config file + module token warnings.
     const notices: string[] = []
 
     if (!configFound && options.config) {
@@ -65,58 +96,45 @@ export async function runStart(options: StartOptions): Promise<void> {
       )
     }
     notices.push(...warnings)
-    printStartupWarnings(notices)
 
-    if (options.verbose) {
-      console.log(chalk.dim('Config:'), {
-        port,
-        apiBasePath: config.apiBasePath,
-        dashboardMode: options.apiOnly ? 'api-only (--api-only flag)' : config.dashboardMode,
-      })
-      console.log('')
+    if (notices.length === 0) {
+      ok('No warnings')
+    } else {
+      warn(`${notices.length} warning${notices.length === 1 ? '' : 's'}`)
+      for (const n of notices) {
+        subItem(n)
+      }
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Database — connect + migrate
-  // -------------------------------------------------------------------------
+  // ── Database ─────────────────────────────────────────────────────────────
+
+  if (!silent) section('Database')
+
   const dbUri = process.env.MX_DB_URI!
   const dbPrefix = process.env.MX_DB_PREFIX ?? 'mx_'
   const adapter = new MongoDBAdapter(dbUri, dbPrefix, config)
 
   // Runtime reconnect listeners — stay active for the lifetime of the process.
   eventBus.on('db:reconnecting', ({ attempt, maxAttempts, nextRetryInSeconds }) => {
-    if (options.silent) return
+    if (silent) return
     const max = maxAttempts === 0 ? '∞' : String(maxAttempts)
-    console.log(
-      chalk.yellow('  ↻') +
-      chalk.dim(`  Reconnecting — attempt ${attempt}/${max}, next in ${nextRetryInSeconds}s`),
-    )
+    warn(`Reconnecting  attempt ${attempt}/${max}  ·  next in ${nextRetryInSeconds}s`)
   })
   eventBus.on('db:reconnected', ({ outageDurationSeconds }) => {
-    if (options.silent) return
-    console.log(chalk.green('  ✓') + chalk.dim(`  Reconnected after ${outageDurationSeconds}s`))
+    if (silent) return
+    ok(`Reconnected`, `after ${outageDurationSeconds}s outage`)
   })
   eventBus.on('db:fatal', ({ totalAttempts, totalOutageDuration }) => {
-    process.stderr.write(
-      [
-        '',
-        chalk.red.bold('  ✗  Lost database connection permanently'),
-        chalk.dim(`     ${totalAttempts} attempts over ${totalOutageDuration}s`),
-        '',
-      ].join('\n') + '\n',
-    )
+    console.log(`  ${chalk.red('✗')}  Connection lost permanently`)
+    console.log(`       ${chalk.dim(`${totalAttempts} attempts  ·  ${totalOutageDuration}s outage`)}`)
     process.exit(1)
   })
 
-  // -- Connect ---------------------------------------------------------------
+  // Connect
+  const dbSpinner = spinner('Connecting to database...', silent).start()
 
-  const dbSpinner = ora({
-    text: 'Connecting to database...',
-    isSilent: options.silent,
-  }).start()
-
-  // Update spinner text on each failed boot attempt so the user sees progress.
+  // Update spinner text on each failed boot attempt.
   let inBootPhase = true
   const onBootError = ({ context }: EventMap['db:error']) => {
     if (!inBootPhase) return
@@ -124,21 +142,21 @@ export async function runStart(options: StartOptions): Promise<void> {
     if (!match) return
     const [, current, max] = match.map(Number)
     if (current < max) {
-      dbSpinner.text = `Connecting to database... (attempt ${current + 1}/${max})`
+      dbSpinner.text = `Connecting to database...  attempt ${current + 1}/${max}`
     }
   }
   eventBus.on('db:error', onBootError)
 
   // db:connected fires synchronously inside connect() — succeed the spinner there.
   eventBus.once('db:connected', ({ latencyMs }) => {
-    dbSpinner.succeed(chalk.bold('Database connected') + '  ' + chalk.dim(`${latencyMs}ms`))
+    dbSpinner.succeed(`${chalk.bold('Connected')}  ${chalk.dim(`${latencyMs}ms`)}`)
   })
 
   try {
     await adapter.connect()
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    dbSpinner.fail(chalk.bold('Failed to connect to database'))
+    dbSpinner.fail(chalk.bold('Failed to connect'))
     process.stderr.write(
       [
         '',
@@ -154,28 +172,24 @@ export async function runStart(options: StartOptions): Promise<void> {
     eventBus.off('db:error', onBootError)
   }
 
-  // -- Migrate ---------------------------------------------------------------
-
-  const migSpinner = ora({
-    text: 'Running migrations...',
-    isSilent: options.silent,
-  }).start()
+  // Migrate
+  const migSpinner = spinner('Running migrations...', silent).start()
 
   try {
     await adapter.migrate()
     migSpinner.succeed(chalk.bold('Migrations complete'))
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    migSpinner.fail(chalk.bold('Migration failed'))
+    migSpinner.fail(chalk.bold('Migrations failed'))
     process.stderr.write(chalk.dim('  ' + msg) + '\n')
     process.exit(1)
   }
 
-  // -------------------------------------------------------------------------
+  // ── Server ───────────────────────────────────────────────────────────────
   // TODO: wire up check engine and Fastify server
-  // -------------------------------------------------------------------------
-  if (!options.silent) {
-    console.log('')
-    console.log(chalk.yellow('  Server startup not yet implemented.'))
+
+  if (!silent) {
+    section('Server')
+    console.log(`  ${chalk.yellow('…')}  Not yet implemented`)
   }
 }
