@@ -218,7 +218,7 @@ export async function runInit(options: InitOptions): Promise<void> {
 
   // Step 6 — Notification channels
   const channels = await p.multiselect({
-    message: 'Which notification channels do you want to enable?',
+    message: 'Which notification channels do you want to enable? (Space to select, Enter to confirm)',
     options: [
       { value: 'discord', label: 'Discord' },
       { value: 'slack', label: 'Slack' },
