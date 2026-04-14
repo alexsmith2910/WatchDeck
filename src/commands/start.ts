@@ -1,10 +1,18 @@
 import { createRequire } from 'node:module'
+import os from 'node:os'
+import path from 'node:path'
 import chalk from 'chalk'
 import ora, { type Ora } from 'ora'
 import { initConfig } from '../config/index.js'
 import { eventBus, initEventBus } from '../core/eventBus.js'
 import type { EventMap } from '../core/eventTypes.js'
 import { MongoDBAdapter } from '../storage/mongodb.js'
+import type { CheckWritePayload } from '../storage/types.js'
+import { MemoryBuffer } from '../buffer/memoryBuffer.js'
+import { DiskBuffer } from '../buffer/diskBuffer.js'
+import { replayFromDisk } from '../buffer/replay.js'
+import { OutageTracker } from '../buffer/outageTracker.js'
+import { BufferPipeline } from '../buffer/pipeline.js'
 import { formatWarning } from '../utils/errors.js'
 
 const require = createRequire(import.meta.url)
@@ -187,6 +195,40 @@ export async function runStart(options: StartOptions): Promise<void> {
     migSpinner.fail(chalk.bold('Migrations failed'))
     process.stderr.write(chalk.dim('  ' + msg) + '\n')
     process.exit(1)
+  }
+
+  // ── Buffer pipeline ───────────────────────────────────────────────────────
+
+  const diskBufferPath = path.join(os.homedir(), '.watchdeck', 'buffer.jsonl')
+  const memBuffer = new MemoryBuffer<CheckWritePayload>(config.buffer.memoryCapacity)
+  const diskBuffer = new DiskBuffer(diskBufferPath)
+  const outageTracker = new OutageTracker(adapter)
+  const pipeline = new BufferPipeline(adapter, memBuffer, diskBuffer, outageTracker)
+
+  outageTracker.register()
+  pipeline.register()
+
+  // Replay any checks buffered during a previous process run.
+  if (!(await diskBuffer.isEmpty())) {
+    const lineCount = await diskBuffer.lineCount()
+    const replaySpinner = spinner(
+      `Replaying ${lineCount} buffered check${lineCount === 1 ? '' : 's'}...`,
+      silent,
+    ).start()
+    const result = await replayFromDisk(adapter, diskBuffer)
+    if (!silent) {
+      if (result.errors === 0) {
+        replaySpinner.succeed(
+          chalk.bold(`Replayed ${result.replayed} check${result.replayed === 1 ? '' : 's'}`),
+        )
+      } else {
+        replaySpinner.warn(
+          `Replayed ${result.replayed}  ·  ${chalk.yellow(`${result.errors} errors remain on disk`)}`,
+        )
+      }
+    } else {
+      replaySpinner.stop()
+    }
   }
 
   // ── Server ───────────────────────────────────────────────────────────────
