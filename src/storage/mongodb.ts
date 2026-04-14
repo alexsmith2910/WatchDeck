@@ -3,7 +3,21 @@ import { eventBus } from '../core/eventBus.js'
 import type { WatchDeckConfig } from '../config/types.js'
 import { StorageAdapter, type HealthCheckResult } from './adapter.js'
 import { runMigrations } from './migrations.js'
-import type { CheckDoc, CheckWritePayload, EndpointDoc, SystemEventDoc } from './types.js'
+import type {
+  CheckDoc,
+  CheckWritePayload,
+  DailySummaryDoc,
+  DbPage,
+  DbPaginationOpts,
+  EndpointDoc,
+  HourlySummaryDoc,
+  IncidentDoc,
+  MaintenanceWindow,
+  NotificationChannelDoc,
+  NotificationLogDoc,
+  SettingsDoc,
+  SystemEventDoc,
+} from './types.js'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -336,6 +350,347 @@ export class MongoDBAdapter extends StorageAdapter {
   }
 
   // ---------------------------------------------------------------------------
+  // Endpoints API
+  // ---------------------------------------------------------------------------
+
+  async createEndpoint(
+    data: Omit<EndpointDoc, '_id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<EndpointDoc> {
+    const db = this.getDb()
+    const now = new Date()
+    const doc: EndpointDoc = { ...data, _id: new ObjectId(), createdAt: now, updatedAt: now }
+    await db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`).insertOne(doc)
+    return doc
+  }
+
+  async getEndpointById(id: string): Promise<EndpointDoc | null> {
+    if (!this.db) return null
+    try {
+      return await this.db
+        .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+        .findOne({ _id: new ObjectId(id) })
+    } catch {
+      return null
+    }
+  }
+
+  async listEndpoints(
+    opts: DbPaginationOpts & { status?: 'active' | 'paused' | 'archived'; type?: 'http' | 'port' },
+  ): Promise<DbPage<EndpointDoc>> {
+    const filter: Record<string, unknown> = {}
+    if (opts.status) {
+      filter.status = opts.status
+    } else {
+      filter.status = { $in: ['active', 'paused'] }
+    }
+    if (opts.type) filter.type = opts.type
+    return this.paginate<EndpointDoc>('endpoints', filter, opts, { _id: 1 })
+  }
+
+  async updateEndpoint(
+    id: string,
+    changes: Partial<EndpointDoc>,
+  ): Promise<EndpointDoc | null> {
+    const db = this.getDb()
+    const { _id: _dropped, createdAt: _c, ...safe } = changes as Record<string, unknown>
+    const result = await db
+      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+      .findOneAndUpdate(
+        { _id: new ObjectId(id) },
+        { $set: { ...safe, updatedAt: new Date() } },
+        { returnDocument: 'after' },
+      )
+    return result ?? null
+  }
+
+  async deleteEndpoint(id: string): Promise<boolean> {
+    const db = this.getDb()
+    const r = await db
+      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+      .deleteOne({ _id: new ObjectId(id) })
+    return r.deletedCount > 0
+  }
+
+  async getLatestCheck(endpointId: string): Promise<CheckDoc | null> {
+    if (!this.db) return null
+    try {
+      return await this.db
+        .collection<CheckDoc>(`${this.dbPrefix}checks`)
+        .findOne(
+          { endpointId: new ObjectId(endpointId) },
+          { sort: { timestamp: -1 } },
+        )
+    } catch {
+      return null
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Checks API
+  // ---------------------------------------------------------------------------
+
+  async listChecks(
+    endpointId: string,
+    opts: DbPaginationOpts & { from?: Date; to?: Date; status?: 'healthy' | 'degraded' | 'down' },
+  ): Promise<DbPage<CheckDoc>> {
+    const filter: Record<string, unknown> = { endpointId: new ObjectId(endpointId) }
+    if (opts.from || opts.to) {
+      const ts: Record<string, Date> = {}
+      if (opts.from) ts.$gte = opts.from
+      if (opts.to) ts.$lte = opts.to
+      filter.timestamp = ts
+    }
+    if (opts.status) filter.status = opts.status
+    return this.paginate<CheckDoc>('checks', filter, opts, { _id: -1 })
+  }
+
+  async listHourlySummaries(
+    endpointId: string,
+    opts: DbPaginationOpts,
+  ): Promise<HourlySummaryDoc[]> {
+    if (!this.db) return []
+    const limit = Math.min(opts.limit ?? 48, 200)
+    return this.db
+      .collection<HourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
+      .find({ endpointId: new ObjectId(endpointId) })
+      .sort({ hour: -1 })
+      .limit(limit)
+      .toArray()
+  }
+
+  async listDailySummaries(
+    endpointId: string,
+    opts: DbPaginationOpts,
+  ): Promise<DailySummaryDoc[]> {
+    if (!this.db) return []
+    const limit = Math.min(opts.limit ?? 90, 365)
+    return this.db
+      .collection<DailySummaryDoc>(`${this.dbPrefix}daily_summaries`)
+      .find({ endpointId: new ObjectId(endpointId) })
+      .sort({ date: -1 })
+      .limit(limit)
+      .toArray()
+  }
+
+  async getUptimeStats(
+    endpointId: string,
+  ): Promise<{ '24h': number; '7d': number; '30d': number; '90d': number }> {
+    if (!this.db) return { '24h': 0, '7d': 0, '30d': 0, '90d': 0 }
+
+    const oid = new ObjectId(endpointId)
+    const now = new Date()
+
+    const calcUptime = async (sinceMs: number): Promise<number> => {
+      const since = new Date(now.getTime() - sinceMs)
+      const [total, healthy] = await Promise.all([
+        this.db!.collection<CheckDoc>(`${this.dbPrefix}checks`)
+          .countDocuments({ endpointId: oid, timestamp: { $gte: since } }),
+        this.db!.collection<CheckDoc>(`${this.dbPrefix}checks`)
+          .countDocuments({ endpointId: oid, timestamp: { $gte: since }, status: 'healthy' }),
+      ])
+      if (total === 0) return 100
+      return Math.round((healthy / total) * 10000) / 100
+    }
+
+    const [h24, d7, d30, d90] = await Promise.all([
+      calcUptime(86_400_000),
+      calcUptime(7 * 86_400_000),
+      calcUptime(30 * 86_400_000),
+      calcUptime(90 * 86_400_000),
+    ])
+    return { '24h': h24, '7d': d7, '30d': d30, '90d': d90 }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Incidents API
+  // ---------------------------------------------------------------------------
+
+  async listIncidents(
+    opts: DbPaginationOpts & {
+      status?: 'active' | 'resolved'
+      endpointId?: string
+      from?: Date
+      to?: Date
+    },
+  ): Promise<DbPage<IncidentDoc>> {
+    const filter: Record<string, unknown> = {}
+    if (opts.status) filter.status = opts.status
+    if (opts.endpointId) filter.endpointId = new ObjectId(opts.endpointId)
+    if (opts.from || opts.to) {
+      const ts: Record<string, Date> = {}
+      if (opts.from) ts.$gte = opts.from
+      if (opts.to) ts.$lte = opts.to
+      filter.startedAt = ts
+    }
+    return this.paginate<IncidentDoc>('incidents', filter, opts, { _id: -1 })
+  }
+
+  async getIncidentById(id: string): Promise<IncidentDoc | null> {
+    if (!this.db) return null
+    try {
+      return await this.db
+        .collection<IncidentDoc>(`${this.dbPrefix}incidents`)
+        .findOne({ _id: new ObjectId(id) })
+    } catch {
+      return null
+    }
+  }
+
+  async listActiveIncidents(): Promise<IncidentDoc[]> {
+    if (!this.db) return []
+    return this.db
+      .collection<IncidentDoc>(`${this.dbPrefix}incidents`)
+      .find({ status: 'active' })
+      .sort({ startedAt: -1 })
+      .toArray()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Notification channels API
+  // ---------------------------------------------------------------------------
+
+  async listNotificationChannels(): Promise<NotificationChannelDoc[]> {
+    if (!this.db) return []
+    return this.db
+      .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+      .find()
+      .sort({ createdAt: 1 })
+      .toArray()
+  }
+
+  async createNotificationChannel(
+    data: Omit<NotificationChannelDoc, '_id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<NotificationChannelDoc> {
+    const db = this.getDb()
+    const now = new Date()
+    const doc: NotificationChannelDoc = { ...data, _id: new ObjectId(), createdAt: now, updatedAt: now }
+    await db
+      .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+      .insertOne(doc)
+    return doc
+  }
+
+  async updateNotificationChannel(
+    id: string,
+    changes: Partial<NotificationChannelDoc>,
+  ): Promise<NotificationChannelDoc | null> {
+    const db = this.getDb()
+    const { _id: _d, createdAt: _c, ...safe } = changes as Record<string, unknown>
+    const result = await db
+      .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+      .findOneAndUpdate(
+        { _id: new ObjectId(id) },
+        { $set: { ...safe, updatedAt: new Date() } },
+        { returnDocument: 'after' },
+      )
+    return result ?? null
+  }
+
+  async deleteNotificationChannel(id: string): Promise<boolean> {
+    const db = this.getDb()
+    const r = await db
+      .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+      .deleteOne({ _id: new ObjectId(id) })
+    return r.deletedCount > 0
+  }
+
+  async listNotificationLog(opts: DbPaginationOpts): Promise<DbPage<NotificationLogDoc>> {
+    return this.paginate<NotificationLogDoc>('notification_log', {}, opts, { _id: -1 })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Maintenance API
+  // ---------------------------------------------------------------------------
+
+  async addMaintenanceWindows(
+    endpointIds: string[],
+    windowData: Omit<MaintenanceWindow, '_id'>,
+  ): Promise<MaintenanceWindow[]> {
+    const db = this.getDb()
+    const windows: MaintenanceWindow[] = endpointIds.map((id) => ({
+      ...windowData,
+      _id: new ObjectId(),
+    }))
+
+    await Promise.all(
+      endpointIds.map((id, i) =>
+        db
+          .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+          .updateOne(
+            { _id: new ObjectId(id) },
+            { $push: { maintenanceWindows: windows[i]! }, $set: { updatedAt: new Date() } },
+          ),
+      ),
+    )
+    return windows
+  }
+
+  async removeMaintenanceWindow(windowId: string): Promise<boolean> {
+    const db = this.getDb()
+    const oid = new ObjectId(windowId)
+    const r = await db
+      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+      .updateOne(
+        { 'maintenanceWindows._id': oid },
+        { $pull: { maintenanceWindows: { _id: oid } }, $set: { updatedAt: new Date() } },
+      )
+    return r.modifiedCount > 0
+  }
+
+  async listMaintenanceWindows(): Promise<
+    Array<{ endpoint: EndpointDoc; window: MaintenanceWindow }>
+  > {
+    if (!this.db) return []
+    const now = new Date()
+    const endpoints = await this.db
+      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+      .find({ 'maintenanceWindows.0': { $exists: true } })
+      .toArray()
+
+    const result: Array<{ endpoint: EndpointDoc; window: MaintenanceWindow }> = []
+    for (const ep of endpoints) {
+      for (const w of ep.maintenanceWindows) {
+        // active: now is within the window; scheduled: window hasn't started yet
+        if (w.endTime >= now) {
+          result.push({ endpoint: ep, window: w })
+        }
+      }
+    }
+    return result
+  }
+
+  // ---------------------------------------------------------------------------
+  // Settings API
+  // ---------------------------------------------------------------------------
+
+  async getSettings(): Promise<SettingsDoc> {
+    const db = this.getDb()
+    const existing = await db
+      .collection<SettingsDoc>(`${this.dbPrefix}settings`)
+      .findOne({ _id: 'global' })
+    if (existing) return existing
+    // Upsert empty doc on first access
+    const doc: SettingsDoc = { _id: 'global' }
+    await db
+      .collection<SettingsDoc>(`${this.dbPrefix}settings`)
+      .updateOne({ _id: 'global' }, { $setOnInsert: doc }, { upsert: true })
+    return doc
+  }
+
+  async updateSettings(changes: Record<string, unknown>): Promise<SettingsDoc> {
+    const db = this.getDb()
+    const { _id: _d, ...safe } = changes
+    const result = await db
+      .collection<SettingsDoc>(`${this.dbPrefix}settings`)
+      .findOneAndUpdate(
+        { _id: 'global' },
+        { $set: safe },
+        { upsert: true, returnDocument: 'after' },
+      )
+    return result ?? { _id: 'global', ...safe }
+  }
+
+  // ---------------------------------------------------------------------------
   // Package-internal accessor for MongoDBAdapter subclasses / same-module code
   // ---------------------------------------------------------------------------
 
@@ -346,5 +701,53 @@ export class MongoDBAdapter extends StorageAdapter {
   protected getDb(): Db {
     if (!this.db) throw new Error('MongoDBAdapter.getDb() called before connect()')
     return this.db
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared pagination helper
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Cursor-based pagination over any collection.
+   * sort direction determines cursor direction: _id:1 uses $gt, _id:-1 uses $lt.
+   */
+  private async paginate<T extends { _id: ObjectId }>(
+    collSuffix: string,
+    filter: Record<string, unknown>,
+    opts: DbPaginationOpts,
+    sort: Record<string, 1 | -1>,
+  ): Promise<DbPage<T>> {
+    if (!this.db) return { items: [], total: 0, hasMore: false, nextCursor: null, prevCursor: null }
+
+    const limit = Math.min(opts.limit ?? 20, 100)
+    const coll = this.db.collection<T>(`${this.dbPrefix}${collSuffix}`)
+    const sortDir = Object.values(sort)[0] ?? 1
+
+    const q: Record<string, unknown> = { ...filter }
+    if (opts.cursor) {
+      try {
+        q._id = sortDir === 1
+          ? { $gt: new ObjectId(opts.cursor) }
+          : { $lt: new ObjectId(opts.cursor) }
+      } catch {
+        // Invalid cursor — ignore and start from beginning
+      }
+    }
+
+    const [items, total] = await Promise.all([
+      coll.find(q as Parameters<typeof coll.find>[0]).sort(sort).limit(limit + 1).toArray(),
+      coll.countDocuments(filter as Parameters<typeof coll.countDocuments>[0]),
+    ])
+
+    const hasMore = items.length > limit
+    if (hasMore) items.pop()
+
+    return {
+      items,
+      total,
+      hasMore,
+      nextCursor: hasMore ? items.at(-1)!._id.toHexString() : null,
+      prevCursor: items.length > 0 ? items[0]!._id.toHexString() : null,
+    }
   }
 }

@@ -1,6 +1,28 @@
 import type { ObjectId } from 'mongodb'
 
 // ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
+
+export interface DbPaginationOpts {
+  /** ObjectId hex string — return items before (or after, depending on sort) this cursor. */
+  cursor?: string
+  /** Page size. Capped at 100 server-side. Defaults to 20. */
+  limit?: number
+}
+
+export interface DbPage<T> {
+  items: T[]
+  /** Total matching documents (without cursor filter). */
+  total: number
+  hasMore: boolean
+  /** Cursor for the next page (last item's _id), or null if no next page. */
+  nextCursor: string | null
+  /** Cursor pointing at the first item in this page, or null if empty. */
+  prevCursor: string | null
+}
+
+// ---------------------------------------------------------------------------
 // Buffer pipeline types
 // ---------------------------------------------------------------------------
 

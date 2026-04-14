@@ -1,4 +1,18 @@
-import type { CheckWritePayload, EndpointDoc, SystemEventDoc } from './types.js'
+import type {
+  CheckDoc,
+  CheckWritePayload,
+  DbPage,
+  DbPaginationOpts,
+  DailySummaryDoc,
+  EndpointDoc,
+  HourlySummaryDoc,
+  IncidentDoc,
+  MaintenanceWindow,
+  NotificationChannelDoc,
+  NotificationLogDoc,
+  SettingsDoc,
+  SystemEventDoc,
+} from './types.js'
 
 /**
  * Abstract storage adapter.
@@ -100,4 +114,118 @@ export abstract class StorageAdapter {
     timestamp: Date,
     consecutiveFailures: number,
   ): Promise<void>
+
+  // ---------------------------------------------------------------------------
+  // Endpoints API
+  // ---------------------------------------------------------------------------
+
+  abstract createEndpoint(
+    data: Omit<EndpointDoc, '_id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<EndpointDoc>
+
+  abstract getEndpointById(id: string): Promise<EndpointDoc | null>
+
+  abstract listEndpoints(opts: DbPaginationOpts & {
+    status?: 'active' | 'paused' | 'archived'
+    type?: 'http' | 'port'
+  }): Promise<DbPage<EndpointDoc>>
+
+  abstract updateEndpoint(
+    id: string,
+    changes: Partial<EndpointDoc>,
+  ): Promise<EndpointDoc | null>
+
+  abstract deleteEndpoint(id: string): Promise<boolean>
+
+  abstract getLatestCheck(endpointId: string): Promise<CheckDoc | null>
+
+  // ---------------------------------------------------------------------------
+  // Checks API
+  // ---------------------------------------------------------------------------
+
+  abstract listChecks(
+    endpointId: string,
+    opts: DbPaginationOpts & {
+      from?: Date
+      to?: Date
+      status?: 'healthy' | 'degraded' | 'down'
+    },
+  ): Promise<DbPage<CheckDoc>>
+
+  abstract listHourlySummaries(
+    endpointId: string,
+    opts: DbPaginationOpts,
+  ): Promise<HourlySummaryDoc[]>
+
+  abstract listDailySummaries(
+    endpointId: string,
+    opts: DbPaginationOpts,
+  ): Promise<DailySummaryDoc[]>
+
+  abstract getUptimeStats(endpointId: string): Promise<{
+    '24h': number
+    '7d': number
+    '30d': number
+    '90d': number
+  }>
+
+  // ---------------------------------------------------------------------------
+  // Incidents API
+  // ---------------------------------------------------------------------------
+
+  abstract listIncidents(opts: DbPaginationOpts & {
+    status?: 'active' | 'resolved'
+    endpointId?: string
+    from?: Date
+    to?: Date
+  }): Promise<DbPage<IncidentDoc>>
+
+  abstract getIncidentById(id: string): Promise<IncidentDoc | null>
+
+  abstract listActiveIncidents(): Promise<IncidentDoc[]>
+
+  // ---------------------------------------------------------------------------
+  // Notification channels API
+  // ---------------------------------------------------------------------------
+
+  abstract listNotificationChannels(): Promise<NotificationChannelDoc[]>
+
+  abstract createNotificationChannel(
+    data: Omit<NotificationChannelDoc, '_id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<NotificationChannelDoc>
+
+  abstract updateNotificationChannel(
+    id: string,
+    changes: Partial<NotificationChannelDoc>,
+  ): Promise<NotificationChannelDoc | null>
+
+  abstract deleteNotificationChannel(id: string): Promise<boolean>
+
+  abstract listNotificationLog(opts: DbPaginationOpts): Promise<DbPage<NotificationLogDoc>>
+
+  // ---------------------------------------------------------------------------
+  // Maintenance API
+  // ---------------------------------------------------------------------------
+
+  /** Add a maintenance window to each of the given endpoints. Returns one window per endpointId. */
+  abstract addMaintenanceWindows(
+    endpointIds: string[],
+    window: Omit<MaintenanceWindow, '_id'>,
+  ): Promise<MaintenanceWindow[]>
+
+  /** Remove a maintenance window (by its ObjectId) from whichever endpoint owns it. */
+  abstract removeMaintenanceWindow(windowId: string): Promise<boolean>
+
+  /** All active (now between start/end) and scheduled (start > now) windows across all endpoints. */
+  abstract listMaintenanceWindows(): Promise<
+    Array<{ endpoint: EndpointDoc; window: MaintenanceWindow }>
+  >
+
+  // ---------------------------------------------------------------------------
+  // Settings API
+  // ---------------------------------------------------------------------------
+
+  abstract getSettings(): Promise<SettingsDoc>
+
+  abstract updateSettings(changes: Record<string, unknown>): Promise<SettingsDoc>
 }
