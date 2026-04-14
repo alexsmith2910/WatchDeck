@@ -13,6 +13,7 @@ import { DiskBuffer } from '../buffer/diskBuffer.js'
 import { replayFromDisk } from '../buffer/replay.js'
 import { OutageTracker } from '../buffer/outageTracker.js'
 import { BufferPipeline } from '../buffer/pipeline.js'
+import { CheckScheduler } from '../core/scheduler.js'
 import { formatWarning } from '../utils/errors.js'
 
 const require = createRequire(import.meta.url)
@@ -281,11 +282,47 @@ export async function runStart(options: StartOptions): Promise<void> {
     subItem('no buffered data on disk')
   }
 
+  // ── Check Engine ─────────────────────────────────────────────────────────
+
+  if (!silent) section('Check Engine')
+
+  const scheduler = new CheckScheduler(adapter, config)
+  const engineSpinner = spinner('Loading endpoints...', silent).start()
+
+  try {
+    await scheduler.init()
+    engineSpinner.succeed(
+      chalk.bold(`Scheduler running`) +
+        chalk.dim(`  ${scheduler.queueSize} endpoint${scheduler.queueSize === 1 ? '' : 's'} queued`),
+    )
+    if (!silent && verbose) {
+      subItem(
+        `concurrency  max ${config.rateLimits.maxConcurrentChecks}  ·  per-host gap ${config.rateLimits.perHostMinGap}s`,
+      )
+      subItem(
+        `ssl checks  ${config.modules.sslChecks ? 'enabled' : 'disabled'}  ·  port checks  ${config.modules.portChecks ? 'enabled' : 'disabled'}`,
+      )
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    engineSpinner.fail(chalk.bold('Scheduler failed to start'))
+    process.stderr.write(chalk.dim('  ' + msg) + '\n')
+    process.exit(1)
+  }
+
+  // Graceful shutdown
+  function shutdown(): void {
+    scheduler.stop()
+    void adapter.disconnect().finally(() => process.exit(0))
+  }
+  process.once('SIGINT', shutdown)
+  process.once('SIGTERM', shutdown)
+
   // ── Server ───────────────────────────────────────────────────────────────
-  // TODO: wire up check engine and Fastify server
+  // TODO: wire up Fastify server (Step 8)
 
   if (!silent) {
     section('Server')
-    console.log(`  ${chalk.yellow('…')}  Not yet implemented`)
+    console.log(`  ${chalk.yellow('…')}  Not yet implemented — API server coming in Step 8`)
   }
 }
