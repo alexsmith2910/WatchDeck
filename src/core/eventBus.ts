@@ -119,7 +119,6 @@ class TypedEventBus extends EventEmitter {
     priority: SubscriberPriority = 'standard',
   ): () => void {
     const wrapped = (payload: EventMap[K]): void => {
-      const result = listener(payload)
       const handleError = (err: unknown): void => {
         const error = err instanceof Error ? err : new Error(String(err))
         if (priority === 'critical') {
@@ -141,6 +140,14 @@ class TypedEventBus extends EventEmitter {
             error,
           )
         }
+      }
+
+      let result: void | Promise<void>
+      try {
+        result = listener(payload)
+      } catch (err) {
+        handleError(err)
+        return
       }
 
       if (result instanceof Promise) {
