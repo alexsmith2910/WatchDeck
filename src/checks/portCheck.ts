@@ -42,7 +42,18 @@ export function runPortCheck(params: {
 
     socket.on('error', (err: Error) => {
       const responseTime = Math.round(performance.now() - start)
-      finish({ portOpen: false, responseTime, errorMessage: err.message })
+      const errnoErr = err as NodeJS.ErrnoException
+      const msg = err.message || errnoErr.code || 'Connection failed'
+      finish({ portOpen: false, responseTime, errorMessage: msg })
+    })
+
+    // Catch clean close (no preceding error) — can occur on some platforms
+    // when a packet is dropped rather than actively refused.
+    socket.on('close', (hadError: boolean) => {
+      if (!hadError) {
+        const responseTime = Math.round(performance.now() - start)
+        finish({ portOpen: false, responseTime, errorMessage: 'Connection closed' })
+      }
     })
 
     socket.on('timeout', () => {
