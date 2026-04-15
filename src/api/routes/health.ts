@@ -7,6 +7,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { getClientCount } from '../sse.js'
 import type { AppContext } from '../server.js'
 
 export function healthRoutes(ctx: AppContext) {
@@ -39,7 +40,7 @@ export function healthHistoryRoutes(ctx: AppContext) {
   return async (fastify: FastifyInstance): Promise<void> => {
     fastify.get('/health/history', async (_req, reply) => {
       const events = await ctx.adapter.getSystemEvents(50)
-      return reply.send({ data: events })
+      return reply.send({ data: events, sseClients: getClientCount() })
     })
   }
 }

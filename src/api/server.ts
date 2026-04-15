@@ -25,6 +25,7 @@ import { maintenanceRoutes } from './routes/maintenance.js'
 import { settingsRoutes } from './routes/settings.js'
 import type { StorageAdapter } from '../storage/adapter.js'
 import type { WatchDeckConfig } from '../config/types.js'
+import { sseRoutes } from './sse.js'
 import type { CheckScheduler } from '../core/scheduler.js'
 
 export interface AppContext {
@@ -123,6 +124,7 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
     await app.register(notificationsRoutes(ctx), { prefix: base })
     await app.register(maintenanceRoutes(ctx), { prefix: base })
     await app.register(settingsRoutes(ctx), { prefix: base })
+    await app.register(sseRoutes(ctx), { prefix: base })
   })
 
   return fastify
