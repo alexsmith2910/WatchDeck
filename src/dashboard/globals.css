@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@import "tailwindcss";
+@import "@heroui/styles";
+
+@theme inline {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  /* WatchDeck semantic colors */
+  --color-wd-primary: var(--wd-primary);
+  --color-wd-primary-foreground: var(--wd-primary-foreground);
+  --color-wd-success: var(--wd-success);
+  --color-wd-warning: var(--wd-warning);
+  --color-wd-danger: var(--wd-danger);
+  --color-wd-muted: var(--wd-muted);
+  --color-wd-surface: var(--wd-surface);
+  --color-wd-surface-hover: var(--wd-surface-hover);
+  --color-wd-border: var(--wd-border);
+}
+
+/* ── Light theme ─────────────────────────────────────────────────────────── */
+
+:root,
+[data-theme="light"] {
+  --wd-primary: #6366f1;
+  --wd-primary-foreground: #ffffff;
+  --wd-success: #22c55e;
+  --wd-warning: #f59e0b;
+  --wd-danger: #ef4444;
+  --wd-muted: #64748b;
+  --wd-surface: #ffffff;
+  --wd-surface-hover: #f1f5f9;
+  --wd-border: #e2e8f0;
+
+  --background: oklch(0.98 0 0);
+  --foreground: oklch(0.15 0.005 286);
+  --surface: oklch(1 0 0);
+  --surface-secondary: oklch(0.965 0.001 286);
+  --surface-tertiary: oklch(0.945 0.001 286);
+  --default: oklch(0.945 0.001 286);
+  --accent: oklch(0.585 0.233 264);
+  --accent-foreground: oklch(1 0 0);
+}
+
+/* ── Dark theme ──────────────────────────────────────────────────────────── */
+
+.dark,
+[data-theme="dark"] {
+  --wd-primary: #818cf8;
+  --wd-primary-foreground: #ffffff;
+  --wd-success: #4ade80;
+  --wd-warning: #fbbf24;
+  --wd-danger: #f87171;
+  --wd-muted: #94a3b8;
+  --wd-surface: #1f1f26;
+  --wd-surface-hover: #2a2a32;
+  --wd-border: #2e2e38;
+
+  --background: oklch(0.145 0.005 286);
+  --foreground: oklch(0.96 0 0);
+  --surface: oklch(0.19 0.005 286);
+  --surface-secondary: oklch(0.225 0.004 286);
+  --surface-tertiary: oklch(0.255 0.004 286);
+  --default: oklch(0.225 0.004 286);
+  --accent: oklch(0.685 0.17 264);
+  --accent-foreground: oklch(0.145 0.005 286);
+}
+
+/* ── Endpoints table — ScrollShadow wrapper handles scroll + fade ──────── */
+
+/* Custom scrollbar on the ScrollShadow wrapper div */
+.wd-endpoints-table-wrap {
+  scrollbar-width: thin;
+  scrollbar-color: var(--wd-border) transparent;
+
+  &::-webkit-scrollbar {
+    width: 5px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+    /* Start scrollbar below the sticky header, end above rounded corner */
+    margin-top: 40px;
+    margin-bottom: 6px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--wd-border);
+    border-radius: 9999px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--wd-muted);
+  }
+}
+
+/* Sticky header inside the ScrollShadow scroll container */
+.wd-endpoints-table .table__header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface-secondary);
+}
+
+/* ── Lighter checkboxes in the endpoints table ───────────────────────────── */
+
+.wd-endpoints-table-container .checkbox__control {
+  background: var(--wd-surface) !important;
+  border: 1px solid var(--wd-border) !important;
+  box-shadow: none !important;
+}

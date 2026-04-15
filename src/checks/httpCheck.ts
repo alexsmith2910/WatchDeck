@@ -20,6 +20,8 @@ export interface HttpCheckResult {
   errorMessage: string | null
 }
 
+const DEFAULT_USER_AGENT = 'WatchDeck/1.0'
+
 export async function runHttpCheck(params: {
   url: string
   method?: string
@@ -31,10 +33,13 @@ export async function runHttpCheck(params: {
   const {
     url,
     method = 'GET',
-    headers = {},
+    headers: rawHeaders = {},
     timeout = 10_000,
     captureSsl = false,
   } = params
+
+  // Ensure a User-Agent is always sent — many sites block bare requests.
+  const headers: Record<string, string> = { 'User-Agent': DEFAULT_USER_AGENT, ...rawHeaders }
 
   const start = performance.now()
 
@@ -61,9 +66,12 @@ export async function runHttpCheck(params: {
     const client = new Client(parsed.origin, {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       connect(opts: any, callback: (err: Error | null, socket: any) => void) {
+        // undici passes port as '' when the URL uses the default port — fall back to 443.
+        const rawPort = (opts as { port: number | string }).port
+        const port = typeof rawPort === 'number' ? rawPort : (parseInt(String(rawPort), 10) || 443)
         const tlsSocket = tls.connect({
           host: (opts as { hostname: string }).hostname,
-          port: (opts as { port: number }).port,
+          port,
           servername: (opts as { servername?: string; hostname: string }).servername
             ?? (opts as { hostname: string }).hostname,
           // Capture cert regardless of chain validity — sslEval can decide.

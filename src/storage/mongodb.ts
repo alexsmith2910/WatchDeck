@@ -334,6 +334,9 @@ export class MongoDBAdapter extends StorageAdapter {
     status: 'healthy' | 'degraded' | 'down',
     timestamp: Date,
     consecutiveFailures: number,
+    responseTime: number,
+    statusCode: number | null,
+    errorMessage: string | null,
   ): Promise<void> {
     const db = this.getDb()
     await db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`).updateOne(
@@ -342,6 +345,9 @@ export class MongoDBAdapter extends StorageAdapter {
         $set: {
           lastCheckAt: timestamp,
           lastStatus: status,
+          lastResponseTime: responseTime,
+          lastStatusCode: statusCode,
+          lastErrorMessage: errorMessage,
           consecutiveFailures,
           updatedAt: new Date(),
         },

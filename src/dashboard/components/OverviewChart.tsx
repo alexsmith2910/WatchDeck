@@ -1,0 +1,237 @@
+import { useState, useCallback } from 'react'
+import { Card, Button, Dropdown, cn } from '@heroui/react'
+import { Icon } from '@iconify/react'
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface SeriesConfig {
+  key: string
+  label: string
+  color: string
+  icon: string
+  /** Current / summary value shown in the mini KPI */
+  value: string
+  /** Change text e.g. "+2.1%" */
+  change: string
+  /** Whether change is positive (green) or negative (red) */
+  changeType: 'positive' | 'negative' | 'neutral'
+}
+
+interface OverviewChartProps {
+  title: string
+  icon: string
+  series: SeriesConfig[]
+  data: Record<string, string | number>[]
+  unit?: string
+}
+
+// ---------------------------------------------------------------------------
+// Custom tooltip
+// ---------------------------------------------------------------------------
+
+function ChartTooltipContent({
+  active,
+  payload,
+  label,
+  series,
+  unit,
+}: {
+  active?: boolean
+  payload?: Array<{ dataKey: string; value: number; color: string }>
+  label?: string
+  series: SeriesConfig[]
+  unit?: string
+}) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="rounded-lg bg-wd-surface border border-wd-border px-3 py-2 shadow-lg">
+      <div className="text-[11px] text-wd-muted mb-1.5">{label}</div>
+      <div className="flex flex-col gap-1">
+        {payload.map((entry) => {
+          const s = series.find((s) => s.key === entry.dataKey)
+          return (
+            <div key={entry.dataKey} className="flex items-center gap-2 text-xs">
+              {s?.icon ? (
+                <Icon icon={s.icon} width={12} style={{ color: entry.color }} className="shrink-0" />
+              ) : (
+                <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
+              )}
+              <span className="text-wd-muted">{s?.label ?? entry.dataKey}:</span>
+              <span className="font-semibold text-foreground">
+                {entry.value}
+                {unit}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const changeColor = (type: SeriesConfig['changeType']) => {
+  if (type === 'positive') return 'text-wd-success'
+  if (type === 'negative') return 'text-wd-danger'
+  return 'text-wd-muted'
+}
+
+const changeBg = (type: SeriesConfig['changeType']) => {
+  if (type === 'positive') return 'bg-wd-success/10'
+  if (type === 'negative') return 'bg-wd-danger/10'
+  return 'bg-wd-surface-hover'
+}
+
+// ---------------------------------------------------------------------------
+// OverviewChart
+// ---------------------------------------------------------------------------
+
+export default function OverviewChart({ title, icon: titleIcon, series, data, unit }: OverviewChartProps) {
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set())
+
+  const toggleSeries = useCallback((key: string) => {
+    setHiddenSeries((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  return (
+    <Card className="relative !bg-wd-surface !shadow-none !border !border-wd-border/50 !rounded-xl !p-0 !overflow-visible">
+      {/* Dropdown menu — top right */}
+      <div className="absolute top-3 right-3 z-20" onClick={(e) => e.stopPropagation()}>
+        <Dropdown>
+          <Dropdown.Trigger>
+            <Button
+              isIconOnly
+              className="!w-auto !rounded-full !min-w-6 !h-6"
+              size="sm"
+              variant="ghost"
+            >
+              <Icon className="text-wd-muted" height={14} icon="solar:menu-dots-bold" width={14} />
+            </Button>
+          </Dropdown.Trigger>
+          <Dropdown.Popover placement="bottom end" className="!min-w-[120px]">
+            <Dropdown.Menu>
+              <Dropdown.Item id="export-csv" className="!text-xs">Export CSV</Dropdown.Item>
+              <Dropdown.Item id="export-png" className="!text-xs">Export PNG</Dropdown.Item>
+              <Dropdown.Item id="fullscreen" className="!text-xs">Fullscreen</Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
+      </div>
+
+      <div className="p-4 pb-0">
+        {/* Title with icon */}
+        <div className="flex items-center gap-2 mb-4">
+          <Icon icon={titleIcon} width={16} className="text-wd-muted" />
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        </div>
+
+        {/* Toggleable KPI stat cards — clicking hides/shows the series */}
+        <div className="grid grid-cols-4 gap-3 mb-4">
+          {series.map((s) => {
+            const hidden = hiddenSeries.has(s.key)
+            return (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => toggleSeries(s.key)}
+                className={cn(
+                  'flex flex-col gap-1.5 rounded-lg px-3 py-2.5 text-left transition-all cursor-pointer',
+                  'bg-wd-surface-hover/50 hover:bg-wd-surface-hover',
+                  hidden ? 'opacity-40' : 'opacity-100',
+                )}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Icon icon={s.icon} width={14} style={{ color: s.color }} className="shrink-0" />
+                  <span className="text-[11px] text-wd-muted">{s.label}</span>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-lg font-semibold text-foreground">{s.value}</span>
+                  <span
+                    className={cn(
+                      'inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-medium',
+                      changeBg(s.changeType),
+                      changeColor(s.changeType),
+                    )}
+                  >
+                    {s.change}
+                  </span>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Chart */}
+      <div className="h-56 px-2 pb-4">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 4, right: 12, bottom: 0, left: -12 }}>
+            <defs>
+              {series.map((s) => (
+                <linearGradient key={s.key} id={`overviewGrad-${s.key}`} x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor={s.color} stopOpacity={0.12} />
+                  <stop offset="95%" stopColor={s.color} stopOpacity={0} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="var(--wd-border)"
+              strokeOpacity={0.5}
+              vertical={false}
+            />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 11, fill: 'var(--wd-muted)' }}
+              tickLine={false}
+              axisLine={false}
+            />
+            <YAxis
+              tick={{ fontSize: 11, fill: 'var(--wd-muted)' }}
+              tickLine={false}
+              axisLine={false}
+            />
+            <RechartsTooltip
+              content={<ChartTooltipContent series={series} unit={unit} />}
+              cursor={{ stroke: 'var(--wd-muted)', strokeWidth: 1, strokeDasharray: '3 3' }}
+            />
+            {series.map((s) =>
+              hiddenSeries.has(s.key) ? null : (
+                <Area
+                  key={s.key}
+                  dataKey={s.key}
+                  stroke={s.color}
+                  strokeWidth={2}
+                  fill={`url(#overviewGrad-${s.key})`}
+                  fillOpacity={1}
+                  type="monotone"
+                  dot={false}
+                  activeDot={{ r: 4, strokeWidth: 0 }}
+                />
+              ),
+            )}
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </Card>
+  )
+}

@@ -105,7 +105,7 @@ export abstract class StorageAdapter {
 
   /**
    * Persist an endpoint's runtime state after a check completes.
-   * Updates lastCheckAt, lastStatus, consecutiveFailures, and updatedAt.
+   * Updates lastCheckAt, lastStatus, check result fields, and updatedAt.
    * Called by the scheduler as a fire-and-forget after each check:complete event.
    */
   abstract updateEndpointAfterCheck(
@@ -113,6 +113,9 @@ export abstract class StorageAdapter {
     status: 'healthy' | 'degraded' | 'down',
     timestamp: Date,
     consecutiveFailures: number,
+    responseTime: number,
+    statusCode: number | null,
+    errorMessage: string | null,
   ): Promise<void>
 
   // ---------------------------------------------------------------------------

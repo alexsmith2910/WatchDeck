@@ -114,6 +114,9 @@ export interface EndpointDoc {
   // Runtime state
   lastCheckAt?: Date
   lastStatus?: 'healthy' | 'degraded' | 'down'
+  lastResponseTime?: number
+  lastStatusCode?: number | null
+  lastErrorMessage?: string | null
   currentIncidentId?: ObjectId
   consecutiveFailures: number
 

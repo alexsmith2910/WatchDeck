@@ -233,7 +233,7 @@ export class CheckScheduler {
   private subscribeToCheckComplete(): void {
     eventBus.subscribe(
       'check:complete',
-      ({ endpointId, status, timestamp }) => {
+      ({ endpointId, status, timestamp, responseTime, statusCode, errorMessage }) => {
         // Update in-memory consecutive failures.
         const prev = this.consecutiveFailures.get(endpointId) ?? 0
         const failures = status === 'healthy' ? 0 : prev + 1
@@ -246,12 +246,17 @@ export class CheckScheduler {
             ...entry.endpoint,
             lastStatus: status,
             lastCheckAt: timestamp,
+            lastResponseTime: responseTime,
+            lastStatusCode: statusCode,
+            lastErrorMessage: errorMessage,
             consecutiveFailures: failures,
           },
         }))
 
         // Persist state to DB (fire-and-forget — failures here are non-critical).
-        this.adapter.updateEndpointAfterCheck(endpointId, status, timestamp, failures).catch(
+        this.adapter.updateEndpointAfterCheck(
+          endpointId, status, timestamp, failures, responseTime, statusCode, errorMessage,
+        ).catch(
           (err: unknown) => {
             eventBus.emit('system:warning', {
               timestamp: new Date(),

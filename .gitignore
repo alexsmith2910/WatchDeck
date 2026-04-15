@@ -31,3 +31,6 @@ watchdeck-v1-spec.md
 # Runtime
 watchdeck.config.js
 ~/.watchdeck/
+
+# Misc
+temp/
