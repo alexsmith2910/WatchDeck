@@ -14,6 +14,7 @@ import { replayFromDisk } from '../buffer/replay.js'
 import { OutageTracker } from '../buffer/outageTracker.js'
 import { BufferPipeline } from '../buffer/pipeline.js'
 import { CheckScheduler } from '../core/scheduler.js'
+import { buildServer } from '../api/server.js'
 import { formatWarning } from '../utils/errors.js'
 
 const require = createRequire(import.meta.url)
@@ -310,19 +311,46 @@ export async function runStart(options: StartOptions): Promise<void> {
     process.exit(1)
   }
 
+  // ── Server ───────────────────────────────────────────────────────────────
+
+  if (!silent) section('Server')
+
+  const serverSpinner = spinner('Starting API server...', silent).start()
+  let server
+
+  try {
+    server = await buildServer({ adapter, scheduler, config, logRequests: verbose })
+    await server.listen({ port, host: '0.0.0.0' })
+    serverSpinner.succeed(
+      chalk.bold('API server listening') + chalk.dim(`  http://localhost:${port}${config.apiBasePath}`),
+    )
+    if (!silent && verbose) {
+      subItem(`auth      ${config.authMiddleware ? 'enabled' : 'disabled (no auth)'}`)
+      subItem(`cors      origin ${config.cors.origin}`)
+      subItem(`dashboard ${options.apiOnly ? 'api-only (--api-only)' : config.dashboardMode}`)
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    serverSpinner.fail(chalk.bold('API server failed to start'))
+    process.stderr.write(chalk.dim('  ' + msg) + '\n')
+    process.exit(1)
+  }
+
   // Graceful shutdown
   function shutdown(): void {
     scheduler.stop()
-    void adapter.disconnect().finally(() => process.exit(0))
+    void server!.close().finally(() => {
+      void adapter.disconnect().finally(() => process.exit(0))
+    })
   }
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
 
-  // ── Server ───────────────────────────────────────────────────────────────
-  // TODO: wire up Fastify server (Step 8)
-
   if (!silent) {
-    section('Server')
-    console.log(`  ${chalk.yellow('…')}  Not yet implemented — API server coming in Step 8`)
+    console.log('')
+    console.log(chalk.dim('  Press Ctrl+C to stop'))
+    if (verbose) {
+      section('Requests')
+    }
   }
 }
