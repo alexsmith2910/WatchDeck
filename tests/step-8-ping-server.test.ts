@@ -262,9 +262,8 @@ let channelId = ''
   const { status, data } = await req('POST', '/notifications/channels', {
     name:             'Ping Test Channel',
     type:             'discord',
-    target:           'https://discord.com/api/webhooks/test/ping',
+    discordWebhookUrl: 'https://discord.com/api/webhooks/test/ping',
     deliveryPriority: 'standard',
-    enabled:          true,
   })
   const d = (data as Record<string, unknown>)?.data as Record<string, unknown>
   channelId = d?._id as string ?? ''

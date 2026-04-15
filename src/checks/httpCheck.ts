@@ -44,7 +44,7 @@ export async function runHttpCheck(params: {
   } catch {
     return {
       statusCode: null,
-      responseTime: 0,
+      responseTime: Math.round(performance.now() - start),
       body: null,
       sslDaysRemaining: null,
       errorMessage: `Invalid URL: ${url}`,
