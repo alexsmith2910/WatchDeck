@@ -1,5 +1,5 @@
 import React from 'react'
-import { Card, Button, Dropdown, cn } from '@heroui/react'
+import { Card, Dropdown, cn } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { Area, AreaChart, ResponsiveContainer, YAxis, Tooltip as RechartsTooltip } from 'recharts'
 
@@ -115,14 +115,13 @@ const KpiCard = React.forwardRef<HTMLDivElement, KpiCardProps>(
         <div className="absolute top-2 right-2 z-20" onClick={(e) => e.stopPropagation()}>
           <Dropdown>
             <Dropdown.Trigger>
-              <Button
-                isIconOnly
-                className="!w-auto !rounded-full !min-w-6 !h-6"
-                size="sm"
-                variant="ghost"
+              <div
+                role="button"
+                tabIndex={0}
+                className="inline-flex items-center justify-center w-6 h-6 rounded-full hover:bg-wd-surface-hover cursor-pointer transition-colors"
               >
                 <Icon className="text-wd-muted" height={14} icon="solar:menu-dots-bold" width={14} />
-              </Button>
+              </div>
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom end" className="!min-w-[120px]">
               <Dropdown.Menu>

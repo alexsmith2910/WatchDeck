@@ -102,6 +102,32 @@
   background: var(--surface-secondary);
 }
 
+/* ── Thin custom scrollbar — reusable utility ──────────────────────────── */
+
+.wd-scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--wd-border) transparent;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 4px 0;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--wd-border);
+    border-radius: 9999px;
+    transition: background 0.15s;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--wd-muted);
+  }
+}
+
 /* ── Lighter checkboxes in the endpoints table ───────────────────────────── */
 
 .wd-endpoints-table-container .checkbox__control {

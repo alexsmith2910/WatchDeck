@@ -19,6 +19,8 @@ import { parsePagination, toEnvelope } from '../utils/pagination.js'
 import type { AppContext } from '../server.js'
 import type { EndpointDoc } from '../../storage/types.js'
 import type { EventMap } from '../../core/eventTypes.js'
+import { runHttpCheck } from '../../checks/httpCheck.js'
+import { runPortCheck } from '../../checks/portCheck.js'
 
 // ---------------------------------------------------------------------------
 // POST /endpoints body schema
@@ -336,6 +338,77 @@ export function endpointsRoutes(ctx: AppContext) {
       })
 
       return reply.send({ data: updated })
+    })
+
+    // ── POST /endpoints/test ──────────────────────────────────────────────
+    // One-off connection test — does NOT save anything.
+    fastify.post('/endpoints/test', async (request, reply) => {
+      const body = request.body as {
+        type: 'http' | 'port'
+        url?: string
+        method?: string
+        headers?: Record<string, string>
+        host?: string
+        port?: number
+        timeout?: number
+      }
+
+      if (!body || !body.type) {
+        return reply.code(400).send(formatError('MISSING_TYPE', 'type is required (http | port)'))
+      }
+
+      const timeout = Math.min(body.timeout ?? 10_000, 15_000)
+
+      if (body.type === 'http') {
+        if (!body.url) {
+          return reply.code(400).send(formatError('MISSING_URL', 'url is required for HTTP test'))
+        }
+        try {
+          new URL(body.url)
+        } catch {
+          return reply.code(400).send(formatError('INVALID_URL', 'url is not a valid URL'))
+        }
+
+        const result = await runHttpCheck({
+          url: body.url,
+          method: body.method ?? 'GET',
+          headers: body.headers,
+          timeout,
+          captureSsl: body.url.startsWith('https'),
+        })
+
+        return reply.send({
+          data: {
+            success: result.statusCode != null && result.statusCode >= 200 && result.statusCode < 400,
+            statusCode: result.statusCode,
+            responseTime: result.responseTime,
+            sslDaysRemaining: result.sslDaysRemaining,
+            errorMessage: result.errorMessage,
+          },
+        })
+      }
+
+      if (body.type === 'port') {
+        if (!body.host || !body.port) {
+          return reply.code(400).send(formatError('MISSING_HOST_PORT', 'host and port are required for port test'))
+        }
+
+        const result = await runPortCheck({
+          host: body.host,
+          port: body.port,
+          timeout,
+        })
+
+        return reply.send({
+          data: {
+            success: result.portOpen,
+            responseTime: result.responseTime,
+            errorMessage: result.errorMessage,
+          },
+        })
+      }
+
+      return reply.code(400).send(formatError('INVALID_TYPE', 'type must be http or port'))
     })
   }
 }

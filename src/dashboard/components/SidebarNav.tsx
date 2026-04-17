@@ -106,7 +106,7 @@ function NavButton({
       className={cn(
         'flex items-center h-10 rounded-xl outline-none w-full',
         'transition-[colors,transform] duration-150',
-        'hover:bg-wd-surface-hover active:scale-[0.97]',
+        'cursor-pointer hover:bg-wd-surface-hover active:scale-[0.97]',
         'focus-visible:ring-2 focus-visible:ring-wd-primary',
         isActive && 'bg-wd-surface-hover',
         isCompact ? 'w-10 justify-center' : 'gap-3 px-3',

@@ -52,11 +52,14 @@ async function runHttpEndpointCheck(
     latencyThreshold: endpoint.latencyThreshold,
   })
 
+  // If the check is down, there's no meaningful response time — report 0.
+  const responseTime = eval_.status === 'down' ? 0 : result.responseTime
+
   eventBus.emit('check:complete', {
     timestamp,
     endpointId: endpoint._id.toString(),
     status: eval_.status,
-    responseTime: result.responseTime,
+    responseTime,
     statusCode: result.statusCode,
     errorMessage: eval_.statusReason ?? result.errorMessage,
   })
@@ -79,11 +82,14 @@ async function runPortEndpointCheck(endpoint: EndpointDoc, timestamp: Date): Pro
     portOpen: result.portOpen,
   })
 
+  // If the check is down, there's no meaningful response time — report 0.
+  const responseTime = eval_.status === 'down' ? 0 : result.responseTime
+
   eventBus.emit('check:complete', {
     timestamp,
     endpointId: endpoint._id.toString(),
     status: eval_.status,
-    responseTime: result.responseTime,
+    responseTime,
     statusCode: null,
     errorMessage: eval_.statusReason ?? result.errorMessage,
   })

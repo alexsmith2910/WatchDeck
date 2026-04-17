@@ -480,21 +480,29 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async getUptimeStats(
     endpointId: string,
-  ): Promise<{ '24h': number; '7d': number; '30d': number; '90d': number }> {
-    if (!this.db) return { '24h': 0, '7d': 0, '30d': 0, '90d': 0 }
+  ): Promise<{ '24h': number | null; '7d': number | null; '30d': number | null; '90d': number | null }> {
+    if (!this.db) return { '24h': null, '7d': null, '30d': null, '90d': null }
 
     const oid = new ObjectId(endpointId)
     const now = new Date()
+    const coll = this.db.collection<CheckDoc>(`${this.dbPrefix}checks`)
 
-    const calcUptime = async (sinceMs: number): Promise<number> => {
+    // Find the oldest check to know how far back data actually exists.
+    const oldest = await coll
+      .findOne({ endpointId: oid }, { sort: { timestamp: 1 }, projection: { timestamp: 1 } })
+    if (!oldest) return { '24h': null, '7d': null, '30d': null, '90d': null }
+
+    const dataAgeMs = now.getTime() - oldest.timestamp.getTime()
+
+    const calcUptime = async (sinceMs: number): Promise<number | null> => {
+      // Only report for windows where we have data covering at least 50% of the period.
+      if (dataAgeMs < sinceMs * 0.5) return null
       const since = new Date(now.getTime() - sinceMs)
       const [total, healthy] = await Promise.all([
-        this.db!.collection<CheckDoc>(`${this.dbPrefix}checks`)
-          .countDocuments({ endpointId: oid, timestamp: { $gte: since } }),
-        this.db!.collection<CheckDoc>(`${this.dbPrefix}checks`)
-          .countDocuments({ endpointId: oid, timestamp: { $gte: since }, status: 'healthy' }),
+        coll.countDocuments({ endpointId: oid, timestamp: { $gte: since } }),
+        coll.countDocuments({ endpointId: oid, timestamp: { $gte: since }, status: 'healthy' }),
       ])
-      if (total === 0) return 100
+      if (total === 0) return null
       return Math.round((healthy / total) * 10000) / 100
     }
 
@@ -549,6 +557,69 @@ export class MongoDBAdapter extends StorageAdapter {
       .find({ status: 'active' })
       .sort({ startedAt: -1 })
       .toArray()
+  }
+
+  async createIncident(
+    data: Omit<IncidentDoc, '_id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<IncidentDoc> {
+    const db = this.getDb()
+    const now = new Date()
+    const doc: IncidentDoc = { ...data, _id: new ObjectId(), createdAt: now, updatedAt: now }
+    await db.collection<IncidentDoc>(`${this.dbPrefix}incidents`).insertOne(doc)
+    return doc
+  }
+
+  async resolveIncident(
+    id: string,
+    resolvedAt: Date,
+    durationSeconds: number,
+  ): Promise<IncidentDoc | null> {
+    const db = this.getDb()
+    const result = await db
+      .collection<IncidentDoc>(`${this.dbPrefix}incidents`)
+      .findOneAndUpdate(
+        { _id: new ObjectId(id), status: 'active' },
+        {
+          $set: {
+            status: 'resolved',
+            resolvedAt,
+            durationSeconds,
+            updatedAt: new Date(),
+          },
+          $push: {
+            timeline: { at: resolvedAt, event: 'resolved', detail: `Resolved after ${durationSeconds}s` },
+          },
+        },
+        { returnDocument: 'after' },
+      )
+    return result ?? null
+  }
+
+  async addIncidentTimelineEvent(
+    incidentId: string,
+    event: { at: Date; event: string; detail?: string },
+  ): Promise<void> {
+    const db = this.getDb()
+    await db.collection<IncidentDoc>(`${this.dbPrefix}incidents`).updateOne(
+      { _id: new ObjectId(incidentId) },
+      { $push: { timeline: event }, $set: { updatedAt: new Date() } },
+    )
+  }
+
+  async setEndpointCurrentIncident(
+    endpointId: string,
+    incidentId: string | null,
+  ): Promise<void> {
+    const db = this.getDb()
+    await db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`).updateOne(
+      { _id: new ObjectId(endpointId) },
+      {
+        $set: {
+          currentIncidentId: incidentId ? new ObjectId(incidentId) : undefined,
+          updatedAt: new Date(),
+        },
+      },
+    )
   }
 
   // ---------------------------------------------------------------------------
@@ -663,6 +734,72 @@ export class MongoDBAdapter extends StorageAdapter {
       }
     }
     return result
+  }
+
+  // ---------------------------------------------------------------------------
+  // Aggregation write API
+  // ---------------------------------------------------------------------------
+
+  async getChecksInHour(endpointId: string, hourStart: Date, hourEnd: Date): Promise<CheckDoc[]> {
+    if (!this.db) return []
+    return this.db
+      .collection<CheckDoc>(`${this.dbPrefix}checks`)
+      .find({
+        endpointId: new ObjectId(endpointId),
+        timestamp: { $gte: hourStart, $lt: hourEnd },
+      })
+      .sort({ timestamp: 1 })
+      .toArray()
+  }
+
+  async upsertHourlySummary(
+    summary: Omit<HourlySummaryDoc, '_id' | 'createdAt'>,
+  ): Promise<void> {
+    const db = this.getDb()
+    await db
+      .collection<HourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
+      .updateOne(
+        { endpointId: summary.endpointId, hour: summary.hour },
+        { $set: { ...summary, createdAt: new Date() } },
+        { upsert: true },
+      )
+  }
+
+  async upsertDailySummary(
+    summary: Omit<DailySummaryDoc, '_id' | 'createdAt'>,
+  ): Promise<void> {
+    const db = this.getDb()
+    await db
+      .collection<DailySummaryDoc>(`${this.dbPrefix}daily_summaries`)
+      .updateOne(
+        { endpointId: summary.endpointId, date: summary.date },
+        { $set: { ...summary, createdAt: new Date() } },
+        { upsert: true },
+      )
+  }
+
+  async deleteHourlySummariesBefore(before: Date): Promise<number> {
+    const db = this.getDb()
+    const result = await db
+      .collection<HourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
+      .deleteMany({ hour: { $lt: before } })
+    return result.deletedCount
+  }
+
+  async deleteDailySummariesBefore(before: Date): Promise<number> {
+    const db = this.getDb()
+    const result = await db
+      .collection<DailySummaryDoc>(`${this.dbPrefix}daily_summaries`)
+      .deleteMany({ date: { $lt: before } })
+    return result.deletedCount
+  }
+
+  async getEndpointIdsWithChecks(from: Date, to: Date): Promise<string[]> {
+    if (!this.db) return []
+    const results = await this.db
+      .collection<CheckDoc>(`${this.dbPrefix}checks`)
+      .distinct('endpointId', { timestamp: { $gte: from, $lt: to } })
+    return results.map((id: ObjectId) => id.toHexString())
   }
 
   // ---------------------------------------------------------------------------

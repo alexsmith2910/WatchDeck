@@ -166,10 +166,10 @@ export abstract class StorageAdapter {
   ): Promise<DailySummaryDoc[]>
 
   abstract getUptimeStats(endpointId: string): Promise<{
-    '24h': number
-    '7d': number
-    '30d': number
-    '90d': number
+    '24h': number | null
+    '7d': number | null
+    '30d': number | null
+    '90d': number | null
   }>
 
   // ---------------------------------------------------------------------------
@@ -186,6 +186,26 @@ export abstract class StorageAdapter {
   abstract getIncidentById(id: string): Promise<IncidentDoc | null>
 
   abstract listActiveIncidents(): Promise<IncidentDoc[]>
+
+  abstract createIncident(
+    data: Omit<IncidentDoc, '_id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<IncidentDoc>
+
+  abstract resolveIncident(
+    id: string,
+    resolvedAt: Date,
+    durationSeconds: number,
+  ): Promise<IncidentDoc | null>
+
+  abstract addIncidentTimelineEvent(
+    incidentId: string,
+    event: { at: Date; event: string; detail?: string },
+  ): Promise<void>
+
+  abstract setEndpointCurrentIncident(
+    endpointId: string,
+    incidentId: string | null,
+  ): Promise<void>
 
   // ---------------------------------------------------------------------------
   // Notification channels API
@@ -223,6 +243,49 @@ export abstract class StorageAdapter {
   abstract listMaintenanceWindows(): Promise<
     Array<{ endpoint: EndpointDoc; window: MaintenanceWindow }>
   >
+
+  // ---------------------------------------------------------------------------
+  // Aggregation write API
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return raw checks for a given endpoint within an hour bucket.
+   * Used by the hourly aggregation worker.
+   */
+  abstract getChecksInHour(endpointId: string, hourStart: Date, hourEnd: Date): Promise<CheckDoc[]>
+
+  /**
+   * Upsert a single hourly summary document (keyed by endpointId + hour).
+   * If a summary already exists for that hour it is replaced.
+   */
+  abstract upsertHourlySummary(
+    summary: Omit<HourlySummaryDoc, '_id' | 'createdAt'>,
+  ): Promise<void>
+
+  /**
+   * Upsert a single daily summary document (keyed by endpointId + date).
+   * If a summary already exists for that date it is replaced.
+   */
+  abstract upsertDailySummary(
+    summary: Omit<DailySummaryDoc, '_id' | 'createdAt'>,
+  ): Promise<void>
+
+  /**
+   * Delete hourly summaries older than the given date.
+   * Returns the number of documents removed.
+   */
+  abstract deleteHourlySummariesBefore(before: Date): Promise<number>
+
+  /**
+   * Delete daily summaries older than the given date.
+   * Returns the number of documents removed.
+   */
+  abstract deleteDailySummariesBefore(before: Date): Promise<number>
+
+  /**
+   * Return all distinct endpointIds that have checks in the given time range.
+   */
+  abstract getEndpointIdsWithChecks(from: Date, to: Date): Promise<string[]>
 
   // ---------------------------------------------------------------------------
   // Settings API

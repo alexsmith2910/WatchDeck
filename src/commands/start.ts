@@ -15,6 +15,8 @@ import { OutageTracker } from '../buffer/outageTracker.js'
 import { BufferPipeline } from '../buffer/pipeline.js'
 import { CheckScheduler } from '../core/scheduler.js'
 import { buildServer } from '../api/server.js'
+import { AggregationScheduler } from '../aggregation/scheduler.js'
+import { IncidentManager } from '../alerts/incidentManager.js'
 import { formatWarning } from '../utils/errors.js'
 
 const require = createRequire(import.meta.url)
@@ -311,6 +313,50 @@ export async function runStart(options: StartOptions): Promise<void> {
     process.exit(1)
   }
 
+  // ── Incidents ────────────────────────────────────────────────────────────
+
+  if (!silent) section('Incidents')
+
+  const incidentManager = new IncidentManager(adapter)
+  const incSpinner = spinner('Starting incident manager...', silent).start()
+
+  try {
+    await incidentManager.init()
+    const activeCount = (await adapter.listActiveIncidents()).length
+    incSpinner.succeed(
+      chalk.bold('Incident manager active') +
+        (activeCount > 0
+          ? chalk.dim(`  ${activeCount} active incident${activeCount === 1 ? '' : 's'}`)
+          : chalk.dim('  no active incidents')),
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    incSpinner.warn(chalk.bold('Incident manager failed') + chalk.dim(`  ${msg}`))
+    // Non-fatal — checks still run, just no automatic incident creation.
+  }
+
+  // ── Aggregation ──────────────────────────────────────────────────────────
+
+  if (!silent) section('Aggregation')
+
+  const aggregation = new AggregationScheduler(adapter, config)
+  const aggSpinner = spinner('Starting aggregation scheduler...', silent).start()
+
+  try {
+    await aggregation.init()
+    aggSpinner.succeed(
+      chalk.bold('Aggregation active') +
+        chalk.dim(`  hourly rollup  ·  daily at ${config.aggregation.time} UTC`),
+    )
+    if (!silent && verbose) {
+      subItem(`retention  hourly ${config.retention.hourlyDays}d  ·  daily ${config.retention.daily}`)
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    aggSpinner.warn(chalk.bold('Aggregation failed to start') + chalk.dim(`  ${msg}`))
+    // Non-fatal — the rest of the system can run without aggregation.
+  }
+
   // ── Server ───────────────────────────────────────────────────────────────
 
   if (!silent) section('Server')
@@ -339,6 +385,7 @@ export async function runStart(options: StartOptions): Promise<void> {
   // Graceful shutdown
   function shutdown(): void {
     scheduler.stop()
+    aggregation.stop()
     void server!.close().finally(() => {
       void adapter.disconnect().finally(() => process.exit(0))
     })

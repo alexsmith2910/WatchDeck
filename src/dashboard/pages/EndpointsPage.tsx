@@ -16,41 +16,11 @@ import {
 } from '@heroui/react'
 import type { Selection } from '@heroui/react'
 import { Icon } from '@iconify/react'
+import { Area, AreaChart, ResponsiveContainer, YAxis } from 'recharts'
 import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
-
-// ---------------------------------------------------------------------------
-// API response types
-// ---------------------------------------------------------------------------
-
-interface ApiEndpoint {
-  _id: string
-  name: string
-  type: 'http' | 'port'
-  url?: string
-  host?: string
-  port?: number
-  method?: string
-  expectedStatusCodes?: number[]
-  checkInterval: number
-  timeout: number
-  enabled: boolean
-  status: 'active' | 'paused' | 'archived'
-  lastStatus?: 'healthy' | 'degraded' | 'down'
-  lastCheckAt?: string
-  lastResponseTime?: number
-  lastStatusCode?: number | null
-  lastErrorMessage?: string | null
-  consecutiveFailures: number
-}
-
-interface ApiPagination {
-  limit: number
-  hasMore: boolean
-  nextCursor: string | null
-  prevCursor: string | null
-  total: number
-}
+import type { ApiEndpoint, ApiPagination, HourlySummary, UptimeStats, EndpointStatus } from '../types/api'
+import { timeAgo, formatTime, latencyColor, uptimeColor } from '../utils/format'
 
 // ---------------------------------------------------------------------------
 // SSE event types
@@ -85,7 +55,6 @@ interface EndpointUpdatedEvent {
 // Display types
 // ---------------------------------------------------------------------------
 
-type EndpointStatus = 'healthy' | 'degraded' | 'down'
 type StatusFilter = 'all' | EndpointStatus
 type TypeFilter = 'all' | 'http' | 'port'
 
@@ -95,13 +64,12 @@ interface Endpoint {
   type: 'http' | 'port'
   url: string
   status: EndpointStatus | null
-  enabled: boolean
+  endpointStatus: 'active' | 'paused' | 'archived'
   checkInterval: number
   consecutiveFailures: number
   lastCheckAt: Date | null
   method?: string
   expectedStatusCodes?: number[]
-  // Live data from SSE check:complete
   responseTime: number | null
   statusCode: number | null
   errorMessage: string | null
@@ -124,7 +92,7 @@ function mapEndpoint(doc: ApiEndpoint): Endpoint {
     type: doc.type,
     url,
     status: doc.lastStatus ?? null,
-    enabled: doc.enabled,
+    endpointStatus: doc.status,
     checkInterval: doc.checkInterval,
     consecutiveFailures: doc.consecutiveFailures,
     lastCheckAt: doc.lastCheckAt ? new Date(doc.lastCheckAt) : null,
@@ -134,30 +102,6 @@ function mapEndpoint(doc: ApiEndpoint): Endpoint {
     statusCode: doc.lastStatusCode ?? null,
     errorMessage: doc.lastErrorMessage ?? null,
   }
-}
-
-function timeAgo(date: Date | null): string {
-  if (!date) return 'Never'
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
-  if (seconds < 5) return 'Just now'
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
-function formatTime(date: Date | null): string {
-  if (!date) return '—'
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  })
 }
 
 // ---------------------------------------------------------------------------
@@ -183,13 +127,6 @@ const typeFilterLabels: Record<TypeFilter, string> = {
   port: 'Port',
 }
 
-function latencyColor(ms: number) {
-  if (ms === 0) return 'text-wd-muted'
-  if (ms < 200) return 'text-wd-success'
-  if (ms < 500) return 'text-wd-warning'
-  return 'text-wd-danger'
-}
-
 const statusOrder: Record<EndpointStatus, number> = { down: 0, degraded: 1, healthy: 2 }
 
 function TipRow({ label, value, className }: { label: string; value: string; className?: string }) {
@@ -208,7 +145,7 @@ const TIP_CLS = 'px-3 py-2 text-[11px] leading-relaxed min-w-[220px] max-w-[320p
 // ---------------------------------------------------------------------------
 
 const FETCH_LIMIT = 100
-const GRID_COLS = 'grid-cols-[32px_40px_100px_1fr_90px_100px_100px_80px]'
+const GRID_COLS = 'grid-cols-[32px_32px_100px_minmax(0,1fr)_80px_80px_80px_120px_80px_80px]'
 
 const statusFilters: { key: StatusFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -233,6 +170,10 @@ export default function EndpointsPage() {
   const [hasMore, setHasMore] = useState(false)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [totalEndpoints, setTotalEndpoints] = useState(0)
+
+  // Intersection observer sentinel for infinite scroll
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
 
   // UI state
   const [search, setSearch] = useState('')
@@ -244,6 +185,10 @@ export default function EndpointsPage() {
   // Rolling response time history from SSE (last N checks per endpoint)
   const responseHistory = useRef<Map<string, number[]>>(new Map())
   const HISTORY_SIZE = 20
+
+  // Aggregation data: uptime stats and hourly summaries per endpoint
+  const [uptimeMap, setUptimeMap] = useState<Map<string, UptimeStats>>(new Map())
+  const [hourlyMap, setHourlyMap] = useState<Map<string, HourlySummary[]>>(new Map())
 
   // Tick for relative time updates
   const [, setTick] = useState(0)
@@ -264,6 +209,7 @@ export default function EndpointsPage() {
       setEndpoints(res.data.map(mapEndpoint))
       setHasMore(res.pagination.hasMore)
       setNextCursor(res.pagination.nextCursor)
+      setTotalEndpoints(res.pagination.total)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch endpoints')
     } finally {
@@ -274,6 +220,51 @@ export default function EndpointsPage() {
   useEffect(() => {
     fetchEndpoints()
   }, [fetchEndpoints])
+
+  // Fetch aggregation data (uptime + hourly) for all loaded endpoints
+  useEffect(() => {
+    if (endpoints.length === 0) return
+    let cancelled = false
+
+    const fetchAggregation = async () => {
+      const ids = endpoints.map((ep) => ep.id)
+      const [uptimeResults, hourlyResults] = await Promise.all([
+        Promise.allSettled(
+          ids.map((id) =>
+            request<{ data: UptimeStats }>(`/endpoints/${id}/uptime`).then((r) => ({ id, data: r.data.data })),
+          ),
+        ),
+        Promise.allSettled(
+          ids.map((id) =>
+            request<{ data: HourlySummary[] }>(`/endpoints/${id}/hourly?limit=12`).then((r) => ({ id, data: r.data.data })),
+          ),
+        ),
+      ])
+
+      if (cancelled) return
+
+      const newUptime = new Map<string, UptimeStats>()
+      const failed = new Set<string>()
+      for (let i = 0; i < uptimeResults.length; i++) {
+        const r = uptimeResults[i]
+        if (r.status === 'fulfilled') newUptime.set(r.value.id, r.value.data)
+        else failed.add(ids[i])
+      }
+      setUptimeMap(newUptime)
+
+      const newHourly = new Map<string, HourlySummary[]>()
+      for (let i = 0; i < hourlyResults.length; i++) {
+        const r = hourlyResults[i]
+        if (r.status === 'fulfilled') newHourly.set(r.value.id, r.value.data)
+        else failed.add(ids[i])
+      }
+      setHourlyMap(newHourly)
+      setFailedAggIds(failed)
+    }
+
+    fetchAggregation()
+    return () => { cancelled = true }
+  }, [endpoints.length, request]) // re-fetch when endpoint count changes
 
   // ── Load more (cursor pagination) ─────────────────────────────────────────
 
@@ -293,6 +284,39 @@ export default function EndpointsPage() {
       setLoadingMore(false)
     }
   }, [request, nextCursor, loadingMore])
+
+  // ── Intersection observer for infinite scroll ───────────────────────────
+  useEffect(() => {
+    if (!hasMore || loadingMore) return
+    const el = sentinelRef.current
+    if (!el) return
+
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) handleLoadMore() },
+      { rootMargin: '100px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasMore, loadingMore, handleLoadMore])
+
+  // ── Aggregation retry for failed fetches ────────────────────────────────
+  const [failedAggIds, setFailedAggIds] = useState<Set<string>>(new Set())
+
+  const retryAggregation = useCallback(async (id: string) => {
+    const [uptimeRes, hourlyRes] = await Promise.allSettled([
+      request<{ data: UptimeStats }>(`/endpoints/${id}/uptime`).then((r) => r.data.data),
+      request<{ data: HourlySummary[] }>(`/endpoints/${id}/hourly?limit=12`).then((r) => r.data.data),
+    ])
+    if (uptimeRes.status === 'fulfilled') {
+      setUptimeMap((prev) => new Map(prev).set(id, uptimeRes.value))
+    }
+    if (hourlyRes.status === 'fulfilled') {
+      setHourlyMap((prev) => new Map(prev).set(id, hourlyRes.value))
+    }
+    if (uptimeRes.status === 'fulfilled' && hourlyRes.status === 'fulfilled') {
+      setFailedAggIds((prev) => { const n = new Set(prev); n.delete(id); return n })
+    }
+  }, [request])
 
   // ── SSE subscriptions ─────────────────────────────────────────────────────
 
@@ -361,9 +385,8 @@ export default function EndpointsPage() {
           return {
             ...ep,
             ...(c.name !== undefined && { name: c.name }),
-            ...(c.enabled !== undefined && { enabled: c.enabled }),
+            ...(c.status !== undefined && { endpointStatus: c.status }),
             ...(c.checkInterval !== undefined && { checkInterval: c.checkInterval }),
-            // If archived, remove from active list
           }
         }).filter((ep) => {
           if (ep.id === evt.endpointId && evt.changes.status === 'archived') return false
@@ -384,6 +407,14 @@ export default function EndpointsPage() {
 
   const handleToggle = useCallback(
     async (id: string) => {
+      // Optimistic update
+      setEndpoints((prev) =>
+        prev.map((ep) =>
+          ep.id === id
+            ? { ...ep, endpointStatus: ep.endpointStatus === 'paused' ? 'active' : 'paused' }
+            : ep,
+        ),
+      )
       await request(`/endpoints/${id}/toggle`, { method: 'PATCH' })
     },
     [request],
@@ -461,12 +492,17 @@ export default function EndpointsPage() {
       if (col === 'responseTime') {
         return ((a.responseTime ?? 0) - (b.responseTime ?? 0)) * dir
       }
+      if (col === 'uptime') {
+        const aUp = uptimeMap.get(a.id)?.['24h'] ?? -2
+        const bUp = uptimeMap.get(b.id)?.['24h'] ?? -2
+        return (aUp - bUp) * dir
+      }
       const aVal = a[col as keyof Endpoint] ?? ''
       const bVal = b[col as keyof Endpoint] ?? ''
       if (typeof aVal === 'number' && typeof bVal === 'number') return (aVal - bVal) * dir
       return String(aVal).localeCompare(String(bVal)) * dir
     })
-  }, [filtered, sort])
+  }, [filtered, sort, uptimeMap])
 
   const toggleSelectAll = useCallback(() => {
     setSelected((prev) =>
@@ -564,10 +600,10 @@ export default function EndpointsPage() {
 
         <Dropdown>
           <Dropdown.Trigger>
-            <Button size="sm" variant="ghost" className="!text-xs !h-8 !px-3">
+            <div className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs cursor-pointer hover:bg-wd-surface-hover transition-colors">
               <Icon icon="solar:filter-outline" width={14} className="text-wd-muted" />
-              {typeFilterLabels[typeFilter]}
-            </Button>
+              <span className="text-foreground">{typeFilterLabels[typeFilter]}</span>
+            </div>
           </Dropdown.Trigger>
           <Dropdown.Popover placement="bottom start" className="!min-w-[140px]">
             <Dropdown.Menu
@@ -610,6 +646,7 @@ export default function EndpointsPage() {
         <Button
           size="sm"
           className="!bg-wd-primary dark:!bg-wd-primary/50 !text-wd-primary-foreground !text-xs !px-4"
+          onPress={() => navigate('/endpoints/add')}
         >
           <Icon icon="solar:add-circle-outline" width={22} />
           Add Endpoint
@@ -644,6 +681,7 @@ export default function EndpointsPage() {
               ['status', 'Status'],
               ['name', 'Name'],
               ['type', 'Type'],
+              ['uptime', 'Uptime'],
               ['responseTime', 'Response'],
             ] as const
           ).map(([col, label]) => (
@@ -661,6 +699,7 @@ export default function EndpointsPage() {
               )}
             </button>
           ))}
+          <span>Trend</span>
           <span>Last Checked</span>
           <span />
         </div>
@@ -681,6 +720,7 @@ export default function EndpointsPage() {
                 <Button
                   size="sm"
                   className="!bg-wd-primary dark:!bg-wd-primary/50 !text-wd-primary-foreground !text-xs !px-4"
+                  onPress={() => navigate('/endpoints/add')}
                 >
                   <Icon icon="solar:add-circle-outline" width={22} />
                   Add Endpoint
@@ -699,7 +739,7 @@ export default function EndpointsPage() {
                     className={cn(
                       'grid items-center gap-x-2 px-3 py-2 cursor-pointer transition-colors',
                       'border-b border-wd-border/10 hover:bg-wd-surface-hover',
-                      !ep.enabled && 'opacity-50',
+                      ep.endpointStatus === 'paused' && 'bg-wd-warning/[0.03] border-l-2 border-l-wd-warning/30',
                       GRID_COLS,
                     )}
                     onClick={() => navigate(`/endpoints/${ep.id}`)}
@@ -724,37 +764,53 @@ export default function EndpointsPage() {
                     {/* Status */}
                     <Tooltip delay={400} closeDelay={0}>
                       <TooltipTrigger>
-                        <div className="flex items-center gap-2">
-                          <span className={cn('h-2 w-2 rounded-full shrink-0', sc.dot)} />
-                          <span className={cn('text-xs font-medium', sc.text)}>{sc.label}</span>
-                        </div>
+                        {ep.endpointStatus === 'paused' ? (
+                          <div className="flex items-center gap-1.5">
+                            <Icon icon="solar:pause-circle-outline" width={14} className="text-wd-warning/70" />
+                            <span className="text-xs font-medium text-wd-warning/70">Paused</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span className={cn('h-2 w-2 rounded-full shrink-0', sc.dot)} />
+                            <span className={cn('text-xs font-medium', sc.text)}>{sc.label}</span>
+                          </div>
+                        )}
                       </TooltipTrigger>
                       <TooltipContent className={TIP_CLS}>
-                        {ep.errorMessage && (
-                          <TipRow
-                            label="Reason"
-                            value={ep.errorMessage}
-                            className="text-wd-danger"
-                          />
-                        )}
-                        {ep.statusCode != null && (
-                          <TipRow label="Last code" value={String(ep.statusCode)} />
-                        )}
-                        {ep.consecutiveFailures > 0 && (
-                          <TipRow
-                            label="Failures"
-                            value={`${ep.consecutiveFailures} consecutive`}
-                            className="text-wd-danger"
-                          />
-                        )}
-                        {!ep.enabled && (
-                          <div className="text-wd-warning">Endpoint is paused</div>
-                        )}
-                        {ep.status === 'healthy' && !ep.errorMessage && ep.enabled && (
-                          <div className="text-wd-success">All checks passing</div>
-                        )}
-                        {ep.status === null && (
-                          <div className="text-wd-muted">Waiting for first check</div>
+                        {ep.endpointStatus === 'paused' ? (
+                          <>
+                            <div className="text-wd-warning">Monitoring paused</div>
+                            <div className="text-wd-muted/60 text-[10px] mt-0.5">Checks are skipped while paused</div>
+                            {ep.status && (
+                              <TipRow label="Last status" value={sc.label} className={sc.text} />
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {ep.errorMessage && (
+                              <TipRow
+                                label="Reason"
+                                value={ep.errorMessage}
+                                className="text-wd-danger"
+                              />
+                            )}
+                            {ep.statusCode != null && (
+                              <TipRow label="Last code" value={String(ep.statusCode)} />
+                            )}
+                            {ep.consecutiveFailures > 0 && (
+                              <TipRow
+                                label="Failures"
+                                value={`${ep.consecutiveFailures} consecutive`}
+                                className="text-wd-danger"
+                              />
+                            )}
+                            {ep.status === 'healthy' && !ep.errorMessage && ep.endpointStatus !== 'paused' && (
+                              <div className="text-wd-success">All checks passing</div>
+                            )}
+                            {ep.status === null && (
+                              <div className="text-wd-muted">Waiting for first check</div>
+                            )}
+                          </>
                         )}
                       </TooltipContent>
                     </Tooltip>
@@ -767,7 +823,7 @@ export default function EndpointsPage() {
                             <span className="text-sm font-medium text-foreground truncate">
                               {ep.name}
                             </span>
-                            {!ep.enabled && (
+                            {ep.endpointStatus === 'paused' && (
                               <span className="text-[9px] font-semibold uppercase tracking-wider text-wd-warning bg-wd-warning/10 px-1.5 py-0.5 rounded">
                                 Paused
                               </span>
@@ -794,49 +850,172 @@ export default function EndpointsPage() {
                       <span className="text-[11px] font-medium text-wd-muted">{tc.label}</span>
                     </div>
 
+                    {/* Uptime (24h) */}
+                    {(() => {
+                      const aggFailed = failedAggIds.has(ep.id)
+                      const stats = uptimeMap.get(ep.id)
+                      const pct = stats?.['24h']
+                      const hasAny = stats && (stats['24h'] != null || stats['7d'] != null || stats['30d'] != null || stats['90d'] != null)
+                      return (
+                        <Tooltip delay={400} closeDelay={0}>
+                          <TooltipTrigger>
+                            {aggFailed && !stats ? (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); retryAggregation(ep.id) }}
+                                className="text-wd-muted/40 hover:text-wd-muted transition-colors"
+                              >
+                                <Icon icon="solar:refresh-outline" width={13} />
+                              </button>
+                            ) : (
+                              <span className={cn('text-xs font-medium', pct != null ? uptimeColor(pct) : 'text-wd-muted/40')}>
+                                {pct != null ? `${pct}%` : '—'}
+                              </span>
+                            )}
+                          </TooltipTrigger>
+                          <TooltipContent className={TIP_CLS}>
+                            {hasAny ? (
+                              <>
+                                {([['24h', '24h'], ['7d', '7d'], ['30d', '30d'], ['90d', '90d']] as const).map(([key, label]) => {
+                                  const v = stats[key]
+                                  return v != null
+                                    ? <TipRow key={key} label={label} value={`${v}%`} className={uptimeColor(v)} />
+                                    : <TipRow key={key} label={label} value="—" className="text-wd-muted" />
+                                })}
+                              </>
+                            ) : (
+                              <div className="text-wd-muted">Waiting for check data</div>
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
+                      )
+                    })()}
+
                     {/* Response time */}
-                    <Tooltip delay={400} closeDelay={0}>
-                      <TooltipTrigger>
-                        <span
-                          className={cn(
-                            'text-sm font-medium',
-                            ep.responseTime != null
-                              ? latencyColor(ep.responseTime)
-                              : 'text-wd-muted',
-                          )}
-                        >
-                          {ep.responseTime != null ? `${ep.responseTime}ms` : '—'}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent className={TIP_CLS}>
-                        {(() => {
-                          const hist = responseHistory.current.get(ep.id)
-                          if (hist && hist.length > 1) {
-                            const min = Math.min(...hist)
-                            const max = Math.max(...hist)
-                            const avg = Math.round(hist.reduce((a, b) => a + b, 0) / hist.length)
-                            return (
+                    {(() => {
+                      const hourlies = hourlyMap.get(ep.id)
+                      const hasHourly = hourlies && hourlies.length > 0
+                      return (
+                        <Tooltip delay={400} closeDelay={0}>
+                          <TooltipTrigger>
+                            <span
+                              className={cn(
+                                'text-sm font-medium',
+                                ep.responseTime != null
+                                  ? latencyColor(ep.responseTime)
+                                  : 'text-wd-muted',
+                              )}
+                            >
+                              {ep.responseTime != null ? `${ep.responseTime}ms` : '—'}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className={TIP_CLS}>
+                            {hasHourly ? (
                               <>
-                                <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime!)} />
-                                <TipRow label="Avg" value={`${avg}ms`} className={latencyColor(avg)} />
-                                <TipRow label="Min" value={`${min}ms`} />
-                                <TipRow label="Max" value={`${max}ms`} className={latencyColor(max)} />
-                                <div className="text-wd-muted/60 mt-1 text-[10px]">Last {hist.length} checks this session</div>
+                                {ep.responseTime != null && (
+                                  <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime)} />
+                                )}
+                                <TipRow label="Avg (hourly)" value={`${Math.round(hourlies.reduce((s, h) => s + h.avgResponseTime, 0) / hourlies.length)}ms`} className={latencyColor(Math.round(hourlies.reduce((s, h) => s + h.avgResponseTime, 0) / hourlies.length))} />
+                                <TipRow label="P95" value={`${Math.max(...hourlies.map((h) => h.p95ResponseTime))}ms`} />
+                                <TipRow label="Min" value={`${Math.min(...hourlies.map((h) => h.minResponseTime))}ms`} />
+                                <TipRow label="Max" value={`${Math.max(...hourlies.map((h) => h.maxResponseTime))}ms`} className={latencyColor(Math.max(...hourlies.map((h) => h.maxResponseTime)))} />
+                                <div className="text-wd-muted/60 mt-1 text-[10px]">Last {hourlies.length}h aggregated</div>
                               </>
-                            )
-                          }
-                          if (ep.responseTime != null) {
-                            return (
-                              <>
-                                <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime)} />
-                                <div className="text-wd-muted/60 mt-1 text-[10px]">More stats after a few checks</div>
-                              </>
-                            )
-                          }
-                          return <div className="text-wd-muted">No response data yet</div>
-                        })()}
-                      </TooltipContent>
-                    </Tooltip>
+                            ) : (() => {
+                              const hist = responseHistory.current.get(ep.id)
+                              if (hist && hist.length > 1) {
+                                const min = Math.min(...hist)
+                                const max = Math.max(...hist)
+                                const avg = Math.round(hist.reduce((a, b) => a + b, 0) / hist.length)
+                                return (
+                                  <>
+                                    <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime!)} />
+                                    <TipRow label="Avg" value={`${avg}ms`} className={latencyColor(avg)} />
+                                    <TipRow label="Min" value={`${min}ms`} />
+                                    <TipRow label="Max" value={`${max}ms`} className={latencyColor(max)} />
+                                    <div className="text-wd-muted/60 mt-1 text-[10px]">Last {hist.length} checks this session</div>
+                                  </>
+                                )
+                              }
+                              if (ep.responseTime != null) {
+                                return (
+                                  <>
+                                    <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime)} />
+                                    <div className="text-wd-muted/60 mt-1 text-[10px]">More stats after aggregation runs</div>
+                                  </>
+                                )
+                              }
+                              return <div className="text-wd-muted">No response data yet</div>
+                            })()}
+                          </TooltipContent>
+                        </Tooltip>
+                      )
+                    })()}
+
+                    {/* Sparkline — last 12h avg response time */}
+                    {(() => {
+                      const hourlies = hourlyMap.get(ep.id)
+                      if (!hourlies || hourlies.length < 2) {
+                        return (
+                          <Tooltip delay={400} closeDelay={0}>
+                            <TooltipTrigger>
+                              <span className="text-xs text-wd-muted/40">—</span>
+                            </TooltipTrigger>
+                            <TooltipContent className={TIP_CLS}>
+                              <div className="text-wd-muted">Waiting for aggregated data</div>
+                            </TooltipContent>
+                          </Tooltip>
+                        )
+                      }
+                      // Reverse so oldest is first (API returns newest first)
+                      const reversed = [...hourlies].reverse()
+                      const chartData = reversed.map((h) => ({ value: h.avgResponseTime }))
+                      const values = chartData.map((d) => d.value)
+                      const oldest = values[0]!
+                      const newest = values[values.length - 1]!
+                      const diffPct = oldest === 0 ? 0 : Math.round(((newest - oldest) / oldest) * 100)
+                      const trendDir = diffPct > 5 ? 'up' : diffPct < -5 ? 'down' : 'stable'
+                      const trendLabel = trendDir === 'up' ? 'Trending up' : trendDir === 'down' ? 'Trending down' : 'Stable'
+                      const trendColor = trendDir === 'up' ? 'text-wd-warning' : trendDir === 'down' ? 'text-wd-success' : 'text-wd-muted'
+                      const chartColor = trendDir === 'up' ? 'var(--wd-warning)' : trendDir === 'down' ? 'var(--wd-success)' : 'var(--wd-primary)'
+                      const avgAll = Math.round(values.reduce((a, b) => a + b, 0) / values.length)
+                      return (
+                        <Tooltip delay={400} closeDelay={0}>
+                          <TooltipTrigger>
+                            <div className="h-[24px] w-full pr-4">
+                              <ResponsiveContainer width="100%" height={24}>
+                                <AreaChart data={chartData} margin={{ top: 2, right: 0, bottom: 2, left: 0 }}>
+                                  <defs>
+                                    <linearGradient id={`spark-${ep.id}`} x1="0" x2="0" y1="0" y2="1">
+                                      <stop offset="5%" stopColor={chartColor} stopOpacity={0.2} />
+                                      <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
+                                    </linearGradient>
+                                  </defs>
+                                  <YAxis domain={[Math.min(...values) * 0.8, Math.max(...values) * 1.1]} hide />
+                                  <Area
+                                    dataKey="value"
+                                    stroke={chartColor}
+                                    strokeWidth={1.5}
+                                    fill={`url(#spark-${ep.id})`}
+                                    type="monotone"
+                                    fillOpacity={1}
+                                    dot={false}
+                                    isAnimationActive={false}
+                                  />
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent className={TIP_CLS}>
+                            <TipRow label="Trend" value={trendLabel} className={trendColor} />
+                            <TipRow label="Change" value={`${diffPct > 0 ? '+' : ''}${diffPct}% (${newest - oldest > 0 ? '+' : ''}${newest - oldest}ms)`} className={trendColor} />
+                            <TipRow label="Avg" value={`${avgAll}ms`} className={latencyColor(avgAll)} />
+                            <TipRow label="Oldest" value={`${oldest}ms`} />
+                            <TipRow label="Latest" value={`${newest}ms`} className={latencyColor(newest)} />
+                            <div className="text-wd-muted/60 mt-1 text-[10px]">Last {hourlies.length}h response time</div>
+                          </TooltipContent>
+                        </Tooltip>
+                      )
+                    })()}
 
                     {/* Last Checked */}
                     <Tooltip delay={400} closeDelay={0}>
@@ -884,7 +1063,7 @@ export default function EndpointsPage() {
                           >
                             <Icon
                               icon={
-                                ep.enabled
+                                ep.endpointStatus !== 'paused'
                                   ? 'solar:pause-outline'
                                   : 'solar:play-outline'
                               }
@@ -894,7 +1073,7 @@ export default function EndpointsPage() {
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent className="px-2 py-1 text-[11px]">
-                          {ep.enabled ? 'Pause' : 'Resume'}
+                          {ep.endpointStatus !== 'paused' ? 'Pause' : 'Resume'}
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -902,19 +1081,8 @@ export default function EndpointsPage() {
                 )
               })}
               {hasMore && (
-                <div className="flex justify-center py-3">
-                  {loadingMore ? (
-                    <Spinner size="sm" />
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="!text-xs"
-                      onPress={handleLoadMore}
-                    >
-                      Load more
-                    </Button>
-                  )}
+                <div ref={sentinelRef} className="flex justify-center py-3">
+                  <Spinner size="sm" />
                 </div>
               )}
             </>
@@ -992,7 +1160,7 @@ export default function EndpointsPage() {
             </>
           ) : (
             <span className="text-[11px] text-wd-muted">
-              Showing {sorted.length} of {endpoints.length}
+              Showing {sorted.length} of {totalEndpoints}
             </span>
           )}
         </div>

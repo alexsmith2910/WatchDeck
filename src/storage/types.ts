@@ -171,6 +171,7 @@ export interface HourlySummaryDoc {
   minResponseTime: number
   maxResponseTime: number
   p95ResponseTime: number
+  p99ResponseTime: number
   /** Counts of each error type seen in this hour */
   errorTypes: Record<string, number>
   hadActiveIncident: boolean
@@ -194,6 +195,7 @@ export interface DailySummaryDoc {
   minResponseTime: number
   maxResponseTime: number
   p95ResponseTime: number
+  p99ResponseTime: number
   incidentCount: number
   totalDowntimeMinutes: number
 

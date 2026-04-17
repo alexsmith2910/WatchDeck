@@ -29,10 +29,16 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     if (!map.has(event)) map.set(event, new Set())
     map.get(event)!.add(handler)
 
-    // If we already have an EventSource, add the listener to it
-    if (esRef.current) {
-      esRef.current.addEventListener(event, ((e: MessageEvent) => {
-        try { handler(JSON.parse(e.data)) } catch { /* skip */ }
+    // If we already have an EventSource but this is a brand-new event type
+    // (no connect-time listener exists), add a dispatcher for it now.
+    if (esRef.current && map.get(event)!.size === 1) {
+      const es = esRef.current
+      es.addEventListener(event, ((e: MessageEvent) => {
+        let data: unknown
+        try { data = JSON.parse(e.data) } catch { return }
+        for (const h of map.get(event) ?? []) {
+          try { h(data) } catch { /* skip */ }
+        }
       }) as EventListener)
     }
 

@@ -17,10 +17,7 @@ interface ActiveIncident {
 interface StatusPillProps {
   healthyCount: number
   totalCount: number
-  uptimePercent: number
-  uptimeChange?: number
-  avgLatencyMs: number
-  latencyChange?: number
+  avgLatencyMs: number | null
   incidentCount: number
   activeIncident?: ActiveIncident
   lastUpdated?: string
@@ -33,20 +30,17 @@ interface StatusPillProps {
 function StatusPopup({
   healthyCount,
   totalCount,
-  uptimePercent,
-  uptimeChange,
   avgLatencyMs,
-  latencyChange,
   incidentCount,
   activeIncident,
   lastUpdated,
   onNavigate,
 }: StatusPillProps & { onNavigate: (path: string) => void }) {
   const downCount = totalCount - healthyCount
-  const allHealthy = downCount === 0
-  const statusLabel = allHealthy ? 'Operational' : 'Degraded'
-  const statusColor = allHealthy ? 'text-wd-success' : 'text-wd-warning'
-  const dotColor = allHealthy ? 'bg-wd-success' : 'bg-wd-warning'
+  const allHealthy = downCount === 0 && totalCount > 0
+  const statusLabel = totalCount === 0 ? 'No endpoints' : allHealthy ? 'Operational' : 'Degraded'
+  const statusColor = allHealthy ? 'text-wd-success' : totalCount === 0 ? 'text-wd-muted' : 'text-wd-warning'
+  const dotColor = allHealthy ? 'bg-wd-success' : totalCount === 0 ? 'bg-wd-muted' : 'bg-wd-warning'
 
   return (
     <div className="w-72">
@@ -54,7 +48,6 @@ function StatusPopup({
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-foreground">System Status</span>
-          <span className="text-[10px] text-wd-muted/50">24h</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className={cn('h-1.5 w-1.5 rounded-full', dotColor)} />
@@ -71,23 +64,13 @@ function StatusPopup({
           <div className="text-[10px] text-wd-muted mb-0.5">Endpoints</div>
           <div className="flex items-baseline gap-1.5 text-sm font-semibold text-foreground">
             {totalCount}
-            <span className="text-[10px] font-medium text-wd-success">{healthyCount} up</span>
-            {downCount > 0 && (
-              <span className="text-[10px] font-medium text-wd-danger">{downCount} down</span>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-lg bg-wd-surface-hover/60 px-3 py-2">
-          <div className="text-[10px] text-wd-muted mb-0.5">Uptime 24h</div>
-          <div className="flex items-baseline gap-1.5 text-sm font-semibold">
-            <span className={uptimePercent >= 99 ? 'text-wd-success' : uptimePercent >= 95 ? 'text-wd-warning' : 'text-wd-danger'}>
-              {uptimePercent}%
-            </span>
-            {uptimeChange != null && (
-              <span className={cn('text-[10px] font-medium', uptimeChange >= 0 ? 'text-wd-success' : 'text-wd-danger')}>
-                {uptimeChange >= 0 ? '+' : ''}{uptimeChange}%
-              </span>
+            {totalCount > 0 && (
+              <>
+                <span className="text-[10px] font-medium text-wd-success">{healthyCount} up</span>
+                {downCount > 0 && (
+                  <span className="text-[10px] font-medium text-wd-danger">{downCount} down</span>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -95,12 +78,13 @@ function StatusPopup({
         <div className="rounded-lg bg-wd-surface-hover/60 px-3 py-2">
           <div className="text-[10px] text-wd-muted mb-0.5">Avg response</div>
           <div className="flex items-baseline gap-1.5 text-sm font-semibold text-foreground">
-            {avgLatencyMs}
-            <span className="text-[10px] font-normal text-wd-muted">ms</span>
-            {latencyChange != null && (
-              <span className={cn('text-[10px] font-medium', latencyChange <= 0 ? 'text-wd-success' : 'text-wd-danger')}>
-                {latencyChange > 0 ? '+' : ''}{latencyChange}ms
-              </span>
+            {avgLatencyMs != null ? (
+              <>
+                {avgLatencyMs}
+                <span className="text-[10px] font-normal text-wd-muted">ms</span>
+              </>
+            ) : (
+              <span className="text-wd-muted">—</span>
             )}
           </div>
         </div>
@@ -114,9 +98,15 @@ function StatusPopup({
             <span className={incidentCount > 0 ? 'text-wd-danger' : 'text-foreground'}>
               {incidentCount}
             </span>
-            {activeIncident && (
-              <span className="text-[10px] font-medium text-wd-danger">{activeIncident.name}</span>
-            )}
+            <span className="text-[10px] font-medium text-wd-muted">active</span>
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-wd-surface-hover/60 px-3 py-2">
+          <div className="text-[10px] text-wd-muted mb-0.5">Status</div>
+          <div className="flex items-center gap-1.5 text-sm font-semibold">
+            <span className={cn('h-1.5 w-1.5 rounded-full', dotColor)} />
+            <span className={statusColor}>{statusLabel}</span>
           </div>
         </div>
       </div>
@@ -143,7 +133,7 @@ function StatusPopup({
       <Separator className="!bg-wd-border/50 mb-2" />
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-wd-muted/60">
-          {lastUpdated ?? 'Updated just now'}
+          {lastUpdated ?? 'Waiting for data'}
         </span>
         <span
           className="text-[10px] text-wd-primary font-medium cursor-pointer hover:underline"
@@ -164,14 +154,12 @@ export default function StatusPill(props: StatusPillProps) {
   const {
     healthyCount,
     totalCount,
-    uptimePercent,
     avgLatencyMs,
     incidentCount,
   } = props
 
   const navigate = useNavigate()
-  const allHealthy = healthyCount === totalCount
-  const uptimeColor = uptimePercent >= 99 ? 'text-wd-success' : uptimePercent >= 95 ? 'text-wd-warning' : 'text-wd-danger'
+  const allHealthy = totalCount > 0 && healthyCount === totalCount
 
   // Hover state with close delay
   const [isOpen, setIsOpen] = useState(false)
@@ -223,23 +211,17 @@ export default function StatusPill(props: StatusPillProps) {
 
             <div className="w-px self-stretch bg-wd-border/50 mx-0.5" />
 
-            {/* Uptime */}
-            <div className="flex items-center gap-1.5 px-2.5 py-0.5">
-              <Icon icon="solar:clock-circle-outline" width={14} className="text-wd-muted" />
-              <span className={cn('text-[11px] font-medium', uptimeColor)}>
-                {uptimePercent}%
-              </span>
-            </div>
-
-            <div className="w-px self-stretch bg-wd-border/50 mx-0.5" />
-
             {/* Avg latency */}
             <div className="flex items-center gap-1.5 px-2.5 py-0.5">
               <Icon icon="solar:graph-outline" width={14} className="text-wd-muted" />
-              <span className="text-[11px] text-wd-muted">
-                {avgLatencyMs}
-                <span className="text-[9px] text-wd-muted/60">ms</span>
-              </span>
+              {avgLatencyMs != null ? (
+                <span className="text-[11px] text-wd-muted">
+                  {avgLatencyMs}
+                  <span className="text-[9px] text-wd-muted/60">ms</span>
+                </span>
+              ) : (
+                <span className="text-[11px] text-wd-muted/40">—</span>
+              )}
             </div>
 
             {incidentCount > 0 && (
