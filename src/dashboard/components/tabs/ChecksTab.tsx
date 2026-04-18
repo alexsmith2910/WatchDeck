@@ -38,6 +38,10 @@ interface ChecksTabProps {
 
 const STATUS_ORDER: Record<string, number> = { down: 0, degraded: 1, healthy: 2 }
 
+// Cap the live-prepended check list to prevent unbounded growth from SSE.
+// Older entries can always be re-fetched via "Load more" pagination.
+const MAX_LIVE_CHECKS = 500
+
 // ---------------------------------------------------------------------------
 // HTTP status code definitions with color categories
 // ---------------------------------------------------------------------------
@@ -188,7 +192,10 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
       }
 
       if (statusFilter !== 'all' && newCheck.status !== statusFilter) return
-      setChecks((prev) => [newCheck, ...prev])
+      setChecks((prev) => {
+        const next = [newCheck, ...prev]
+        return next.length > MAX_LIVE_CHECKS ? next.slice(0, MAX_LIVE_CHECKS) : next
+      })
     })
     return unsub
   }, [endpointId, subscribe, statusFilter])

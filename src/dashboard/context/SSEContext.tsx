@@ -22,31 +22,47 @@ export const SSEContext = createContext<SSEContextValue | null>(null)
 export function SSEProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SSEStatus>('connecting')
   const listenersRef = useRef(new Map<string, Set<SSEHandler>>())
+  // Event types that have an active dispatcher attached to the current ES.
+  const dispatchedRef = useRef(new Set<string>())
   const esRef = useRef<EventSource | null>(null)
+
+  // Install a single dispatcher for `event` on the given EventSource. The
+  // dispatcher reads the current handler Set at fire time, so we never need
+  // to re-register when handlers come and go — this avoids stacking duplicate
+  // listeners across mount/unmount cycles.
+  const attachDispatcher = useCallback((es: EventSource, event: string) => {
+    if (dispatchedRef.current.has(event)) return
+    dispatchedRef.current.add(event)
+    es.addEventListener(event, ((e: MessageEvent) => {
+      let data: unknown
+      try { data = JSON.parse(e.data) } catch { return }
+      const handlers = listenersRef.current.get(event)
+      if (!handlers) return
+      for (const h of handlers) {
+        try { h(data) } catch { /* skip */ }
+      }
+    }) as EventListener)
+  }, [])
 
   const subscribe = useCallback((event: string, handler: SSEHandler): (() => void) => {
     const map = listenersRef.current
-    if (!map.has(event)) map.set(event, new Set())
-    map.get(event)!.add(handler)
-
-    // If we already have an EventSource but this is a brand-new event type
-    // (no connect-time listener exists), add a dispatcher for it now.
-    if (esRef.current && map.get(event)!.size === 1) {
-      const es = esRef.current
-      es.addEventListener(event, ((e: MessageEvent) => {
-        let data: unknown
-        try { data = JSON.parse(e.data) } catch { return }
-        for (const h of map.get(event) ?? []) {
-          try { h(data) } catch { /* skip */ }
-        }
-      }) as EventListener)
+    let set = map.get(event)
+    if (!set) {
+      set = new Set()
+      map.set(event, set)
     }
+    set.add(handler)
+
+    if (esRef.current) attachDispatcher(esRef.current, event)
 
     return () => {
+      // Keep the Set in the map even when empty — the ES dispatcher reads it
+      // lazily. Recreating the Set on re-subscribe would force us to
+      // re-register the dispatcher, which is what caused the duplicate-listener
+      // leak in the previous implementation.
       map.get(event)?.delete(handler)
-      if (map.get(event)?.size === 0) map.delete(event)
     }
-  }, [])
+  }, [attachDispatcher])
 
   useEffect(() => {
     let reconnectTimer: ReturnType<typeof setTimeout>
@@ -57,25 +73,22 @@ export function SSEProvider({ children }: { children: ReactNode }) {
 
       const es = new EventSource(`${API_BASE}/stream`)
       esRef.current = es
+      // New EventSource means no dispatchers are attached yet.
+      dispatchedRef.current = new Set()
 
       es.onopen = () => setStatus('connected')
       es.onerror = () => {
         setStatus('disconnected')
         es.close()
         esRef.current = null
+        dispatchedRef.current = new Set()
         // Reconnect after 60s (2x default 30s heartbeat)
         reconnectTimer = setTimeout(connect, 60_000)
       }
 
-      // Wire up all currently registered event types
-      for (const [event, handlers] of listenersRef.current) {
-        es.addEventListener(event, ((e: MessageEvent) => {
-          let data: unknown
-          try { data = JSON.parse(e.data) } catch { return }
-          for (const handler of handlers) {
-            try { handler(data) } catch { /* skip */ }
-          }
-        }) as EventListener)
+      // Wire up dispatchers for all currently known event types.
+      for (const event of listenersRef.current.keys()) {
+        attachDispatcher(es, event)
       }
     }
 
@@ -86,8 +99,9 @@ export function SSEProvider({ children }: { children: ReactNode }) {
       clearTimeout(reconnectTimer)
       esRef.current?.close()
       esRef.current = null
+      dispatchedRef.current = new Set()
     }
-  }, [])
+  }, [attachDispatcher])
 
   return (
     <SSEContext.Provider value={{ status, subscribe }}>

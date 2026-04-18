@@ -69,7 +69,8 @@
 /* ── Endpoints table — ScrollShadow wrapper handles scroll + fade ──────── */
 
 /* Custom scrollbar on the ScrollShadow wrapper div */
-.wd-endpoints-table-wrap {
+.wd-endpoints-table-wrap,
+.wd-incidents-table-wrap {
   scrollbar-width: thin;
   scrollbar-color: var(--wd-border) transparent;
 
