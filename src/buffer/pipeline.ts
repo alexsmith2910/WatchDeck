@@ -31,6 +31,11 @@ export class BufferPipeline {
     private readonly outageTracker: OutageTracker,
   ) {}
 
+  /** Current write mode — read by the system metrics collector. */
+  getMode(): 'live' | 'buffering' {
+    return this.mode
+  }
+
   register(): void {
     // Switch to buffering as soon as the topology closes.
     eventBus.subscribe('db:disconnected', () => { this.mode = 'buffering' }, 'critical')

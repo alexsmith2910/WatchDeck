@@ -17,6 +17,8 @@ import { CheckScheduler } from '../core/scheduler.js'
 import { buildServer } from '../api/server.js'
 import { AggregationScheduler } from '../aggregation/scheduler.js'
 import { IncidentManager } from '../alerts/incidentManager.js'
+import { systemMetrics } from '../core/systemMetrics.js'
+import { getClientCount } from '../api/sse.js'
 import { formatWarning } from '../utils/errors.js'
 
 const require = createRequire(import.meta.url)
@@ -364,6 +366,17 @@ export async function runStart(options: StartOptions): Promise<void> {
   const serverSpinner = spinner('Starting API server...', silent).start()
   let server
 
+  // Start the system metrics collector — event-bus subscribers + 1s sampling tick.
+  systemMetrics.init({
+    adapter,
+    scheduler,
+    diskBufferPath,
+    memoryBufferSize: () => memBuffer.size,
+    memoryBufferCapacity: config.buffer.memoryCapacity,
+    bufferMode: () => pipeline.getMode(),
+    sseClientCount: getClientCount,
+  })
+
   try {
     server = await buildServer({ adapter, scheduler, config, logRequests: verbose })
     await server.listen({ port, host: '0.0.0.0' })
@@ -384,6 +397,7 @@ export async function runStart(options: StartOptions): Promise<void> {
 
   // Graceful shutdown
   function shutdown(): void {
+    systemMetrics.stop()
     scheduler.stop()
     aggregation.stop()
     void server!.close().finally(() => {

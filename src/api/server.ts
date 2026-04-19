@@ -23,10 +23,12 @@ import { incidentsRoutes } from './routes/incidents.js'
 import { notificationsRoutes } from './routes/notifications.js'
 import { maintenanceRoutes } from './routes/maintenance.js'
 import { settingsRoutes } from './routes/settings.js'
+import { systemHealthRoutes } from './routes/systemHealth.js'
 import type { StorageAdapter } from '../storage/adapter.js'
 import type { WatchDeckConfig } from '../config/types.js'
 import { sseRoutes } from './sse.js'
 import type { CheckScheduler } from '../core/scheduler.js'
+import { systemMetrics } from '../core/systemMetrics.js'
 
 export interface AppContext {
   adapter: StorageAdapter
@@ -99,6 +101,12 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
     void reply.code(404).send(formatError('NOT_FOUND', 'Route not found'))
   })
 
+  // ── System metrics hook — record every API response for the health page ────
+  fastify.addHook('onResponse', (request, reply, done) => {
+    systemMetrics.recordApiRequest(reply.statusCode, request.url)
+    done()
+  })
+
   // ── Request logger (verbose mode only) ──────────────────────────────────────
   if (ctx.logRequests) {
     const basePath = ctx.config.apiBasePath
@@ -124,6 +132,7 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
     await app.register(notificationsRoutes(ctx), { prefix: base })
     await app.register(maintenanceRoutes(ctx), { prefix: base })
     await app.register(settingsRoutes(ctx), { prefix: base })
+    await app.register(systemHealthRoutes(ctx), { prefix: base })
     await app.register(sseRoutes(ctx), { prefix: base })
   })
 
