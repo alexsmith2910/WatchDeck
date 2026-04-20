@@ -1,4 +1,11 @@
-import type { EndpointDoc, IncidentDoc } from '../storage/types.js'
+import type {
+  EndpointDoc,
+  IncidentDoc,
+  NotificationKind,
+  NotificationSeverity,
+  NotificationSuppressedReason,
+} from '../storage/types.js'
+import type { ProbeResult } from './health/probeTypes.js'
 
 /**
  * Typed event map for the WatchDeck event bus.
@@ -84,5 +91,126 @@ export interface EventMap {
     resultsTotal: number
     errors: number
     percentComplete: number
+  }
+
+  // -------------------------------------------------------------------------
+  // Aggregation lifecycle — structured payloads keep the aggregator probe
+  // out of the business of string-matching `system:warning` messages.
+  // -------------------------------------------------------------------------
+  'aggregation:run': {
+    timestamp: Date
+    kind: 'hourly' | 'daily' | 'cleanup'
+    durationMs: number
+    rowsIn: number
+    rowsOut: number
+    ok: boolean
+    error?: string
+  }
+
+  // -------------------------------------------------------------------------
+  // Probe lifecycle (system-plane health). Emitted by ProbeRegistry on every
+  // probe completion; transition events fire when a probe changes category
+  // between healthy/standby/disabled and degraded/down.
+  // -------------------------------------------------------------------------
+  'probe:completed': { timestamp: Date; result: ProbeResult }
+  'probe:degraded': { timestamp: Date; result: ProbeResult }
+  'probe:recovered': { timestamp: Date; result: ProbeResult }
+
+  // -------------------------------------------------------------------------
+  // Internal event-bus round-trip probe.
+  // -------------------------------------------------------------------------
+  'system:heartbeat': { timestamp: Date; token: string }
+
+  // -------------------------------------------------------------------------
+  // Notification dispatcher — every dispatch outcome is observable on the bus
+  // so the dashboard (via SSE), the health probe, and the event trace can all
+  // react to the same stream of truth.
+  // -------------------------------------------------------------------------
+  'notification:dispatched': {
+    timestamp: Date
+    logId: string
+    channelId: string
+    endpointId?: string
+    incidentId?: string
+    kind: NotificationKind
+    severity: NotificationSeverity
+    latencyMs: number
+  }
+  'notification:failed': {
+    timestamp: Date
+    logId: string
+    channelId: string
+    endpointId?: string
+    incidentId?: string
+    kind: NotificationKind
+    reason: string
+  }
+  'notification:suppressed': {
+    timestamp: Date
+    channelId: string
+    endpointId?: string
+    incidentId?: string
+    suppressedReason: NotificationSuppressedReason
+  }
+
+  // Channel CRUD — the registry listens to these to refresh its cache.
+  'notification:channelCreated': { timestamp: Date; channelId: string }
+  'notification:channelUpdated': { timestamp: Date; channelId: string }
+  'notification:channelDeleted': { timestamp: Date; channelId: string }
+
+  // Mute lifecycle
+  'notification:muted': {
+    timestamp: Date
+    scope: 'endpoint' | 'channel' | 'global'
+    targetId?: string
+    expiresAt: Date
+  }
+  'notification:unmuted': {
+    timestamp: Date
+    scope: 'endpoint' | 'channel' | 'global'
+    targetId?: string
+  }
+
+  // Channel test fired
+  'notification:test': {
+    timestamp: Date
+    channelId: string
+    ok: boolean
+    reason?: string
+  }
+
+  // Escalation scheduler
+  'notification:escalationScheduled': {
+    timestamp: Date
+    incidentId: string
+    endpointId: string
+    channelId: string
+    firesAt: Date
+  }
+  'notification:escalationCancelled': {
+    timestamp: Date
+    incidentId: string
+    reason: 'resolved' | 'acknowledged' | 'muted' | 'channel_gone'
+  }
+  'notification:escalationFired': {
+    timestamp: Date
+    incidentId: string
+    endpointId: string
+    channelId: string
+  }
+
+  // Burst coalescing (see plan §1.5 / finalized decision #5)
+  'notification:coalescingOpened': {
+    timestamp: Date
+    channelId: string
+    endpointId?: string
+    windowMs: number
+  }
+  'notification:coalescingFlushed': {
+    timestamp: Date
+    channelId: string
+    endpointId?: string
+    count: number
+    logId: string
   }
 }

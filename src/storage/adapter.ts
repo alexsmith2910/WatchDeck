@@ -5,14 +5,56 @@ import type {
   DbPaginationOpts,
   DailySummaryDoc,
   EndpointDoc,
+  HealthStateDoc,
   HourlySummaryDoc,
   IncidentDoc,
+  InternalIncidentDoc,
   MaintenanceWindow,
   NotificationChannelDoc,
+  NotificationDeliveryStatus,
+  NotificationKind,
   NotificationLogDoc,
+  NotificationMuteDoc,
+  NotificationPreferencesDoc,
+  NotificationSeverity,
   SettingsDoc,
   SystemEventDoc,
 } from './types.js'
+
+// ---------------------------------------------------------------------------
+// Notification query/stat shapes (used by several adapter methods)
+// ---------------------------------------------------------------------------
+
+export interface NotificationLogFilter {
+  endpointId?: string
+  channelId?: string
+  incidentId?: string
+  severity?: NotificationSeverity
+  kind?: NotificationKind
+  status?: NotificationDeliveryStatus
+  from?: Date
+  to?: Date
+  /** Substring match on messageSummary. */
+  search?: string
+}
+
+export interface NotificationStatsWindow {
+  from: Date
+  to: Date
+}
+
+export interface NotificationStats {
+  total: number
+  sent: number
+  failed: number
+  suppressed: number
+  pending: number
+  byChannel: Array<{ channelId: string; sent: number; failed: number; suppressed: number }>
+  bySuppressedReason: Record<string, number>
+  byKind: Record<NotificationKind, number>
+  lastDispatchAt: Date | null
+  lastFailureAt: Date | null
+}
 
 /**
  * Abstract storage adapter.
@@ -55,6 +97,18 @@ export abstract class StorageAdapter {
    * Returns true if the adapter currently has an active connection.
    */
   abstract isConnected(): boolean
+
+  /**
+   * If the adapter is currently disconnected, how long in seconds (floor) it
+   * has been that way; 0 when connected. Used by the db health probe.
+   */
+  abstract currentOutageDuration(): number
+
+  /**
+   * Current reconnect attempt number if a reconnect loop is in progress, or
+   * null when connected / not reconnecting. Used by the db health probe.
+   */
+  abstract reconnectAttempt(): number | null
 
   /**
    * Run idempotent collection and index migrations.
@@ -224,7 +278,73 @@ export abstract class StorageAdapter {
 
   abstract deleteNotificationChannel(id: string): Promise<boolean>
 
-  abstract listNotificationLog(opts: DbPaginationOpts): Promise<DbPage<NotificationLogDoc>>
+  abstract getNotificationChannelById(id: string): Promise<NotificationChannelDoc | null>
+
+  // ---------------------------------------------------------------------------
+  // Notification log API
+  // ---------------------------------------------------------------------------
+
+  /** Cursor-paginated list with server-side filters. */
+  abstract listNotificationLog(
+    opts: DbPaginationOpts & NotificationLogFilter,
+  ): Promise<DbPage<NotificationLogDoc>>
+
+  /** Convenience: paginated log scoped to a single endpoint. */
+  abstract listNotificationLogForEndpoint(
+    endpointId: string,
+    opts: DbPaginationOpts & NotificationLogFilter,
+  ): Promise<DbPage<NotificationLogDoc>>
+
+  /** Convenience: paginated log scoped to a single channel. */
+  abstract listNotificationLogForChannel(
+    channelId: string,
+    opts: DbPaginationOpts & NotificationLogFilter,
+  ): Promise<DbPage<NotificationLogDoc>>
+
+  /** All dispatches (any status) for a single incident, newest first. */
+  abstract listNotificationLogForIncident(incidentId: string): Promise<NotificationLogDoc[]>
+
+  /**
+   * Coalesced summary log rows whose `coalescedIncidentIds` array contains
+   * the given incident. Used by the dispatcher to find the channels that
+   * received this incident's open as part of a folded batch — so it can
+   * decide whether to emit a recovery message.
+   */
+  abstract findCoalescedDeliveriesFor(incidentId: string): Promise<NotificationLogDoc[]>
+
+  abstract getNotificationLogById(id: string): Promise<NotificationLogDoc | null>
+
+  /** Persist a single log row. Returns the inserted doc. */
+  abstract writeNotificationLog(
+    row: Omit<NotificationLogDoc, '_id' | 'createdAt'>,
+  ): Promise<NotificationLogDoc>
+
+  /** Aggregate stats for the given window — KPI cards and health probe. */
+  abstract countNotificationStats(window: NotificationStatsWindow): Promise<NotificationStats>
+
+  // ---------------------------------------------------------------------------
+  // Notification mutes API
+  // ---------------------------------------------------------------------------
+
+  abstract recordMute(
+    data: Omit<NotificationMuteDoc, '_id' | 'mutedAt'>,
+  ): Promise<NotificationMuteDoc>
+
+  abstract listActiveMutes(): Promise<NotificationMuteDoc[]>
+
+  abstract getMuteById(id: string): Promise<NotificationMuteDoc | null>
+
+  abstract deleteMute(id: string): Promise<boolean>
+
+  // ---------------------------------------------------------------------------
+  // Notification preferences (singleton, _id = "global")
+  // ---------------------------------------------------------------------------
+
+  abstract getNotificationPreferences(): Promise<NotificationPreferencesDoc>
+
+  abstract updateNotificationPreferences(
+    changes: Partial<Omit<NotificationPreferencesDoc, '_id'>>,
+  ): Promise<NotificationPreferencesDoc>
 
   // ---------------------------------------------------------------------------
   // Maintenance API
@@ -294,4 +414,20 @@ export abstract class StorageAdapter {
   abstract getSettings(): Promise<SettingsDoc>
 
   abstract updateSettings(changes: Record<string, unknown>): Promise<SettingsDoc>
+
+  // ---------------------------------------------------------------------------
+  // System Health persistence
+  // ---------------------------------------------------------------------------
+
+  /** Persist (or replace) the single health-state snapshot document. */
+  abstract saveHealthState(state: Omit<HealthStateDoc, '_id'>): Promise<void>
+
+  /** Load the health-state snapshot, or null if none has been saved yet. */
+  abstract loadHealthState(): Promise<HealthStateDoc | null>
+
+  /** Internal-incident history (most recent first, capped to a sane number). */
+  abstract listInternalIncidents(): Promise<InternalIncidentDoc[]>
+
+  /** Upsert a single internal-incident document keyed by its synthesized _id. */
+  abstract upsertInternalIncident(doc: InternalIncidentDoc): Promise<void>
 }

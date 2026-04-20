@@ -228,16 +228,66 @@ export interface IncidentDoc {
 // mx_notification_channels
 // ---------------------------------------------------------------------------
 
+export type NotificationChannelType = 'discord' | 'slack' | 'email' | 'webhook'
+
+export type NotificationSeverityFilter = 'info+' | 'warning+' | 'critical'
+
+export interface NotificationEventFilters {
+  sendOpen: boolean
+  sendResolved: boolean
+  sendEscalation: boolean
+}
+
+export interface NotificationQuietHours {
+  /** "HH:MM" 24-hour local start time */
+  start: string
+  /** "HH:MM" 24-hour local end time (may cross midnight: e.g. "22:00"–"06:00") */
+  end: string
+  /** IANA timezone name, e.g. "Europe/London" */
+  tz: string
+}
+
 export interface NotificationChannelDoc {
   _id: ObjectId
-  type: 'discord' | 'slack' | 'email'
+  type: NotificationChannelType
   name: string
   deliveryPriority: 'standard' | 'critical'
 
+  /** Soft-disable without deleting. Defaults to true on create. */
+  enabled: boolean
+
+  /** Only emit dispatches for events at or above this severity threshold. */
+  severityFilter: NotificationSeverityFilter
+
+  /** Which lifecycle events this channel should receive. */
+  eventFilters: NotificationEventFilters
+
+  /** Optional quiet hours window that suppresses non-critical dispatches. */
+  quietHours?: NotificationQuietHours
+
+  /** Per-channel rate limit override (otherwise the type default applies). */
+  rateLimit?: { maxPerMinute: number }
+
+  /** If true, failed dispatches are retried per the global backoff schedule. */
+  retryOnFailure: boolean
+
+  /** Free-form channel metadata (color accent, routing tags, etc.). */
+  metadata?: Record<string, unknown>
+
   // Discord
+  /**
+   * Which Discord transport this channel uses. `webhook` is the default and
+   * only transport with an implementation today — `bot` is reserved for a
+   * future PR (see src/notifications/providers/discord/bot.ts).
+   */
+  discordTransport?: 'webhook' | 'bot'
   discordWebhookUrl?: string
   discordChannelId?: string
   discordGuildId?: string
+  /** Optional override for the author name shown in Discord. */
+  discordUsername?: string
+  /** Optional override for the author avatar shown in Discord. */
+  discordAvatarUrl?: string
 
   // Slack
   slackWebhookUrl?: string
@@ -247,6 +297,12 @@ export interface NotificationChannelDoc {
   // Email
   emailEndpoint?: string
   emailRecipients?: string[]
+
+  // Webhook (generic POST-JSON)
+  webhookUrl?: string
+  webhookMethod?: 'POST' | 'PUT' | 'PATCH'
+  webhookHeaders?: Record<string, string>
+  webhookBodyTemplate?: string
 
   isConnected: boolean
   lastTestedAt?: Date
@@ -259,20 +315,101 @@ export interface NotificationChannelDoc {
 // mx_notification_log
 // ---------------------------------------------------------------------------
 
+export type NotificationKind =
+  | 'incident_opened'
+  | 'incident_resolved'
+  | 'incident_escalated'
+  | 'channel_test'
+  | 'custom'
+
+export type NotificationSeverity = 'info' | 'warning' | 'critical' | 'success'
+
+export type NotificationDeliveryStatus = 'sent' | 'failed' | 'pending' | 'suppressed'
+
+export type NotificationSuppressedReason =
+  | 'cooldown'
+  | 'quiet_hours'
+  | 'maintenance'
+  | 'severity_filter'
+  | 'event_filter'
+  | 'rate_limit'
+  | 'module_disabled'
+  | 'coalesced'
+  | 'muted'
+  | 'channel_disabled'
+
 export interface NotificationLogDoc {
   _id: ObjectId
-  endpointId: ObjectId
-  incidentId: ObjectId
+  /** Optional — absent on global suppressions and channel tests. */
+  endpointId?: ObjectId
+  /** Optional — absent on channel tests and coalescing-parent summaries. */
+  incidentId?: ObjectId
   channelId: ObjectId
+  /** Deprecated short label — use `kind` going forward. Kept for back-compat. */
   type: string
-  channelType: 'discord' | 'slack' | 'email'
+  channelType: NotificationChannelType
   channelTarget: string
   messageSummary: string
-  deliveryStatus: 'sent' | 'failed' | 'pending'
-  failureReason?: string
-  sentAt: Date
 
+  /** Severity of the underlying alert. */
+  severity: NotificationSeverity
+  /** What event produced this dispatch. */
+  kind: NotificationKind
+
+  deliveryStatus: NotificationDeliveryStatus
+  failureReason?: string
+  /** Outcome reason when deliveryStatus === 'suppressed'. */
+  suppressedReason?: NotificationSuppressedReason
+
+  /** Round-trip latency of the provider call, when one was made. */
+  latencyMs?: number
+  /** Stable key used for dedup (incidentId + kind). */
+  idempotencyKey?: string
+  /** If set, this row is a retry attempt of the referenced log row. */
+  retryOf?: ObjectId
+
+  /** Set on individual rows that were folded into a coalescing-parent summary. */
+  coalescedIntoLogId?: ObjectId
+  /** Set on the coalescing-parent summary row: number of alerts it represents. */
+  coalescedCount?: number
+  /** Incident ids represented by a coalescing-parent summary row. */
+  coalescedIncidentIds?: ObjectId[]
+
+  sentAt: Date
   createdAt: Date
+}
+
+// ---------------------------------------------------------------------------
+// mx_notification_mutes  — temporary muting (e.g. during a deploy)
+// ---------------------------------------------------------------------------
+
+export interface NotificationMuteDoc {
+  _id: ObjectId
+  scope: 'endpoint' | 'channel' | 'global'
+  /** Required when scope is 'endpoint' or 'channel'. */
+  targetId?: ObjectId
+  mutedBy: string
+  mutedAt: Date
+  /** TTL index on this field drops the doc once it's reached. */
+  expiresAt: Date
+  reason?: string
+}
+
+// ---------------------------------------------------------------------------
+// mx_notification_preferences  — single document, _id = "global"
+// ---------------------------------------------------------------------------
+
+export interface NotificationPreferencesDoc {
+  _id: 'global'
+  globalQuietHours?: NotificationQuietHours
+  /** If set and in the future, all dispatches are suppressed until this time. */
+  globalMuteUntil?: Date
+  defaultSeverityFilter: NotificationSeverityFilter
+  defaultEventFilters: NotificationEventFilters
+  /** Preview-only in V1; full batching lands in V1.5. */
+  digestMode?: { enabled: boolean; intervalMinutes: number }
+  lastEditedBy?: string
+  updatedAt: Date
 }
 
 // ---------------------------------------------------------------------------
@@ -311,4 +448,70 @@ export interface SystemEventDoc {
   replayedCount: number
   replayErrors: number
   timeline: SystemEventTimelineEntry[]
+}
+
+// ---------------------------------------------------------------------------
+// mx_health_state  (single document, _id = "snapshot")
+//
+// Persisted by HealthPersistence every ~30s and on shutdown so the System
+// Health page can show 24h-of-context after a process restart instead of
+// re-accumulating from zero.
+// ---------------------------------------------------------------------------
+
+export interface HealthHistoryEntryDoc {
+  ts: number
+  status: 'healthy' | 'degraded' | 'down' | 'standby' | 'disabled'
+  latencyMs: number | null
+}
+
+export interface HealthHeatmapBucketDoc {
+  count: number
+  degraded: number
+  down: number
+}
+
+export interface HealthHeatmapRowDoc {
+  /** Epoch ms of the leftmost bucket (UTC hour-aligned). */
+  startMs: number
+  buckets: HealthHeatmapBucketDoc[]
+}
+
+export interface HealthStateDoc {
+  _id: 'snapshot'
+  savedAt: Date
+  /** Last ≤30 minutes of probe completions per subsystem. */
+  probeHistory: Record<string, HealthHistoryEntryDoc[]>
+  /** 24 × 1-hour buckets per subsystem for the activity heatmap. */
+  heatmap: Record<string, HealthHeatmapRowDoc>
+}
+
+// ---------------------------------------------------------------------------
+// mx_internal_incidents  — system-plane incident history.
+//
+// `_id` is the synthesized id from the in-memory tracker (e.g. "ii-7") so
+// upserts replace cleanly. `expiresAt` is set when an incident resolves;
+// a TTL index drops the doc 24h later.
+// ---------------------------------------------------------------------------
+
+export interface InternalIncidentTimelineEntryDoc {
+  at: Date
+  event: string
+  detail?: string
+}
+
+export interface InternalIncidentDoc {
+  _id: string
+  subsystem: string
+  severity: 'p1' | 'p2' | 'p3'
+  status: 'active' | 'resolved'
+  title: string
+  cause: string
+  startedAt: Date
+  resolvedAt?: Date
+  durationSeconds?: number
+  ack: string | null
+  commits: number
+  timeline: InternalIncidentTimelineEntryDoc[]
+  /** Set on resolve; TTL index drops the doc when reached. */
+  expiresAt?: Date
 }

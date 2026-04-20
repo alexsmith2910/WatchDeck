@@ -198,6 +198,152 @@ function validateDefaults(
       'Set defaults.escalationDelay to a delay in seconds, or 0 to disable',
     )
   }
+
+  validateNotifications(cfg, errors)
+}
+
+const ALLOWED_SEVERITY_FILTERS = ['info+', 'warning+', 'critical'] as const
+const ALLOWED_BYPASS_SEVERITIES = ['info', 'warning', 'critical'] as const
+const TIME_HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+
+function validateNotifications(
+  cfg: WatchDeckConfig,
+  errors: ValidationError[],
+): void {
+  const n = cfg.defaults.notifications
+
+  if (!n || typeof n !== 'object') {
+    push(
+      errors,
+      'defaults.notifications',
+      n,
+      'object',
+      'Restore the defaults.notifications block (see src/config/defaults.ts)',
+    )
+    return
+  }
+
+  if (typeof n.enabled !== 'boolean') {
+    push(errors, 'defaults.notifications.enabled', n.enabled, 'boolean', 'Set to true or false')
+  }
+
+  if (!ALLOWED_SEVERITY_FILTERS.includes(n.severityFloor)) {
+    push(
+      errors,
+      'defaults.notifications.severityFloor',
+      n.severityFloor,
+      `one of ["${ALLOWED_SEVERITY_FILTERS.join('", "')}"]`,
+      'Set severityFloor to "info+", "warning+", or "critical"',
+    )
+  }
+
+  for (const key of ['sendOpen', 'sendResolved', 'sendEscalation', 'alertDuringMaintenance', 'retryOnFailure'] as const) {
+    if (typeof n[key] !== 'boolean') {
+      push(errors, `defaults.notifications.${key}`, n[key], 'boolean', `Set ${key} to true or false`)
+    }
+  }
+
+  if (
+    !Array.isArray(n.retryBackoffMs) ||
+    n.retryBackoffMs.length === 0 ||
+    !n.retryBackoffMs.every((v) => isInteger(v) && v >= 0 && v <= 600_000)
+  ) {
+    push(
+      errors,
+      'defaults.notifications.retryBackoffMs',
+      n.retryBackoffMs,
+      'non-empty array of integers (0–600000 ms each)',
+      'Provide a retry backoff schedule, e.g. [2000, 8000, 30000]',
+    )
+  }
+
+  const c = n.coalescing
+  if (!c || typeof c !== 'object') {
+    push(
+      errors,
+      'defaults.notifications.coalescing',
+      c,
+      'object',
+      'Restore the defaults.notifications.coalescing block',
+    )
+  } else {
+    if (typeof c.enabled !== 'boolean') {
+      push(errors, 'defaults.notifications.coalescing.enabled', c.enabled, 'boolean', 'Set to true or false')
+    }
+    if (!isInteger(c.windowSeconds) || c.windowSeconds < 5 || c.windowSeconds > 600) {
+      push(
+        errors,
+        'defaults.notifications.coalescing.windowSeconds',
+        c.windowSeconds,
+        'integer between 5 and 600 seconds',
+        'Set coalescing.windowSeconds within the allowed range',
+      )
+    }
+    if (!isInteger(c.minBurstCount) || c.minBurstCount < 2 || c.minBurstCount > 100) {
+      push(
+        errors,
+        'defaults.notifications.coalescing.minBurstCount',
+        c.minBurstCount,
+        'integer between 2 and 100',
+        'Set coalescing.minBurstCount within the allowed range',
+      )
+    }
+    if (!ALLOWED_BYPASS_SEVERITIES.includes(c.bypassSeverity)) {
+      push(
+        errors,
+        'defaults.notifications.coalescing.bypassSeverity',
+        c.bypassSeverity,
+        `one of ["${ALLOWED_BYPASS_SEVERITIES.join('", "')}"]`,
+        'Set bypassSeverity to "info", "warning", or "critical"',
+      )
+    }
+  }
+
+  if (n.quietHours !== null) {
+    if (
+      !n.quietHours ||
+      typeof n.quietHours !== 'object' ||
+      typeof n.quietHours.start !== 'string' ||
+      !TIME_HHMM_RE.test(n.quietHours.start) ||
+      typeof n.quietHours.end !== 'string' ||
+      !TIME_HHMM_RE.test(n.quietHours.end) ||
+      typeof n.quietHours.tz !== 'string' ||
+      n.quietHours.tz.trim() === ''
+    ) {
+      push(
+        errors,
+        'defaults.notifications.quietHours',
+        n.quietHours,
+        '{ start: "HH:MM", end: "HH:MM", tz: IANA zone } or null',
+        'Provide a valid quiet hours object, or set to null to disable',
+      )
+    }
+  }
+
+  const cd = n.channelDefaults
+  if (!cd || typeof cd !== 'object') {
+    push(
+      errors,
+      'defaults.notifications.channelDefaults',
+      cd,
+      'object',
+      'Restore the defaults.notifications.channelDefaults block',
+    )
+  } else {
+    for (const channel of ['discord', 'slack', 'email', 'webhook'] as const) {
+      const entry = cd[channel]
+      const rl = entry?.rateLimitPerMinute
+      if (!isInteger(rl) || rl < 1 || rl > 1000) {
+        push(
+          errors,
+          `defaults.notifications.channelDefaults.${channel}.rateLimitPerMinute`,
+          rl,
+          'integer between 1 and 1000',
+          `Set channelDefaults.${channel}.rateLimitPerMinute within the allowed range`,
+        )
+      }
+    }
+  }
 }
 
 function validateRetention(

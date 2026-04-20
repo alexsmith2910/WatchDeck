@@ -120,6 +120,80 @@ export const defaults = {
      * Range: 0–86400 seconds.
      */
     escalationDelay: 1_800,
+
+    // -------------------------------------------------------------------------
+    // Notifications — global dispatcher policy.
+    //
+    // These act as the floor for every channel; per-channel and per-endpoint
+    // settings narrow them but cannot relax them. Coalescing is the burst
+    // strategy (not digest) — see notifications-plan.md §1.5.
+    // -------------------------------------------------------------------------
+    notifications: {
+      /** Master switch — false disables the dispatcher entirely. */
+      enabled: true,
+
+      /**
+       * Severity floor for dispatch. Alerts below this threshold are
+       * suppressed with reason 'severity_filter'.
+       * Allowed: 'info+' | 'warning+' | 'critical'.
+       */
+      severityFloor: 'warning+' as 'info+' | 'warning+' | 'critical',
+
+      /** Whether incident-opened dispatches fire by default. */
+      sendOpen: true,
+      /** Whether incident-resolved dispatches fire by default. */
+      sendResolved: true,
+      /** Whether the escalation dispatch fires by default. */
+      sendEscalation: true,
+      /** If false, dispatches are suppressed during an endpoint's maintenance window. */
+      alertDuringMaintenance: false,
+
+      /**
+       * Retry failed provider calls per the backoff schedule below.
+       * Per-channel `retryOnFailure` flag narrows this on a case-by-case basis.
+       */
+      retryOnFailure: true,
+
+      /**
+       * Backoff schedule in milliseconds. Length = maximum retry attempts.
+       * Provider `429 Retry-After` headers take precedence over this schedule.
+       */
+      retryBackoffMs: [2000, 8000, 30000] as number[],
+
+      /**
+       * Burst coalescing — not digest. Immediate delivery by default; only
+       * additional alerts arriving within `windowSeconds` after the first are
+       * held and flushed as one consolidated follow-up. Critical severity
+       * bypasses the buffer.
+       */
+      coalescing: {
+        /** Master toggle for burst coalescing. */
+        enabled: true,
+        /** Rolling window after the first alert in which follow-ups are buffered. */
+        windowSeconds: 60,
+        /** Minimum number of alerts required to emit a coalesced summary. */
+        minBurstCount: 3,
+        /** Severity that bypasses the coalescing buffer (always immediate). */
+        bypassSeverity: 'critical' as 'info' | 'warning' | 'critical',
+      },
+
+      /**
+       * Global quiet hours. Set to null to disable; channels can still set
+       * their own quiet hours on top.
+       */
+      quietHours: null as { start: string; end: string; tz: string } | null,
+
+      /**
+       * Per-channel-type rate limit defaults (can be overridden per-channel).
+       * Protects provider APIs — Discord webhooks rate-limit at 5/2s by default.
+       */
+      channelDefaults: {
+        discord: { rateLimitPerMinute: 30 },
+        slack: { rateLimitPerMinute: 30 },
+        email: { rateLimitPerMinute: 10 },
+        webhook: { rateLimitPerMinute: 60 },
+      },
+    },
   },
 
   // ---------------------------------------------------------------------------

@@ -29,6 +29,29 @@ export interface WatchDeckConfig {
     alertCooldown: number;
     recoveryAlert: boolean;
     escalationDelay: number;
+    notifications: {
+      enabled: boolean;
+      severityFloor: 'info+' | 'warning+' | 'critical';
+      sendOpen: boolean;
+      sendResolved: boolean;
+      sendEscalation: boolean;
+      alertDuringMaintenance: boolean;
+      retryOnFailure: boolean;
+      retryBackoffMs: number[];
+      coalescing: {
+        enabled: boolean;
+        windowSeconds: number;
+        minBurstCount: number;
+        bypassSeverity: 'info' | 'warning' | 'critical';
+      };
+      quietHours: { start: string; end: string; tz: string } | null;
+      channelDefaults: {
+        discord: { rateLimitPerMinute: number };
+        slack: { rateLimitPerMinute: number };
+        email: { rateLimitPerMinute: number };
+        webhook: { rateLimitPerMinute: number };
+      };
+    };
   };
 
   retention: {

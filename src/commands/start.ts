@@ -17,8 +17,12 @@ import { CheckScheduler } from '../core/scheduler.js'
 import { buildServer } from '../api/server.js'
 import { AggregationScheduler } from '../aggregation/scheduler.js'
 import { IncidentManager } from '../alerts/incidentManager.js'
-import { systemMetrics } from '../core/systemMetrics.js'
-import { getClientCount } from '../api/sse.js'
+import { registerNotifications } from '../notifications/index.js'
+import { probeRegistry } from '../core/health/probeRegistry.js'
+import { registerCoreProbes } from '../core/health/register.js'
+import { internalIncidents } from '../alerts/internalIncidents.js'
+import { activity } from '../core/health/activity.js'
+import { healthPersistence } from '../core/health/persistence.js'
 import { formatWarning } from '../utils/errors.js'
 
 const require = createRequire(import.meta.url)
@@ -64,6 +68,38 @@ function spinner(text: string, silent: boolean): Ora {
   return ora({ text, indent: 2, isSilent: silent })
 }
 
+/**
+ * Register process-level guards so one escaping error in a module can't
+ * tear the whole monitor down. Idempotent — safe to call more than once
+ * if the start command is re-entered (e.g. during tests).
+ */
+let safetyNetsInstalled = false
+function installProcessSafetyNets(): void {
+  if (safetyNetsInstalled) return
+  safetyNetsInstalled = true
+
+  process.on('unhandledRejection', (reason) => {
+    const err = reason instanceof Error ? reason : new Error(String(reason))
+    console.error(`  ${chalk.red('✗')}  unhandledRejection: ${err.message}`)
+    if (err.stack) console.error(chalk.dim(err.stack))
+    console.error(
+      chalk.dim(
+        '       The originating module should be handling this itself — please report it. Continuing.',
+      ),
+    )
+  })
+
+  process.on('uncaughtException', (err) => {
+    console.error(`  ${chalk.red('✗')}  uncaughtException: ${err.message}`)
+    if (err.stack) console.error(chalk.dim(err.stack))
+    console.error(
+      chalk.dim(
+        '       The originating module should be handling this itself — please report it. Continuing.',
+      ),
+    )
+  })
+}
+
 /** Extract just the host from a MongoDB URI without exposing credentials. */
 function hostFromUri(uri: string): string {
   try {
@@ -87,6 +123,14 @@ interface StartOptions {
 
 export async function runStart(options: StartOptions): Promise<void> {
   const { silent, verbose } = options
+
+  // Last-line-of-defence handlers. Individual modules already try/catch
+  // their own work (the event bus wraps subscribers; the dispatcher
+  // catches around retries and the coalescing flush) but if anything
+  // ever slips through we want to log it and *keep the monitor alive*
+  // rather than drop off and stop checking endpoints. A dead monitor
+  // is worse than a noisy one.
+  installProcessSafetyNets()
 
   if (!silent) header()
 
@@ -231,7 +275,7 @@ export async function runStart(options: StartOptions): Promise<void> {
     await adapter.migrate()
     migSpinner.succeed(chalk.bold('Migrations complete'))
     if (!silent && verbose) {
-      subItem('9 collections ensured')
+      subItem('11 collections ensured')
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -337,6 +381,36 @@ export async function runStart(options: StartOptions): Promise<void> {
     // Non-fatal — checks still run, just no automatic incident creation.
   }
 
+  // ── Notifications ────────────────────────────────────────────────────────
+
+  if (!silent) section('Notifications')
+
+  const notifications = registerNotifications({ adapter, config, port })
+  const notifSpinner = spinner('Starting notification dispatcher...', silent).start()
+
+  try {
+    await notifications.start()
+    const chCount = notifications.channels.size()
+    notifSpinner.succeed(
+      chCount > 0
+        ? chalk.bold('Dispatcher active') +
+            chalk.dim(`  ${chCount} channel${chCount === 1 ? '' : 's'}`)
+        : chalk.bold('Dispatcher active') + chalk.dim('  no channels configured'),
+    )
+    if (!silent && verbose) {
+      subItem(
+        `coalescing  ${config.defaults.notifications.coalescing.enabled ? 'on' : 'off'}  ·  window ${config.defaults.notifications.coalescing.windowSeconds}s  ·  burst ≥${config.defaults.notifications.coalescing.minBurstCount}`,
+      )
+      subItem(
+        `retry  ${config.defaults.notifications.retryOnFailure ? 'enabled' : 'disabled'}  ·  backoff [${config.defaults.notifications.retryBackoffMs.join(', ')}] ms`,
+      )
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    notifSpinner.warn(chalk.bold('Notification dispatcher failed') + chalk.dim(`  ${msg}`))
+    // Non-fatal — everything else can run without the dispatcher.
+  }
+
   // ── Aggregation ──────────────────────────────────────────────────────────
 
   if (!silent) section('Aggregation')
@@ -366,23 +440,30 @@ export async function runStart(options: StartOptions): Promise<void> {
   const serverSpinner = spinner('Starting API server...', silent).start()
   let server
 
-  // Start the system metrics collector — event-bus subscribers + 1s sampling tick.
-  systemMetrics.init({
-    adapter,
-    scheduler,
-    diskBufferPath,
-    memoryBufferSize: () => memBuffer.size,
-    memoryBufferCapacity: config.buffer.memoryCapacity,
-    bufferMode: () => pipeline.getMode(),
-    sseClientCount: getClientCount,
-  })
-
   try {
-    server = await buildServer({ adapter, scheduler, config, logRequests: verbose })
+    server = await buildServer({ adapter, scheduler, config, notifications, logRequests: verbose })
     await server.listen({ port, host: '0.0.0.0' })
     serverSpinner.succeed(
       chalk.bold('API server listening') + chalk.dim(`  http://localhost:${port}${config.apiBasePath}`),
     )
+
+    // Wire and start the probe-based health system. Must happen after the
+    // server is listening so the `checkers` loopback probe has a target.
+    activity.start()
+    internalIncidents.start()
+    registerCoreProbes({
+      adapter,
+      scheduler,
+      pipeline,
+      memBuffer,
+      diskBuffer,
+      aggregation,
+      config,
+      port,
+    })
+    await healthPersistence.loadAndHydrate(adapter)
+    probeRegistry.start()
+    healthPersistence.start()
     if (!silent && verbose) {
       subItem(`auth      ${config.authMiddleware ? 'enabled' : 'disabled (no auth)'}`)
       subItem(`cors      origin ${config.cors.origin}`)
@@ -397,11 +478,17 @@ export async function runStart(options: StartOptions): Promise<void> {
 
   // Graceful shutdown
   function shutdown(): void {
-    systemMetrics.stop()
+    probeRegistry.stop()
+    healthPersistence.stop()
+    internalIncidents.stop()
+    activity.stop()
     scheduler.stop()
+    notifications.stop()
     aggregation.stop()
-    void server!.close().finally(() => {
-      void adapter.disconnect().finally(() => process.exit(0))
+    void healthPersistence.flush().finally(() => {
+      void server!.close().finally(() => {
+        void adapter.disconnect().finally(() => process.exit(0))
+      })
     })
   }
   process.once('SIGINT', shutdown)

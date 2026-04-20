@@ -1,7 +1,13 @@
 import { MongoClient, ObjectId, type Db } from 'mongodb'
 import { eventBus } from '../core/eventBus.js'
 import type { WatchDeckConfig } from '../config/types.js'
-import { StorageAdapter, type HealthCheckResult } from './adapter.js'
+import {
+  StorageAdapter,
+  type HealthCheckResult,
+  type NotificationLogFilter,
+  type NotificationStats,
+  type NotificationStatsWindow,
+} from './adapter.js'
 import { runMigrations } from './migrations.js'
 import type {
   CheckDoc,
@@ -10,11 +16,16 @@ import type {
   DbPage,
   DbPaginationOpts,
   EndpointDoc,
+  HealthStateDoc,
   HourlySummaryDoc,
   IncidentDoc,
+  InternalIncidentDoc,
   MaintenanceWindow,
   NotificationChannelDoc,
+  NotificationKind,
   NotificationLogDoc,
+  NotificationMuteDoc,
+  NotificationPreferencesDoc,
   SettingsDoc,
   SystemEventDoc,
 } from './types.js'
@@ -40,6 +51,8 @@ export class MongoDBAdapter extends StorageAdapter {
   /** Set before an intentional close to prevent the topology handler from starting a reconnect loop. */
   private _intentionalDisconnect = false
   private disconnectedAt: number | null = null
+  /** Monotonic attempt counter for the active reconnect loop. Null when connected. */
+  private reconnectAttemptCount: number | null = null
 
   constructor(
     private readonly uri: string,
@@ -55,6 +68,15 @@ export class MongoDBAdapter extends StorageAdapter {
 
   isConnected(): boolean {
     return this._connected
+  }
+
+  currentOutageDuration(): number {
+    if (this._connected || this.disconnectedAt === null) return 0
+    return Math.max(0, Math.floor((Date.now() - this.disconnectedAt) / 1000))
+  }
+
+  reconnectAttempt(): number | null {
+    return this.reconnectAttemptCount
   }
 
   /**
@@ -115,6 +137,7 @@ export class MongoDBAdapter extends StorageAdapter {
       this.db,
       this.dbPrefix,
       this.config.retention.detailedDays,
+      this.config.retention.notificationLogDays,
     )
   }
 
@@ -150,6 +173,7 @@ export class MongoDBAdapter extends StorageAdapter {
     this.db = db
     this._connected = true
     this.disconnectedAt = null
+    this.reconnectAttemptCount = null
 
     this.registerTopologyHandler(client)
 
@@ -196,6 +220,7 @@ export class MongoDBAdapter extends StorageAdapter {
 
     while (!this._intentionalDisconnect && (unlimited || attempt < dbReconnectAttempts)) {
       attempt++
+      this.reconnectAttemptCount = attempt
 
       eventBus.emit('db:reconnecting', {
         timestamp: new Date(),
@@ -236,6 +261,8 @@ export class MongoDBAdapter extends StorageAdapter {
         totalOutageDuration: outageDurationSeconds,
       })
     }
+    // Loop exited — clear the attempt counter either way.
+    this.reconnectAttemptCount = null
   }
 
   /**
@@ -671,8 +698,283 @@ export class MongoDBAdapter extends StorageAdapter {
     return r.deletedCount > 0
   }
 
-  async listNotificationLog(opts: DbPaginationOpts): Promise<DbPage<NotificationLogDoc>> {
-    return this.paginate<NotificationLogDoc>('notification_log', {}, opts, { _id: -1 })
+  async getNotificationChannelById(id: string): Promise<NotificationChannelDoc | null> {
+    if (!this.db) return null
+    try {
+      return await this.db
+        .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+        .findOne({ _id: new ObjectId(id) })
+    } catch {
+      return null
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Notification log API
+  // ---------------------------------------------------------------------------
+
+  async listNotificationLog(
+    opts: DbPaginationOpts & NotificationLogFilter,
+  ): Promise<DbPage<NotificationLogDoc>> {
+    const filter = this.buildNotificationLogFilter(opts)
+    return this.paginate<NotificationLogDoc>('notification_log', filter, opts, { _id: -1 })
+  }
+
+  async listNotificationLogForEndpoint(
+    endpointId: string,
+    opts: DbPaginationOpts & NotificationLogFilter,
+  ): Promise<DbPage<NotificationLogDoc>> {
+    return this.listNotificationLog({ ...opts, endpointId })
+  }
+
+  async listNotificationLogForChannel(
+    channelId: string,
+    opts: DbPaginationOpts & NotificationLogFilter,
+  ): Promise<DbPage<NotificationLogDoc>> {
+    return this.listNotificationLog({ ...opts, channelId })
+  }
+
+  async listNotificationLogForIncident(incidentId: string): Promise<NotificationLogDoc[]> {
+    if (!this.db) return []
+    return this.db
+      .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+      .find({ incidentId: new ObjectId(incidentId) })
+      .sort({ sentAt: -1 })
+      .limit(500)
+      .toArray()
+  }
+
+  async findCoalescedDeliveriesFor(incidentId: string): Promise<NotificationLogDoc[]> {
+    if (!this.db) return []
+    return this.db
+      .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+      .find({ coalescedIncidentIds: new ObjectId(incidentId) })
+      .sort({ sentAt: -1 })
+      .limit(100)
+      .toArray()
+  }
+
+  async getNotificationLogById(id: string): Promise<NotificationLogDoc | null> {
+    if (!this.db) return null
+    try {
+      return await this.db
+        .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+        .findOne({ _id: new ObjectId(id) })
+    } catch {
+      return null
+    }
+  }
+
+  async writeNotificationLog(
+    row: Omit<NotificationLogDoc, '_id' | 'createdAt'>,
+  ): Promise<NotificationLogDoc> {
+    const db = this.getDb()
+    const doc: NotificationLogDoc = { ...row, _id: new ObjectId(), createdAt: new Date() }
+    await db.collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`).insertOne(doc)
+    return doc
+  }
+
+  async countNotificationStats(window: NotificationStatsWindow): Promise<NotificationStats> {
+    const empty: NotificationStats = {
+      total: 0,
+      sent: 0,
+      failed: 0,
+      suppressed: 0,
+      pending: 0,
+      byChannel: [],
+      bySuppressedReason: {},
+      byKind: {
+        incident_opened: 0,
+        incident_resolved: 0,
+        incident_escalated: 0,
+        channel_test: 0,
+        custom: 0,
+      },
+      lastDispatchAt: null,
+      lastFailureAt: null,
+    }
+    if (!this.db) return empty
+
+    const coll = this.db.collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+    const match = { sentAt: { $gte: window.from, $lte: window.to } }
+
+    const [statusAgg, channelAgg, reasonAgg, kindAgg, lastSent, lastFailed] = await Promise.all([
+      coll.aggregate<{ _id: NotificationLogDoc['deliveryStatus']; count: number }>([
+        { $match: match },
+        { $group: { _id: '$deliveryStatus', count: { $sum: 1 } } },
+      ]).toArray(),
+      coll.aggregate<{ _id: { channelId: ObjectId; deliveryStatus: NotificationLogDoc['deliveryStatus'] }; count: number }>([
+        { $match: match },
+        { $group: { _id: { channelId: '$channelId', deliveryStatus: '$deliveryStatus' }, count: { $sum: 1 } } },
+      ]).toArray(),
+      coll.aggregate<{ _id: string; count: number }>([
+        { $match: { ...match, deliveryStatus: 'suppressed', suppressedReason: { $ne: null } } },
+        { $group: { _id: '$suppressedReason', count: { $sum: 1 } } },
+      ]).toArray(),
+      coll.aggregate<{ _id: NotificationKind; count: number }>([
+        { $match: match },
+        { $group: { _id: '$kind', count: { $sum: 1 } } },
+      ]).toArray(),
+      coll.findOne(
+        { ...match, deliveryStatus: 'sent' },
+        { sort: { sentAt: -1 }, projection: { sentAt: 1 } },
+      ),
+      coll.findOne(
+        { ...match, deliveryStatus: 'failed' },
+        { sort: { sentAt: -1 }, projection: { sentAt: 1 } },
+      ),
+    ])
+
+    const stats = { ...empty, byKind: { ...empty.byKind } }
+
+    for (const row of statusAgg) {
+      if (row._id === 'sent') stats.sent = row.count
+      else if (row._id === 'failed') stats.failed = row.count
+      else if (row._id === 'suppressed') stats.suppressed = row.count
+      else if (row._id === 'pending') stats.pending = row.count
+    }
+    stats.total = stats.sent + stats.failed + stats.suppressed + stats.pending
+
+    const byChannelMap = new Map<string, { sent: number; failed: number; suppressed: number }>()
+    for (const row of channelAgg) {
+      const key = row._id.channelId.toHexString()
+      const entry = byChannelMap.get(key) ?? { sent: 0, failed: 0, suppressed: 0 }
+      if (row._id.deliveryStatus === 'sent') entry.sent += row.count
+      else if (row._id.deliveryStatus === 'failed') entry.failed += row.count
+      else if (row._id.deliveryStatus === 'suppressed') entry.suppressed += row.count
+      byChannelMap.set(key, entry)
+    }
+    stats.byChannel = Array.from(byChannelMap.entries()).map(([channelId, counts]) => ({
+      channelId,
+      ...counts,
+    }))
+
+    for (const row of reasonAgg) {
+      if (row._id) stats.bySuppressedReason[row._id] = row.count
+    }
+    for (const row of kindAgg) {
+      if (row._id && row._id in stats.byKind) {
+        stats.byKind[row._id] = row.count
+      }
+    }
+
+    stats.lastDispatchAt = lastSent?.sentAt ?? null
+    stats.lastFailureAt = lastFailed?.sentAt ?? null
+    return stats
+  }
+
+  private buildNotificationLogFilter(f: NotificationLogFilter): Record<string, unknown> {
+    const filter: Record<string, unknown> = {}
+    if (f.endpointId) filter.endpointId = new ObjectId(f.endpointId)
+    if (f.channelId) filter.channelId = new ObjectId(f.channelId)
+    if (f.incidentId) filter.incidentId = new ObjectId(f.incidentId)
+    if (f.severity) filter.severity = f.severity
+    if (f.kind) filter.kind = f.kind
+    if (f.status) filter.deliveryStatus = f.status
+    if (f.from || f.to) {
+      const ts: Record<string, Date> = {}
+      if (f.from) ts.$gte = f.from
+      if (f.to) ts.$lte = f.to
+      filter.sentAt = ts
+    }
+    if (f.search && f.search.trim() !== '') {
+      // Escape regex special chars — messageSummary is user-controlled via template output.
+      const escaped = f.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      filter.messageSummary = { $regex: escaped, $options: 'i' }
+    }
+    return filter
+  }
+
+  // ---------------------------------------------------------------------------
+  // Notification mutes
+  // ---------------------------------------------------------------------------
+
+  async recordMute(
+    data: Omit<NotificationMuteDoc, '_id' | 'mutedAt'>,
+  ): Promise<NotificationMuteDoc> {
+    const db = this.getDb()
+    const doc: NotificationMuteDoc = { ...data, _id: new ObjectId(), mutedAt: new Date() }
+    await db.collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`).insertOne(doc)
+    return doc
+  }
+
+  async listActiveMutes(): Promise<NotificationMuteDoc[]> {
+    if (!this.db) return []
+    // TTL drops expired docs, but the index is checked every ~60s so filter
+    // defensively too.
+    return this.db
+      .collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
+      .find({ expiresAt: { $gt: new Date() } })
+      .sort({ expiresAt: 1 })
+      .toArray()
+  }
+
+  async getMuteById(id: string): Promise<NotificationMuteDoc | null> {
+    if (!this.db) return null
+    try {
+      return await this.db
+        .collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
+        .findOne({ _id: new ObjectId(id) })
+    } catch {
+      return null
+    }
+  }
+
+  async deleteMute(id: string): Promise<boolean> {
+    const db = this.getDb()
+    try {
+      const r = await db
+        .collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
+        .deleteOne({ _id: new ObjectId(id) })
+      return r.deletedCount > 0
+    } catch {
+      return false
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Notification preferences (singleton)
+  // ---------------------------------------------------------------------------
+
+  async getNotificationPreferences(): Promise<NotificationPreferencesDoc> {
+    const db = this.getDb()
+    const coll = db.collection<NotificationPreferencesDoc>(
+      `${this.dbPrefix}notification_preferences`,
+    )
+    const existing = await coll.findOne({ _id: 'global' })
+    if (existing) return existing
+    const seed: NotificationPreferencesDoc = {
+      _id: 'global',
+      defaultSeverityFilter: 'warning+',
+      defaultEventFilters: { sendOpen: true, sendResolved: true, sendEscalation: true },
+      updatedAt: new Date(),
+    }
+    await coll.updateOne({ _id: 'global' }, { $setOnInsert: seed }, { upsert: true })
+    return seed
+  }
+
+  async updateNotificationPreferences(
+    changes: Partial<Omit<NotificationPreferencesDoc, '_id'>>,
+  ): Promise<NotificationPreferencesDoc> {
+    const db = this.getDb()
+    const coll = db.collection<NotificationPreferencesDoc>(
+      `${this.dbPrefix}notification_preferences`,
+    )
+    const patch = { ...changes, updatedAt: new Date() }
+    const result = await coll.findOneAndUpdate(
+      { _id: 'global' },
+      { $set: patch },
+      { upsert: true, returnDocument: 'after' },
+    )
+    if (result) return result
+    // Extreme fallback — driver returned null despite upsert.
+    return {
+      _id: 'global',
+      defaultSeverityFilter: 'warning+',
+      defaultEventFilters: { sendOpen: true, sendResolved: true, sendEscalation: true },
+      updatedAt: new Date(),
+      ...changes,
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -831,6 +1133,43 @@ export class MongoDBAdapter extends StorageAdapter {
         { upsert: true, returnDocument: 'after' },
       )
     return result ?? { _id: 'global', ...safe }
+  }
+
+  // ---------------------------------------------------------------------------
+  // System Health persistence
+  // ---------------------------------------------------------------------------
+
+  async saveHealthState(state: Omit<HealthStateDoc, '_id'>): Promise<void> {
+    const db = this.getDb()
+    await db.collection<HealthStateDoc>(`${this.dbPrefix}health_state`).updateOne(
+      { _id: 'snapshot' },
+      { $set: { ...state, _id: 'snapshot' } },
+      { upsert: true },
+    )
+  }
+
+  async loadHealthState(): Promise<HealthStateDoc | null> {
+    if (!this.db) return null
+    return this.db
+      .collection<HealthStateDoc>(`${this.dbPrefix}health_state`)
+      .findOne({ _id: 'snapshot' })
+  }
+
+  async listInternalIncidents(): Promise<InternalIncidentDoc[]> {
+    if (!this.db) return []
+    return this.db
+      .collection<InternalIncidentDoc>(`${this.dbPrefix}internal_incidents`)
+      .find()
+      .sort({ startedAt: -1 })
+      .limit(500)
+      .toArray()
+  }
+
+  async upsertInternalIncident(doc: InternalIncidentDoc): Promise<void> {
+    const db = this.getDb()
+    await db
+      .collection<InternalIncidentDoc>(`${this.dbPrefix}internal_incidents`)
+      .updateOne({ _id: doc._id }, { $set: doc }, { upsert: true })
   }
 
   // ---------------------------------------------------------------------------

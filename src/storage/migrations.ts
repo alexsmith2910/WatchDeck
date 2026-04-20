@@ -17,8 +17,10 @@ interface CollectionDef {
 function buildCollections(
   prefix: string,
   detailedRetentionDays: number,
+  notificationLogRetentionDays: number,
 ): CollectionDef[] {
   const detailedTtlSeconds = detailedRetentionDays * 24 * 60 * 60
+  const notificationLogTtlSeconds = notificationLogRetentionDays * 24 * 60 * 60
 
   return [
     {
@@ -102,6 +104,10 @@ function buildCollections(
           key: { type: 1 },
           options: { name: 'type' },
         },
+        {
+          key: { enabled: 1, type: 1 },
+          options: { name: 'enabled_type' },
+        },
       ],
     },
     {
@@ -112,14 +118,42 @@ function buildCollections(
           options: { name: 'endpointId_sentAt' },
         },
         {
+          key: { channelId: 1, sentAt: -1 },
+          options: { name: 'channelId_sentAt' },
+        },
+        {
           key: { incidentId: 1 },
           options: { name: 'incidentId' },
         },
         {
+          key: { deliveryStatus: 1, sentAt: -1 },
+          options: { name: 'status_sentAt' },
+        },
+        {
+          // TTL index — notification log rows expire after retention.notificationLogDays
           key: { sentAt: 1 },
-          options: { name: 'sentAt' },
+          options: { name: 'sentAt_ttl', expireAfterSeconds: notificationLogTtlSeconds },
         },
       ],
+    },
+    {
+      name: `${prefix}notification_mutes`,
+      indexes: [
+        {
+          key: { scope: 1, targetId: 1 },
+          options: { name: 'scope_targetId' },
+        },
+        {
+          // TTL — mutes drop themselves at expiresAt.
+          key: { expiresAt: 1 },
+          options: { name: 'expiresAt_ttl', expireAfterSeconds: 0 },
+        },
+      ],
+    },
+    {
+      // Single global document (_id: "global"). No custom indexes needed.
+      name: `${prefix}notification_preferences`,
+      indexes: [],
     },
     {
       // Single global document (_id: "global"). No custom indexes needed.
@@ -132,6 +166,26 @@ function buildCollections(
         {
           key: { type: 1, startedAt: -1 },
           options: { name: 'type_startedAt' },
+        },
+      ],
+    },
+    {
+      // Single global document (_id: "snapshot"). No custom indexes needed.
+      name: `${prefix}health_state`,
+      indexes: [],
+    },
+    {
+      name: `${prefix}internal_incidents`,
+      indexes: [
+        {
+          key: { status: 1, startedAt: -1 },
+          options: { name: 'status_startedAt' },
+        },
+        {
+          // TTL — drop resolved incidents after the date stored in expiresAt.
+          // Active incidents have no expiresAt and are never auto-removed.
+          key: { expiresAt: 1 },
+          options: { name: 'expiresAt_ttl', expireAfterSeconds: 0 },
         },
       ],
     },
@@ -152,17 +206,47 @@ async function ensureCollection(db: Db, name: string): Promise<void> {
   }
 }
 
+function keySignature(key: unknown): string {
+  // listIndexes returns `key` as a plain object; IndexSpecification inputs can
+  // also be arrays of tuples. Normalize to a stable JSON string.
+  if (Array.isArray(key)) return JSON.stringify(key)
+  if (key && typeof key === 'object') {
+    return JSON.stringify(Object.entries(key as Record<string, unknown>))
+  }
+  return JSON.stringify(key)
+}
+
 async function ensureIndexes(db: Db, collectionName: string, indexes: IndexDef[]): Promise<void> {
   if (indexes.length === 0) return
 
   const collection = db.collection(collectionName)
   const existingIndexes = await collection.listIndexes().toArray()
-  const existingNames = new Set(existingIndexes.map((i) => i.name as string))
+  const existingByName = new Map(existingIndexes.map((i) => [i.name as string, i]))
+  const existingByKey = new Map(
+    existingIndexes
+      .filter((i) => (i.name as string) !== '_id_')
+      .map((i) => [keySignature(i.key), i]),
+  )
 
   for (const { key, options } of indexes) {
-    if (!existingNames.has(options.name)) {
-      await collection.createIndex(key, options)
+    const desiredSig = keySignature(key)
+    const byName = existingByName.get(options.name)
+    const byKey = existingByKey.get(desiredSig)
+
+    // An index with the same name already exists → trust it and move on.
+    // (If its options drifted, that's a manual fix; we never silently
+    // drop an index the caller pinned by name.)
+    if (byName) continue
+
+    // An index on the same key exists under a different name. This happens
+    // when an older migration created the index without TTL/partial options
+    // and we've since tightened the spec. Drop it so the create below can
+    // replace it with the intended name and options.
+    if (byKey) {
+      await collection.dropIndex(byKey.name as string)
     }
+
+    await collection.createIndex(key, options)
   }
 }
 
@@ -173,21 +257,27 @@ async function ensureIndexes(db: Db, collectionName: string, indexes: IndexDef[]
 /**
  * Idempotent migration runner.
  *
- * For each of the 9 collections:
+ * For each configured collection:
  *   - Creates the collection if it does not exist
  *   - Creates any missing indexes (identified by name)
  *   - Never drops or alters existing collections or data
  *
- * @param db                  Connected MongoDB Db instance
- * @param prefix              Collection name prefix (e.g. "mx_")
- * @param detailedRetentionDays  From config.retention.detailedDays — sets TTL on mx_checks
+ * @param db                           Connected MongoDB Db instance
+ * @param prefix                       Collection name prefix (e.g. "mx_")
+ * @param detailedRetentionDays        From config.retention.detailedDays — sets TTL on mx_checks
+ * @param notificationLogRetentionDays From config.retention.notificationLogDays — sets TTL on mx_notification_log
  */
 export async function runMigrations(
   db: Db,
   prefix: string,
   detailedRetentionDays: number,
+  notificationLogRetentionDays: number,
 ): Promise<void> {
-  const collections = buildCollections(prefix, detailedRetentionDays)
+  const collections = buildCollections(
+    prefix,
+    detailedRetentionDays,
+    notificationLogRetentionDays,
+  )
 
   for (const col of collections) {
     await ensureCollection(db, col.name)

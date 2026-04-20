@@ -115,17 +115,19 @@ export function checksRoutes(ctx: AppContext) {
 
       const now = new Date()
       const todayStart = truncateToDay(now)
+      const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000)
       const currentHourStart = truncateToHour(now)
 
-      // Fetch daily summaries, today's hourly summaries, and current-hour checks in parallel
-      const [dailies, todayHourlies, currentHourChecks] = await Promise.all([
+      // Fetch daily summaries, the last 48 hourly summaries (covers both
+      // yesterday + today comfortably), and current-hour checks in parallel.
+      const [dailies, recentHourlies, currentHourChecks] = await Promise.all([
         ctx.adapter.listDailySummaries(id, { limit }),
-        ctx.adapter.listHourlySummaries(id, { limit: 24 }),
+        ctx.adapter.listHourlySummaries(id, { limit: 48 }),
         ctx.adapter.getChecksInHour(id, currentHourStart, now),
       ])
 
       // Filter hourly summaries to only today's completed hours
-      const todayCompletedHourlies = todayHourlies.filter(
+      const todayCompletedHourlies = recentHourlies.filter(
         (h) => h.hour.getTime() >= todayStart.getTime() && h.hour.getTime() < currentHourStart.getTime(),
       )
 
@@ -155,6 +157,30 @@ export function checksRoutes(ctx: AppContext) {
             _id: new ObjectId(),
             createdAt: now,
           } as typeof dailies[0])
+        }
+      }
+
+      // Fallback for the 00:00–03:00 UTC window: the daily rollup runs at
+      // 03:00 UTC for the prior UTC day, so yesterday can be "complete but
+      // not yet stored". Synthesise it from yesterday's hourly summaries.
+      const hasYesterday = dailies.some(
+        (d) => d.date.getTime() === yesterdayStart.getTime(),
+      )
+      if (!hasYesterday) {
+        const yesterdayHourlies = recentHourlies.filter(
+          (h) => h.hour.getTime() >= yesterdayStart.getTime() && h.hour.getTime() < todayStart.getTime(),
+        )
+        if (yesterdayHourlies.length > 0) {
+          const partialDay = buildDailySummary(id, yesterdayStart, yesterdayHourlies)
+          const synthEntry = {
+            ...partialDay,
+            _id: new ObjectId(),
+            createdAt: now,
+          } as typeof dailies[0]
+          // Insert in date-desc order: after any entries newer than yesterday.
+          const insertAt = dailies.findIndex((d) => d.date.getTime() < yesterdayStart.getTime())
+          if (insertAt === -1) dailies.push(synthEntry)
+          else dailies.splice(insertAt, 0, synthEntry)
         }
       }
 

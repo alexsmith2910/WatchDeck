@@ -224,6 +224,16 @@ export function endpointsRoutes(ctx: AppContext) {
       // Strip immutable fields
       const { _id: _d, createdAt: _c, type: _t, ...changes } = body
 
+      // Coerce ID-typed fields the API receives as strings back into
+      // ObjectIds. Mongo will happily store strings here, but code that
+      // reads them (e.g. the notification dispatcher's fan-out) assumes
+      // ObjectId instances — mixing shapes causes runtime crashes.
+      if (Array.isArray(changes.notificationChannelIds)) {
+        changes.notificationChannelIds = (changes.notificationChannelIds as unknown[])
+          .filter((v): v is string => typeof v === 'string' && ObjectId.isValid(v))
+          .map((v) => new ObjectId(v))
+      }
+
       const updated = await ctx.adapter.updateEndpoint(id, changes as Partial<EndpointDoc>)
       if (!updated) {
         return reply.code(404).send(formatError('NOT_FOUND', `Endpoint ${id} not found`))
