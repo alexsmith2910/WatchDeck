@@ -1,10 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 @import "tailwindcss";
 @import "@heroui/styles";
 
 @theme inline {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
 
   /* WatchDeck semantic colors */
   --color-wd-primary: var(--wd-primary);
@@ -18,52 +19,159 @@
   --color-wd-border: var(--wd-border);
 }
 
+/* ── Typography base ─────────────────────────────────────────────────────
+   Inter is the default for prose. JetBrains Mono is reserved for data:
+   numbers, IDs, URLs, timestamps, durations, status codes, code chips.
+   Tabular-nums is baked into .font-mono so digits align in tables + timers
+   without callers needing to remember it. */
+
+html, body {
+  font-family: var(--font-sans);
+}
+
+code, kbd, pre, samp {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Force high-quality SVG rasterization. Browsers default to `auto`, which in
+   some paths falls back to `optimizeSpeed` and softens small icons. Explicit
+   `geometricPrecision` guarantees anti-aliased curves across all SVG output
+   (Iconify icons, Recharts paths, inline sparklines). */
+svg {
+  shape-rendering: geometricPrecision;
+}
+
+/* Specialized typography utilities (spec §"Utility classes"). Use these when
+   the Tailwind font-mono/font-sans defaults aren't enough — they bundle size,
+   weight, and tracking for two recurring patterns. */
+
+.wd-code-chip {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface-secondary);
+  color: var(--foreground);
+}
+
+.wd-micro-tag {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wd-muted);
+}
+
 /* ── Light theme ─────────────────────────────────────────────────────────── */
+/* Softened, pastel-leaning palette. Warm off-white bg with slate foregrounds.
+   Semantic colors sit around 70% L so state changes are readable without
+   being aggressive on the eyes. */
 
 :root,
 [data-theme="light"] {
-  --wd-primary: #6366f1;
+  /* Semantic brand colors (soft pastel) */
+  --wd-primary:            #7c83f5;   /* soft indigo */
+  --wd-primary-hover:      #6a72ef;
   --wd-primary-foreground: #ffffff;
-  --wd-success: #22c55e;
-  --wd-warning: #f59e0b;
-  --wd-danger: #ef4444;
-  --wd-muted: #64748b;
-  --wd-surface: #ffffff;
-  --wd-surface-hover: #f1f5f9;
-  --wd-border: #e2e8f0;
+  --wd-primary-soft:       #eef0fe;
+  --wd-primary-ring:       #c5cafa;
 
-  --background: oklch(0.98 0 0);
-  --foreground: oklch(0.15 0.005 286);
-  --surface: oklch(1 0 0);
-  --surface-secondary: oklch(0.965 0.001 286);
-  --surface-tertiary: oklch(0.945 0.001 286);
-  --default: oklch(0.945 0.001 286);
-  --accent: oklch(0.585 0.233 264);
-  --accent-foreground: oklch(1 0 0);
+  --wd-success:            #5ac08a;   /* softened mint green */
+  --wd-success-soft:       #e7f6ee;
+  --wd-warning:            #e8a252;   /* warm amber, not neon */
+  --wd-warning-soft:       #fbefde;
+  --wd-danger:             #e57b7b;   /* dusty coral red */
+  --wd-danger-soft:        #fbe8e8;
+  --wd-info:               #6ea8d8;
+  --wd-info-soft:          #e7f0f8;
+
+  /* Surfaces & foregrounds */
+  --background:            #fafaf9;   /* app bg — warm off-white */
+  --foreground:            #1c1e26;   /* main text */
+  --surface:               #ffffff;   /* cards, sidebar, topbar */
+  --surface-secondary:     #f5f5f4;   /* table headers, grouped bg */
+  --surface-tertiary:      #eeeeec;   /* deeper grouping */
+
+  --wd-surface:            var(--surface);
+  --wd-surface-hover:      #f1f1ef;
+  --wd-surface-active:     #e8e8e5;
+  --wd-border:             #e5e5e2;
+  --wd-border-strong:      #d6d6d2;
+  --wd-muted:              #71717a;
+  --wd-muted-soft:         #a1a1aa;
+
+  --wd-chart-grid:         #ececea;
+  --wd-focus-ring:         #c5cafa;
+
+  /* Soft, layered shadows — never harsh */
+  --wd-shadow-xs:      0 1px 2px 0 rgba(24, 24, 27, 0.04);
+  --wd-shadow-sm:      0 1px 3px 0 rgba(24, 24, 27, 0.06), 0 1px 2px 0 rgba(24, 24, 27, 0.04);
+  --wd-shadow-md:      0 4px 10px -2px rgba(24, 24, 27, 0.06), 0 2px 4px -2px rgba(24, 24, 27, 0.04);
+  --wd-shadow-lg:      0 12px 24px -6px rgba(24, 24, 27, 0.08), 0 4px 8px -4px rgba(24, 24, 27, 0.05);
+  --wd-shadow-popover: 0 8px 24px -4px rgba(24, 24, 27, 0.10), 0 2px 6px -2px rgba(24, 24, 27, 0.06);
+
+  /* HeroUI / legacy aliases */
+  --default:           #eeeeec;
+  --accent:            var(--wd-primary);
+  --accent-foreground: var(--wd-primary-foreground);
 }
 
 /* ── Dark theme ──────────────────────────────────────────────────────────── */
+/* Cool near-black surfaces with slightly desaturated fg. Semantics sit
+   lighter / more pastel than light mode so they don't burn on dark surfaces. */
 
 .dark,
 [data-theme="dark"] {
-  --wd-primary: #818cf8;
-  --wd-primary-foreground: #ffffff;
-  --wd-success: #4ade80;
-  --wd-warning: #fbbf24;
-  --wd-danger: #f87171;
-  --wd-muted: #94a3b8;
-  --wd-surface: #1f1f26;
-  --wd-surface-hover: #2a2a32;
-  --wd-border: #2e2e38;
+  --wd-primary:            #9da4f8;
+  --wd-primary-hover:      #b0b6f9;
+  --wd-primary-foreground: #1a1b24;
+  --wd-primary-soft:       #2a2d55;
+  --wd-primary-ring:       #4c518a;
 
-  --background: oklch(0.145 0.005 286);
-  --foreground: oklch(0.96 0 0);
-  --surface: oklch(0.19 0.005 286);
-  --surface-secondary: oklch(0.225 0.004 286);
-  --surface-tertiary: oklch(0.255 0.004 286);
-  --default: oklch(0.225 0.004 286);
-  --accent: oklch(0.685 0.17 264);
-  --accent-foreground: oklch(0.145 0.005 286);
+  --wd-success:            #82d4a6;
+  --wd-success-soft:       #1f3a2c;
+  --wd-warning:            #f2bc7a;
+  --wd-warning-soft:       #3d2f1d;
+  --wd-danger:             #f29a9a;
+  --wd-danger-soft:        #3d2626;
+  --wd-info:               #9dc2e2;
+  --wd-info-soft:          #1f2c38;
+
+  --background:            #16161c;
+  --foreground:            #e8e8ec;
+  --surface:               #1d1d25;
+  --surface-secondary:     #22222c;
+  --surface-tertiary:      #2a2a33;
+
+  --wd-surface:            var(--surface);
+  --wd-surface-hover:      #2a2a33;
+  --wd-surface-active:     #33333d;
+  --wd-border:             #2e2e38;
+  --wd-border-strong:      #3a3a45;
+  --wd-muted:              #9c9caa;
+  --wd-muted-soft:         #6e6e7a;
+
+  --wd-chart-grid:         #2b2b34;
+  --wd-focus-ring:         #4c518a;
+
+  --wd-shadow-xs:      0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --wd-shadow-sm:      0 1px 3px 0 rgba(0, 0, 0, 0.35), 0 1px 2px 0 rgba(0, 0, 0, 0.25);
+  --wd-shadow-md:      0 4px 10px -2px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --wd-shadow-lg:      0 12px 24px -6px rgba(0, 0, 0, 0.5), 0 4px 8px -4px rgba(0, 0, 0, 0.3);
+  --wd-shadow-popover: 0 8px 24px -4px rgba(0, 0, 0, 0.5), 0 2px 6px -2px rgba(0, 0, 0, 0.3);
+
+  --default:           #22222c;
+  --accent:            var(--wd-primary);
+  --accent-foreground: var(--wd-primary-foreground);
 }
 
 /* ── Endpoints table — ScrollShadow wrapper handles scroll + fade ──────── */
@@ -135,4 +243,113 @@
   background: var(--wd-surface) !important;
   border: 1px solid var(--wd-border) !important;
   box-shadow: none !important;
+}
+
+/* ── Uptime bar (cell grid + staged load animation) ─────────────────────── */
+
+.wd-up-bar {
+  /* Default stagger + reveal duration. Cycle length is set inline (per-bar)
+     from JS based on cell count, so the wave completes a full pass and then
+     pauses before the next one begins. */
+  --wd-up-stagger: 40ms;
+  --wd-up-reveal-duration: 650ms;
+  /* Grid (instead of flex) gives subpixel-consistent track widths. */
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 2px;
+  width: 100%;
+  cursor: crosshair;
+}
+
+.wd-up-cell {
+  min-width: 0;
+  border-radius: 1.5px;
+  transform-origin: center;
+  --cell-bg: var(--wd-border);
+  background: var(--cell-bg);
+  transition: transform 200ms cubic-bezier(.2,.0,.2,1), filter 120ms;
+}
+
+.wd-up-cell[data-status='healthy']  { --cell-bg: var(--wd-success); }
+.wd-up-cell[data-status='degraded'] { --cell-bg: var(--wd-warning); }
+.wd-up-cell[data-status='down']     { --cell-bg: var(--wd-danger); }
+.wd-up-cell[data-status='paused']   { --cell-bg: color-mix(in srgb, var(--wd-muted) 28%, transparent); }
+.wd-up-cell[data-status='nodata']   { --cell-bg: color-mix(in srgb, var(--wd-border) 55%, transparent); }
+
+/* Loading + settling: sequential wave. Cycle = (N-1)*stagger + rest_pad, so
+   each pass completes fully before the next begins. Peak lives in the first
+   10% of the keyframe; rest is the dominant state. Cell i's phase is offset
+   by i*stagger, so the wave travels left → right. */
+.wd-up-bar[data-stage='loading'] .wd-up-cell,
+.wd-up-bar[data-stage='settling'] .wd-up-cell {
+  background: var(--wd-border);
+  animation: wd-up-pulse var(--wd-up-cycle, 1660ms) linear infinite;
+  animation-delay: calc(var(--cell-idx) * var(--wd-up-stagger));
+  will-change: transform, filter;
+}
+
+/* Reveal: one-shot staggered morph from grey → final color. */
+.wd-up-bar[data-stage='reveal'] .wd-up-cell {
+  background: var(--wd-border);
+  animation: wd-up-reveal var(--wd-up-reveal-duration) cubic-bezier(.22,.8,.3,1) 1 forwards;
+  animation-delay: calc(var(--cell-idx) * var(--wd-up-stagger));
+  will-change: transform, filter, background-color;
+}
+
+/* Hover emphasis — only enabled when the bar is idle so it doesn't fight
+   any in-flight animation. */
+.wd-up-bar[data-stage='done'] .wd-up-cell:hover,
+.wd-up-bar[data-stage='done'] .wd-up-cell[data-hover='true'] {
+  filter: brightness(1.12);
+  transform: scaleY(1.4);
+}
+
+/* Single pass: cell peaks inside a narrow window (~10% of cycle), rests for
+   the remainder. Cell boundaries (0%/100%) match rest, so restarting the
+   animation at a cycle boundary lines up perfectly with the reveal 0% frame. */
+@keyframes wd-up-pulse {
+  0% {
+    transform: scaleY(1);
+    filter: brightness(0.82);
+  }
+  5% {
+    transform: scaleY(1.45);
+    filter: brightness(1.3);
+  }
+  10% {
+    transform: scaleY(1);
+    filter: brightness(0.82);
+  }
+  100% {
+    transform: scaleY(1);
+    filter: brightness(0.82);
+  }
+}
+
+@keyframes wd-up-reveal {
+  0% {
+    transform: scaleY(1);
+    background: var(--wd-border);
+    filter: brightness(0.82);
+  }
+  38% {
+    transform: scaleY(1.55);
+    background: var(--cell-bg);
+    filter: brightness(1.35);
+  }
+  100% {
+    transform: scaleY(1);
+    background: var(--cell-bg);
+    filter: brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wd-up-bar[data-stage='loading'] .wd-up-cell,
+  .wd-up-bar[data-stage='settling'] .wd-up-cell,
+  .wd-up-bar[data-stage='reveal'] .wd-up-cell {
+    animation: none;
+    background: var(--cell-bg);
+  }
 }

@@ -883,7 +883,7 @@ export default function IncidentDetailPage() {
         <Link to="/incidents" className="hover:text-foreground transition-colors">
           Incidents
         </Link>
-        <Icon icon="solar:alt-arrow-right-linear" width={12} />
+        <Icon icon="solar:alt-arrow-right-linear" width={16} />
         <span className="text-foreground truncate">
           {endpoint?.name ?? 'Incident'}
         </span>
@@ -926,7 +926,7 @@ export default function IncidentDetailPage() {
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-wd-success/15 px-2.5 py-1 text-xs font-semibold text-wd-success">
-                    <Icon icon="solar:check-circle-bold" width={13} />
+                    <Icon icon="solar:check-circle-bold" width={16} />
                     Resolved
                   </span>
                 )}
@@ -940,12 +940,12 @@ export default function IncidentDetailPage() {
                         : 'bg-wd-surface-hover text-wd-muted',
                   )}
                 >
-                  <Icon icon="solar:shield-warning-linear" width={12} />
+                  <Icon icon="solar:shield-warning-linear" width={16} />
                   Severity: {severity.label}
                 </span>
                 {isActive && nextCheckInLabel && (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-wd-surface-hover px-2.5 py-1 text-[11px] font-medium text-wd-muted">
-                    <Icon icon="solar:refresh-linear" width={12} />
+                    <Icon icon="solar:refresh-linear" width={16} />
                     Next check {nextCheckInLabel}
                   </span>
                 )}
@@ -984,7 +984,7 @@ export default function IncidentDetailPage() {
                   className="!text-xs"
                   onPress={() => navigate(`/endpoints/${incident.endpointId}`)}
                 >
-                  <Icon icon="solar:square-arrow-right-up-linear" width={14} />
+                  <Icon icon="solar:square-arrow-right-up-linear" width={16} />
                   View Endpoint
                 </Button>
                 <Button
@@ -993,7 +993,7 @@ export default function IncidentDetailPage() {
                   className="!text-xs"
                   onPress={() => navigate('/incidents')}
                 >
-                  <Icon icon="solar:list-linear" width={14} />
+                  <Icon icon="solar:list-linear" width={16} />
                   All Incidents
                 </Button>
               </div>
@@ -1006,7 +1006,7 @@ export default function IncidentDetailPage() {
               </span>
               <span
                 className={cn(
-                  'font-mono text-3xl font-semibold tabular-nums leading-none',
+                  'font-mono text-3xl font-semibold tracking-tight leading-none',
                   isActive ? 'text-wd-danger' : 'text-foreground',
                 )}
               >
@@ -1015,12 +1015,12 @@ export default function IncidentDetailPage() {
               <div className="mt-1.5 text-right text-[11px] text-wd-muted leading-snug">
                 <div>
                   <span className="text-wd-muted/70">Started </span>
-                  {formatDateTime(incident.startedAt)}
+                  <span className="font-mono">{formatDateTime(incident.startedAt)}</span>
                 </div>
                 {incident.resolvedAt && (
                   <div>
                     <span className="text-wd-muted/70">Resolved </span>
-                    {formatDateTime(incident.resolvedAt)}
+                    <span className="font-mono">{formatDateTime(incident.resolvedAt)}</span>
                   </div>
                 )}
               </div>
@@ -1283,11 +1283,11 @@ function KpiCell({
   return (
     <div className="flex items-center gap-2">
       <div className={cn('rounded-lg p-1.5', t.bg)}>
-        <Icon icon={icon} width={14} className={t.text} />
+        <Icon icon={icon} width={16} className={t.text} />
       </div>
       <div>
         <div className="text-[10px] text-wd-muted">{label}</div>
-        <div className="text-sm font-semibold text-foreground tabular-nums">{value}</div>
+        <div className="text-sm font-semibold text-foreground font-mono">{value}</div>
       </div>
     </div>
   )
@@ -1319,7 +1319,7 @@ function LatencyStat({
           {label}
         </span>
       </div>
-      <div className="mt-1 text-base font-semibold text-foreground tabular-nums">
+      <div className="mt-1 text-base font-semibold text-foreground font-mono">
         {value}
         <span className="text-[11px] font-normal text-wd-muted ml-0.5">ms</span>
       </div>
@@ -1383,7 +1383,7 @@ function StatusLegendRow({
         <span className={cn('h-2 w-2 rounded-full', dotClass)} />
         {label}
       </div>
-      <div className="flex items-center gap-2 tabular-nums">
+      <div className="flex items-center gap-2 font-mono">
         <span className="text-foreground font-medium">{count}</span>
         <span className="text-wd-muted/70 w-[32px] text-right">{pct}%</span>
       </div>
@@ -1449,18 +1449,18 @@ function CheckDetailGrid({ check }: { check: CheckPoint | ApiCheck }) {
       ) : (
         <DetailRow label="Source" value="Live (SSE)" />
       )}
-      <DetailRow label="Timestamp" value={new Date(check.timestamp).toLocaleString()} />
+      <DetailRow label="Timestamp" value={new Date(check.timestamp).toLocaleString()} mono />
       <DetailRow label="Status" value={check.status} />
-      <DetailRow label="Response Time" value={`${check.responseTime}ms`} />
+      <DetailRow label="Response Time" value={`${check.responseTime}ms`} mono />
       {check.statusCode != null && (
-        <DetailRow label="Status Code" value={String(check.statusCode)} />
+        <DetailRow label="Status Code" value={String(check.statusCode)} mono />
       )}
       {asApi?.portOpen != null && (
         <DetailRow label="Port Open" value={asApi.portOpen ? 'Yes' : 'No'} />
       )}
       {asApi?.statusReason && <DetailRow label="Reason" value={asApi.statusReason} />}
       {asApi?.sslDaysRemaining != null && (
-        <DetailRow label="SSL Days" value={String(asApi.sslDaysRemaining)} />
+        <DetailRow label="SSL Days" value={String(asApi.sslDaysRemaining)} mono />
       )}
       {asApi?.duringMaintenance && (
         <DetailRow label="Maintenance" value="During maintenance window" />
@@ -1590,7 +1590,7 @@ function TimelineRowView({
                 {badgeLabel}
               </span>
             )}
-            <span className="text-[11px] text-wd-muted">
+            <span className="text-[11px] text-wd-muted font-mono">
               {formatDateTime(row.at)}
             </span>
             {!isPhaseMarker && (
@@ -1601,7 +1601,7 @@ function TimelineRowView({
             {canExpand && (
               <Icon
                 icon="solar:alt-arrow-down-linear"
-                width={11}
+                width={16}
                 className={cn(
                   'ml-auto text-wd-muted/60 transition-transform duration-150',
                   isExpanded && 'rotate-180',
@@ -1782,13 +1782,14 @@ function TimelineRowView({
                 {incident.causeDetail && (
                   <DetailRow label="Detail" value={incident.causeDetail} />
                 )}
-                <DetailRow label="Started" value={formatDateTime(incident.startedAt)} />
+                <DetailRow label="Started" value={formatDateTime(incident.startedAt)} mono />
               </div>
             ) : row.event === 'resolved' ? (
               <div className="space-y-2">
                 <DetailRow
                   label="Resolved"
                   value={incident.resolvedAt ? formatDateTime(incident.resolvedAt) : '—'}
+                  mono
                 />
                 <DetailRow
                   label="Total Duration"
@@ -1797,6 +1798,7 @@ function TimelineRowView({
                       ? formatDuration(incident.durationSeconds)
                       : formatDuration(duration)
                   }
+                  mono
                 />
                 {row.detail && <DetailRow label="Note" value={row.detail} />}
               </div>
@@ -1882,11 +1884,11 @@ function ChartEventMarkers({
               strokeOpacity={0.7}
             />
             {/* Icon above the line */}
-            <foreignObject x={xN - 8} y={top - 2} width={16} height={16}>
+            <foreignObject x={xN - 10} y={top - 3} width={20} height={20}>
               <div
                 style={{
-                  width: 16,
-                  height: 16,
+                  width: 20,
+                  height: 20,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -1895,7 +1897,7 @@ function ChartEventMarkers({
                   borderRadius: 4,
                 }}
               >
-                <Icon icon={iconForEvent(m.event)} width={10} style={{ color }} />
+                <Icon icon={iconForEvent(m.event)} width={16} style={{ color }} />
               </div>
             </foreignObject>
           </g>
@@ -1962,7 +1964,7 @@ function RelatedIncidentRow({ incident }: { incident: ApiIncident }) {
         </span>
       ) : (
         <span className="inline-flex items-center gap-1 rounded-full bg-wd-success/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-wd-success shrink-0">
-          <Icon icon="solar:check-circle-bold" width={9} />
+          <Icon icon="solar:check-circle-bold" width={16} />
           Resolved
         </span>
       )}
@@ -1981,10 +1983,10 @@ function RelatedIncidentRow({ incident }: { incident: ApiIncident }) {
       >
         {severity.label}
       </span>
-      <span className="ml-auto text-[11px] text-wd-muted font-mono tabular-nums">
+      <span className="ml-auto text-[11px] text-wd-muted font-mono">
         {formatDuration(durationSeconds)}
       </span>
-      <span className="text-[11px] text-wd-muted min-w-[140px] text-right">
+      <span className="text-[11px] text-wd-muted min-w-[140px] text-right font-mono">
         {formatDateTime(incident.startedAt)}
       </span>
     </Link>

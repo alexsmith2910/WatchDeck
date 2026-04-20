@@ -375,7 +375,7 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Icon
             icon="solar:magnifer-linear"
-            width={14}
+            width={16}
             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-wd-muted pointer-events-none"
           />
           <input
@@ -391,7 +391,7 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
               onClick={() => setSearchQuery('')}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-wd-muted hover:text-foreground cursor-pointer"
             >
-              <Icon icon="solar:close-circle-linear" width={14} />
+              <Icon icon="solar:close-circle-linear" width={16} />
             </button>
           )}
         </div>
@@ -408,11 +408,11 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
                   : 'text-wd-muted border-wd-border/50 hover:text-foreground hover:bg-wd-surface-hover/50',
               )}
             >
-              <Icon icon="solar:filter-linear" width={13} />
+              <Icon icon="solar:filter-linear" width={16} />
               {selectedErrorCodes.size > 0
                 ? `${selectedErrorCodes.size} code${selectedErrorCodes.size > 1 ? 's' : ''}`
                 : 'Error Codes'}
-              <Icon icon="solar:alt-arrow-down-linear" width={12} className="text-wd-muted" />
+              <Icon icon="solar:alt-arrow-down-linear" width={16} className="text-wd-muted" />
             </button>
             <Dropdown.Popover placement="bottom start" className="!min-w-[240px]">
               <Dropdown.Menu>
@@ -524,7 +524,7 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
                   className="p-0.5 rounded text-wd-muted hover:text-foreground transition-colors cursor-pointer"
                   aria-label="Table options"
                 >
-                  <Icon icon="solar:menu-dots-bold" width={14} />
+                  <Icon icon="solar:menu-dots-bold" width={16} />
                 </button>
               </Dropdown.Trigger>
               <Dropdown.Popover placement="bottom end" className="!min-w-[160px]">
@@ -556,7 +556,7 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
                   <div className="flex items-center justify-center">
                     <Icon
                       icon="solar:alt-arrow-right-linear"
-                      width={14}
+                      width={16}
                       className={cn(
                         'text-wd-muted transition-transform duration-200',
                         isExpanded && 'rotate-90',
@@ -565,11 +565,11 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
                   </div>
 
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-xs text-foreground font-medium truncate">
+                    <span className="text-xs font-mono text-foreground font-medium truncate">
                       {formatDateTime(check.timestamp)}
                     </span>
                     {check.duringMaintenance && (
-                      <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-wd-muted/10 text-wd-muted">
+                      <span className="text-[9px] font-mono font-medium px-1.5 py-0.5 rounded bg-wd-muted/10 text-wd-muted">
                         MAINT
                       </span>
                     )}
@@ -600,11 +600,11 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
                 {isExpanded && (
                   <div className="border-t border-wd-border/30 bg-wd-surface-hover/20 px-4 py-4 pl-12">
                     <div className="grid grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-3">
-                      <DetailField label="Response Time" value={`${check.responseTime}ms`} />
+                      <DetailField label="Response Time" value={`${check.responseTime}ms`} mono />
                       <DetailField label="Status" value={check.status} />
                       {check.statusReason && <DetailField label="Status Reason" value={check.statusReason} />}
                       {endpointType === 'http' && (
-                        <DetailField label="Status Code" value={check.statusCode != null ? String(check.statusCode) : '—'} />
+                        <DetailField label="Status Code" value={check.statusCode != null ? String(check.statusCode) : '—'} mono />
                       )}
                       {endpointType === 'port' && (
                         <DetailField label="Port Open" value={check.portOpen != null ? (check.portOpen ? 'Yes' : 'No') : '—'} />
@@ -614,19 +614,20 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
                           label="SSL Days Remaining"
                           value={String(check.sslDaysRemaining)}
                           valueClass={check.sslDaysRemaining <= 14 ? 'text-wd-warning' : 'text-wd-success'}
+                          mono
                         />
                       )}
                       <DetailField
                         label="During Maintenance"
                         value={check.duringMaintenance ? 'Yes' : 'No'}
                       />
-                      <DetailField label="Timestamp" value={formatDateTime(check.timestamp)} />
-                      <DetailField label="Check ID" value={check._id} mono />
+                      <DetailField label="Timestamp" value={formatDateTime(check.timestamp)} mono />
+                      <DetailField label="Check ID" value={check._id} idStyle />
                     </div>
 
                     {check.errorMessage && (
                       <div className="mt-3 rounded-lg bg-wd-danger/5 border border-wd-danger/10 px-3 py-2">
-                        <span className="text-[10px] font-medium text-wd-danger uppercase tracking-wider">Error</span>
+                        <span className="text-[10px] font-mono font-medium text-wd-danger uppercase tracking-wider">Error</span>
                         <p className="text-xs text-wd-danger/80 mt-0.5 break-all">{check.errorMessage}</p>
                       </div>
                     )}
@@ -636,7 +637,7 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
                         <div className="flex items-center gap-2 mb-1.5">
                           <Icon
                             icon={check.bodyValidation.passed ? 'solar:check-circle-linear' : 'solar:close-circle-linear'}
-                            width={14}
+                            width={16}
                             className={check.bodyValidation.passed ? 'text-wd-success' : 'text-wd-danger'}
                           />
                           <span className="text-xs font-medium text-foreground">
@@ -659,7 +660,7 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
 
                     <Separator className="!bg-wd-border/30 my-3" />
                     <div>
-                      <span className="text-[11px] font-medium text-wd-muted uppercase tracking-wider">
+                      <span className="text-[11px] font-mono font-medium text-wd-muted uppercase tracking-wider">
                         Related Incidents
                       </span>
                       {loadingIncidents ? (
@@ -696,7 +697,7 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
                                       <span className="text-wd-muted font-normal"> — {inc.causeDetail}</span>
                                     )}
                                   </div>
-                                  <div className="text-[10px] text-wd-muted">
+                                  <div className="text-[10px] font-mono text-wd-muted">
                                     {isActive
                                       ? `Started ${timeAgo(inc.startedAt)}`
                                       : `Lasted ${inc.durationSeconds ? formatDuration(inc.durationSeconds) : '—'}`}
@@ -744,7 +745,7 @@ export default function ChecksTab({ endpointId, endpointType, initialExpandedId 
               </>
             ) : (
               <>
-                <Icon icon="solar:arrow-down-linear" width={14} className="mr-1" />
+                <Icon icon="solar:arrow-down-linear" width={16} className="mr-1" />
                 Load More ({pagination.total - checks.length} remaining)
               </>
             )}
@@ -788,7 +789,7 @@ function SortHeader({
       {label}
       <Icon
         icon={isActive && dir === 'asc' ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'}
-        width={12}
+        width={16}
         className={isActive ? 'text-wd-primary' : 'text-wd-muted/40'}
       />
     </button>
@@ -804,19 +805,22 @@ function DetailField({
   value,
   valueClass,
   mono,
+  idStyle,
 }: {
   label: string
   value: string
   valueClass?: string
   mono?: boolean
+  idStyle?: boolean
 }) {
   return (
     <div>
-      <span className="text-[10px] text-wd-muted uppercase tracking-wider block">{label}</span>
+      <span className="text-[10px] font-mono text-wd-muted uppercase tracking-wider block">{label}</span>
       <span
         className={cn(
           'text-xs font-medium text-foreground mt-0.5 block',
-          mono && 'font-mono text-[11px] text-wd-muted',
+          mono && 'font-mono',
+          idStyle && 'font-mono text-[11px] text-wd-muted',
           valueClass,
         )}
       >

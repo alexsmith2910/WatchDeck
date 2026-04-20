@@ -60,7 +60,7 @@ export default function KeyValueEditor({
               placeholder={keyPlaceholder}
               value={pair.key}
               onChange={(e) => updatePair(i, 'key', e.target.value)}
-              className="!text-xs"
+              className="!text-xs !font-mono"
             />
           </TextField>
           <TextField className="flex-1" isDisabled={isDisabled} aria-label={`Header value ${i + 1}`}>
@@ -68,7 +68,7 @@ export default function KeyValueEditor({
               placeholder={valuePlaceholder}
               value={pair.value}
               onChange={(e) => updatePair(i, 'value', e.target.value)}
-              className="!text-xs"
+              className="!text-xs !font-mono"
             />
           </TextField>
           <Button
@@ -79,7 +79,7 @@ export default function KeyValueEditor({
             isDisabled={isDisabled}
             onPress={() => removePair(i)}
           >
-            <Icon icon="solar:trash-bin-minimalistic-outline" width={14} className="text-wd-danger" />
+            <Icon icon="solar:trash-bin-minimalistic-outline" width={16} className="text-wd-danger" />
           </Button>
         </div>
       ))}
@@ -91,8 +91,8 @@ export default function KeyValueEditor({
         isDisabled={isDisabled}
         onPress={addPair}
       >
-        <Icon icon="solar:add-circle-outline" width={14} />
-        Add header
+        <Icon icon="solar:add-circle-outline" width={16} />
+        Add Header
       </Button>
     </div>
   )

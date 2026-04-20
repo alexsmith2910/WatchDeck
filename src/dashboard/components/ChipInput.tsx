@@ -70,7 +70,7 @@ export default function ChipInput({
             <span
               key={v}
               className={cn(
-                'inline-flex items-center gap-1 rounded-md text-xs px-2 py-0.5',
+                'inline-flex items-center gap-1 rounded-md text-xs font-mono px-2 py-0.5',
                 'bg-wd-primary/10 text-wd-primary border border-wd-primary/20',
               )}
             >
@@ -81,7 +81,7 @@ export default function ChipInput({
                 className="text-wd-primary/60 hover:text-wd-primary cursor-pointer"
                 disabled={isDisabled}
               >
-                <Icon icon="solar:close-circle-linear" width={12} />
+                <Icon icon="solar:close-circle-linear" width={16} />
               </button>
             </span>
           ))}
@@ -107,7 +107,7 @@ export default function ChipInput({
               addValue()
             }
           }}
-          className="!text-xs"
+          className="!text-xs !font-mono"
         />
       </TextField>
       {error && <span className="text-[11px] text-wd-danger">{error}</span>}

@@ -62,7 +62,7 @@ function StatusPopup({
           onClick={() => onNavigate('/endpoints')}
         >
           <div className="text-[10px] text-wd-muted mb-0.5">Endpoints</div>
-          <div className="flex items-baseline gap-1.5 text-sm font-semibold text-foreground">
+          <div className="flex items-baseline gap-1.5 text-sm font-semibold font-mono text-foreground">
             {totalCount}
             {totalCount > 0 && (
               <>
@@ -76,15 +76,15 @@ function StatusPopup({
         </div>
 
         <div className="rounded-lg bg-wd-surface-hover/60 px-3 py-2">
-          <div className="text-[10px] text-wd-muted mb-0.5">Avg response</div>
-          <div className="flex items-baseline gap-1.5 text-sm font-semibold text-foreground">
+          <div className="text-[10px] text-wd-muted mb-0.5">Avg Response</div>
+          <div className="flex items-baseline gap-1.5 text-sm font-semibold font-mono text-foreground">
             {avgLatencyMs != null ? (
               <>
                 {avgLatencyMs}
                 <span className="text-[10px] font-normal text-wd-muted">ms</span>
               </>
             ) : (
-              <span className="text-wd-muted">—</span>
+              <span className="text-wd-muted font-sans">—</span>
             )}
           </div>
         </div>
@@ -95,7 +95,7 @@ function StatusPopup({
         >
           <div className="text-[10px] text-wd-muted mb-0.5">Incidents</div>
           <div className="flex items-baseline gap-1.5 text-sm font-semibold">
-            <span className={incidentCount > 0 ? 'text-wd-danger' : 'text-foreground'}>
+            <span className={cn('font-mono', incidentCount > 0 ? 'text-wd-danger' : 'text-foreground')}>
               {incidentCount}
             </span>
             <span className="text-[10px] font-medium text-wd-muted">active</span>
@@ -114,17 +114,17 @@ function StatusPopup({
       {/* Active incident */}
       {activeIncident && (
         <div className="mb-3">
-          <div className="text-[10px] text-wd-muted mb-1.5">Active incident</div>
+          <div className="text-[10px] text-wd-muted mb-1.5">Active Incident</div>
           <div
             className="flex items-center gap-2.5 rounded-lg bg-wd-danger/5 border border-wd-danger/10 px-3 py-2 cursor-pointer hover:bg-wd-danger/8 transition-colors"
             onClick={() => onNavigate('/incidents')}
           >
             <span className="h-1.5 w-1.5 rounded-full bg-wd-danger shrink-0 animate-pulse" />
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-foreground">{activeIncident.name}</div>
+              <div className="text-xs font-medium font-mono text-foreground">{activeIncident.name}</div>
               <div className="text-[10px] text-wd-muted truncate">{activeIncident.detail}</div>
             </div>
-            <span className="text-[10px] text-wd-muted shrink-0">{activeIncident.duration}</span>
+            <span className="text-[10px] text-wd-muted font-mono shrink-0">{activeIncident.duration}</span>
           </div>
         </div>
       )}
@@ -137,9 +137,9 @@ function StatusPopup({
         </span>
         <span
           className="text-[10px] text-wd-primary font-medium cursor-pointer hover:underline"
-          onClick={() => onNavigate('/health')}
+          onClick={() => onNavigate('/endpoints')}
         >
-          View details &rarr;
+          View Endpoints &rarr;
         </span>
       </div>
     </div>
@@ -199,7 +199,7 @@ export default function StatusPill(props: StatusPillProps) {
                     allHealthy ? 'bg-wd-success' : 'bg-wd-warning',
                   )}
                 />
-                <span>
+                <span className="font-mono">
                   <span className={cn('!font-medium', allHealthy ? '!text-wd-success' : '!text-wd-warning')}>
                     {healthyCount}
                   </span>
@@ -213,9 +213,9 @@ export default function StatusPill(props: StatusPillProps) {
 
             {/* Avg latency */}
             <div className="flex items-center gap-1.5 px-2.5 py-0.5">
-              <Icon icon="solar:graph-outline" width={14} className="text-wd-muted" />
+              <Icon icon="solar:graph-outline" width={16} className="text-wd-muted" />
               {avgLatencyMs != null ? (
-                <span className="text-[11px] text-wd-muted">
+                <span className="text-[11px] text-wd-muted font-mono">
                   {avgLatencyMs}
                   <span className="text-[9px] text-wd-muted/60">ms</span>
                 </span>
@@ -234,8 +234,8 @@ export default function StatusPill(props: StatusPillProps) {
                   className="!h-auto !min-h-0 !rounded-full !px-2.5 !py-0.5 !text-[11px] !bg-wd-danger/8 !border !border-wd-danger/12"
                 >
                   <Chip.Label className="flex items-center gap-1.5">
-                    <Icon icon="solar:danger-triangle-outline" width={14} className="!text-wd-danger" />
-                    <span className="!text-wd-danger !font-medium">{incidentCount}</span>
+                    <Icon icon="solar:danger-triangle-outline" width={16} className="!text-wd-danger" />
+                    <span className="!text-wd-danger !font-medium font-mono">{incidentCount}</span>
                   </Chip.Label>
                 </Chip>
               </>

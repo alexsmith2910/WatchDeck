@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" width="56" height="56" role="img" aria-label="WatchDeck logo mark">
+  <rect x="4" y="4" width="48" height="48" rx="12" fill="#7c83f5"></rect>
+  <defs>
+    <clipPath id="wd-lm-clip">
+      <path d="M28 13.5 L17.8 17.1 V25.7 c0 7.1 4.4 13.3 10.2 15.4 5.8 -2.1 10.2 -8.3 10.2 -15.4 V17.1 Z"></path>
+    </clipPath>
+  </defs>
+  <path d="M28 13.5 L17.8 17.1 V25.7 c0 7.1 4.4 13.3 10.2 15.4 5.8 -2.1 10.2 -8.3 10.2 -15.4 V17.1 Z" fill="#ffffff" opacity="0.96"></path>
+  <g clip-path="url(#wd-lm-clip)">
+    <path d="M14 30 h6 l2 -4 3 8 3 -11 2 7 h12" fill="none" stroke="#7c83f5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+  </g>
+</svg>

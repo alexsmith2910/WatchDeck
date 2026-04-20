@@ -172,21 +172,21 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
               </p>
               <div className="flex items-center gap-4 mt-2 text-[11px] text-wd-muted">
                 <span>
-                  <Icon icon="solar:clock-circle-linear" width={12} className="inline mr-1" />
-                  Started {timeAgo(activeIncident.startedAt)}
+                  <Icon icon="solar:clock-circle-linear" width={16} className="inline mr-1" />
+                  Started <span className="font-mono">{timeAgo(activeIncident.startedAt)}</span>
                 </span>
                 <span>
-                  <Icon icon="solar:stopwatch-linear" width={12} className="inline mr-1" />
-                  Duration: {formatDuration(activeDuration)}
+                  <Icon icon="solar:stopwatch-linear" width={16} className="inline mr-1" />
+                  Duration: <span className="font-mono">{formatDuration(activeDuration)}</span>
                 </span>
                 <span>
-                  <Icon icon="solar:bell-linear" width={12} className="inline mr-1" />
-                  {activeIncident.notificationsSent} notification{activeIncident.notificationsSent !== 1 ? 's' : ''} sent
+                  <Icon icon="solar:bell-linear" width={16} className="inline mr-1" />
+                  <span className="font-mono">{activeIncident.notificationsSent}</span> notification{activeIncident.notificationsSent !== 1 ? 's' : ''} sent
                 </span>
                 {activeIncident.acknowledgedAt && (
                   <span>
-                    <Icon icon="solar:check-read-linear" width={12} className="inline mr-1" />
-                    Acknowledged by {activeIncident.acknowledgedBy ?? 'someone'} {timeAgo(activeIncident.acknowledgedAt)}
+                    <Icon icon="solar:check-read-linear" width={16} className="inline mr-1" />
+                    Acknowledged by {activeIncident.acknowledgedBy ?? 'someone'} <span className="font-mono">{timeAgo(activeIncident.acknowledgedAt)}</span>
                   </span>
                 )}
               </div>
@@ -197,7 +197,7 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
         <div className="bg-wd-success/5 border border-wd-success/20 rounded-xl p-4">
           <div className="flex items-center gap-3">
             <div className="rounded-full bg-wd-success/10 p-2">
-              <Icon icon="solar:shield-check-bold" width={20} className="text-wd-success" />
+              <Icon icon="solar:shield-check-bold" width={24} className="text-wd-success" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-wd-success">All Clear</h3>
@@ -210,9 +210,9 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
       {/* ── Incident History ──────────────────────────────────────── */}
       <div>
         <div className="flex items-center gap-2 mb-3">
-          <Icon icon="solar:history-linear" width={14} className="text-wd-muted" />
+          <Icon icon="solar:history-linear" width={16} className="text-wd-muted" />
           <h3 className="text-sm font-semibold text-foreground">Incident History</h3>
-          <span className="text-[10px] text-wd-muted">
+          <span className="text-[10px] text-wd-muted font-mono">
             ({pagination?.total ?? incidents.length} total)
           </span>
         </div>
@@ -255,7 +255,7 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
                     <div className="flex items-center justify-center">
                       <Icon
                         icon="solar:alt-arrow-right-linear"
-                        width={14}
+                        width={16}
                         className={cn(
                           'text-wd-muted transition-transform duration-200',
                           isExpanded && 'rotate-90',
@@ -292,10 +292,10 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
                     </div>
 
                     {/* Started */}
-                    <span className="text-xs text-wd-muted">{timeAgo(inc.startedAt)}</span>
+                    <span className="text-xs text-wd-muted font-mono">{timeAgo(inc.startedAt)}</span>
 
                     {/* Duration */}
-                    <span className="text-xs text-foreground text-right">
+                    <span className="text-xs text-foreground text-right font-mono">
                       {isActive
                         ? formatDuration(Math.floor((Date.now() - new Date(inc.startedAt).getTime()) / 1000))
                         : inc.durationSeconds
@@ -304,7 +304,7 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
                     </span>
 
                     {/* Notifications */}
-                    <span className="text-xs text-wd-muted text-right">{inc.notificationsSent}</span>
+                    <span className="text-xs text-wd-muted text-right font-mono">{inc.notificationsSent}</span>
                   </button>
 
                   {/* Expanded: Timeline */}
@@ -314,29 +314,29 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
                       <div className="grid grid-cols-2 xl:grid-cols-4 gap-x-8 gap-y-3 mb-4">
                         <div>
                           <span className="text-[10px] text-wd-muted uppercase tracking-wider block">Started</span>
-                          <span className="text-xs font-medium text-foreground">{formatDateTime(inc.startedAt)}</span>
+                          <span className="text-xs font-medium text-foreground font-mono">{formatDateTime(inc.startedAt)}</span>
                         </div>
                         {inc.resolvedAt && (
                           <div>
                             <span className="text-[10px] text-wd-muted uppercase tracking-wider block">Resolved</span>
-                            <span className="text-xs font-medium text-foreground">{formatDateTime(inc.resolvedAt)}</span>
+                            <span className="text-xs font-medium text-foreground font-mono">{formatDateTime(inc.resolvedAt)}</span>
                           </div>
                         )}
                         {inc.durationSeconds != null && (
                           <div>
                             <span className="text-[10px] text-wd-muted uppercase tracking-wider block">Duration</span>
-                            <span className="text-xs font-medium text-foreground">{formatDuration(inc.durationSeconds)}</span>
+                            <span className="text-xs font-medium text-foreground font-mono">{formatDuration(inc.durationSeconds)}</span>
                           </div>
                         )}
                         <div>
                           <span className="text-[10px] text-wd-muted uppercase tracking-wider block">Notifications</span>
-                          <span className="text-xs font-medium text-foreground">{inc.notificationsSent}</span>
+                          <span className="text-xs font-medium text-foreground font-mono">{inc.notificationsSent}</span>
                         </div>
                         {inc.acknowledgedAt && (
                           <div>
                             <span className="text-[10px] text-wd-muted uppercase tracking-wider block">Acknowledged</span>
                             <span className="text-xs font-medium text-foreground">
-                              {inc.acknowledgedBy ?? 'Someone'} — {formatDateTime(inc.acknowledgedAt)}
+                              {inc.acknowledgedBy ?? 'Someone'} — <span className="font-mono">{formatDateTime(inc.acknowledgedAt)}</span>
                             </span>
                           </div>
                         )}
@@ -347,7 +347,7 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
                         <>
                           <Separator className="!bg-wd-border/30 mb-3" />
                           <div className="flex items-center gap-2 mb-3">
-                            <Icon icon="solar:timeline-up-linear" width={13} className="text-wd-muted" />
+                            <Icon icon="solar:timeline-up-linear" width={16} className="text-wd-muted" />
                             <span className="text-[11px] font-medium text-wd-muted uppercase tracking-wider">
                               Timeline
                             </span>
@@ -373,7 +373,7 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
                                         <span className="text-xs font-medium text-foreground">
                                           {formatTimelineEvent(evt.event)}
                                         </span>
-                                        <span className="text-[10px] text-wd-muted">
+                                        <span className="text-[10px] text-wd-muted font-mono">
                                           {new Date(evt.at).toLocaleTimeString(undefined, {
                                             hour: '2-digit',
                                             minute: '2-digit',
@@ -420,7 +420,7 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
               </>
             ) : (
               <>
-                <Icon icon="solar:arrow-down-linear" width={14} className="mr-1" />
+                <Icon icon="solar:arrow-down-linear" width={16} className="mr-1" />
                 Load More
               </>
             )}

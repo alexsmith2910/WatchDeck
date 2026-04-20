@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { Fragment, memo, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
   Button,
   Spinner,
@@ -25,13 +25,15 @@ import {
 import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
 import type { ApiEndpoint, ApiCheck, ApiIncident, HourlySummary, DailySummary, UptimeStats } from '../types/api'
-import { statusColors, formatDuration, formatRuntime, timeAgo, formatHour, formatDate, getIncidentRanges } from '../utils/format'
+import { statusColors, formatDuration, formatRuntime, timeAgo, formatHour, formatDate, getIncidentRanges, latencyColor, uptimeColor } from '../utils/format'
 import type { IncidentRange } from '../utils/format'
 import MetricsTab from '../components/tabs/MetricsTab'
 import ChecksTab from '../components/tabs/ChecksTab'
 import IncidentsTab from '../components/tabs/IncidentsTab'
 import SettingsTab from '../components/tabs/SettingsTab'
+import NotificationsTab from '../components/tabs/NotificationsTab'
 import ForegroundReferenceArea from '../components/ForegroundReferenceArea'
+import UptimeBar, { buildHistory } from '../components/UptimeBar'
 
 type TimeRange = '1h' | '24h' | '7d' | '30d'
 
@@ -39,13 +41,14 @@ type TimeRange = '1h' | '24h' | '7d' | '30d'
 // Tab definitions
 // ---------------------------------------------------------------------------
 
-type TabId = 'overview' | 'metrics' | 'checks' | 'incidents' | 'settings'
+type TabId = 'overview' | 'metrics' | 'checks' | 'incidents' | 'notifications' | 'settings'
 
 const tabs: { id: TabId; label: string; icon: string }[] = [
   { id: 'overview', label: 'Overview', icon: 'solar:chart-square-linear' },
   { id: 'metrics', label: 'Metrics', icon: 'solar:graph-up-linear' },
   { id: 'checks', label: 'Checks', icon: 'solar:checklist-minimalistic-linear' },
   { id: 'incidents', label: 'Incidents', icon: 'solar:danger-triangle-linear' },
+  { id: 'notifications', label: 'Notifications', icon: 'solar:bell-linear' },
   { id: 'settings', label: 'Settings', icon: 'solar:settings-linear' },
 ]
 
@@ -76,12 +79,12 @@ function ChartTooltipContent({
 
   return (
     <div className="rounded-lg bg-wd-surface border border-wd-border px-3 py-2 shadow-lg max-w-[280px]">
-      <div className="text-[11px] text-wd-muted mb-1">{label}</div>
+      <div className="text-[11px] font-mono text-wd-muted mb-1">{label}</div>
       {payload.map((entry: { dataKey: string; value: number; color: string }) => (
         <div key={entry.dataKey} className="flex items-center gap-2 text-xs">
           <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
           <span className="text-wd-muted [word-break:normal] [overflow-wrap:normal]">{entry.dataKey}:</span>
-          <span className="font-semibold text-foreground">
+          <span className="font-mono font-semibold text-foreground">
             {entry.value}
             {unit}
           </span>
@@ -122,15 +125,32 @@ const chartModes: { id: ChartMode; label: string; icon: string }[] = [
 export default function EndpointDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { request } = useApi()
   const { subscribe } = useSSE()
 
+  const validTabs: TabId[] = ['overview', 'metrics', 'checks', 'incidents', 'notifications', 'settings']
+  const initialTab = (searchParams.get('tab') as TabId | null)
+  const initialTabSafe: TabId = initialTab && validTabs.includes(initialTab) ? initialTab : 'overview'
+
   // ── State ──────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(true)
+  const [aggLoading, setAggLoading] = useState(true)
   const [endpoint, setEndpoint] = useState<ApiEndpoint | null>(null)
   const [latestCheck, setLatestCheck] = useState<ApiCheck | null>(null)
   const [uptimeStats, setUptimeStats] = useState<UptimeStats | null>(null)
-  const [activeTab, setActiveTab] = useState<TabId>('overview')
+  const [daily30d, setDaily30d] = useState<DailySummary[]>([])
+  const [incidents30d, setIncidents30d] = useState<ApiIncident[]>([])
+  const [activeTab, setActiveTabState] = useState<TabId>(initialTabSafe)
+  const setActiveTab = useCallback((tab: TabId) => {
+    setActiveTabState(tab)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (tab === 'overview') next.delete('tab')
+      else next.set('tab', tab)
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
 
   // Overview tab state
   const [chartMode, setChartMode] = useState<ChartMode>('response')
@@ -149,22 +169,18 @@ export default function EndpointDetailPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  // Per-endpoint runtime ticker (seconds since createdAt)
-  const [runtimeTick, setRuntimeTick] = useState(0)
-
-  useEffect(() => {
-    const interval = setInterval(() => setRuntimeTick((t) => t + 1), 1000)
-    return () => clearInterval(interval)
-  }, [])
-
   // ── Fetch endpoint data ────────────────────────────────────────────────
+  // Split into two phases so the page renders as soon as the endpoint + uptime
+  // stats arrive; the 30d history (dailies + incidents) loads in the background
+  // and the uptime bar animates until it's ready.
   const fetchEndpoint = useCallback(async () => {
     if (!id) return
+
+    // Phase 1 — fast: endpoint + uptime stats (unblocks render)
     const [epRes, uptimeRes] = await Promise.all([
       request<{ data: ApiEndpoint; latestCheck: ApiCheck | null }>(`/endpoints/${id}`),
       request<{ data: UptimeStats }>(`/endpoints/${id}/uptime`),
     ])
-
     if (epRes.status < 400) {
       setEndpoint(epRes.data.data)
       setLatestCheck(epRes.data.latestCheck)
@@ -173,6 +189,25 @@ export default function EndpointDetailPage() {
       setUptimeStats(uptimeRes.data.data)
     }
     setLoading(false)
+
+    // Phase 2 — slower: 30d dailies + incidents (fills uptime bar with real data)
+    setAggLoading(true)
+    const [dailyRes, incRes] = await Promise.all([
+      request<{ data: DailySummary[] }>(`/endpoints/${id}/daily?limit=30`),
+      request<{ data: ApiIncident[] }>(`/incidents?endpointId=${id}&limit=500`),
+    ])
+    if (dailyRes.status < 400) {
+      setDaily30d(dailyRes.data.data ?? [])
+    }
+    if (incRes.status < 400) {
+      const cutoff = Date.now() - 30 * 86400_000
+      setIncidents30d(
+        (incRes.data.data ?? []).filter(
+          (i) => new Date(i.startedAt).getTime() >= cutoff,
+        ),
+      )
+    }
+    setAggLoading(false)
   }, [id, request])
 
   // ── Fetch overview tab data ────────────────────────────────────────────
@@ -419,15 +454,65 @@ export default function EndpointDetailPage() {
   // ── Derived values ─────────────────────────────────────────────────────
   const currentStatus = endpoint?.lastStatus ?? 'unknown'
   const sc = statusColors[currentStatus]
-  const uptime24h = uptimeStats?.['24h']
 
-  // Per-endpoint runtime: seconds since this endpoint was created
-  // runtimeTick forces re-render every second
-  const endpointRuntime = useMemo(() => {
-    if (!endpoint) return 0
-    void runtimeTick // reference to trigger recalc
-    return Math.floor((Date.now() - new Date(endpoint.createdAt).getTime()) / 1000)
-  }, [endpoint, runtimeTick])
+  // 30d aggregate stats derived from dailies + incidents
+  const stats30d = useMemo(() => {
+    let totalChecks = 0
+    let weightedUptime = 0
+    let weightedResp = 0
+    for (const d of daily30d) {
+      totalChecks += d.totalChecks
+      weightedUptime += d.uptimePercent * d.totalChecks
+      weightedResp += d.avgResponseTime * d.totalChecks
+    }
+    const uptimePct = totalChecks > 0 ? weightedUptime / totalChecks : null
+    const avgResponse = totalChecks > 0 ? Math.round(weightedResp / totalChecks) : null
+
+    // Downtime from incidents (more accurate than check-based estimates)
+    const now = Date.now()
+    let downtimeSec = 0
+    for (const inc of incidents30d) {
+      if (inc.status === 'active') {
+        downtimeSec += Math.max(0, (now - new Date(inc.startedAt).getTime()) / 1000)
+      } else {
+        downtimeSec += inc.durationSeconds ?? 0
+      }
+    }
+
+    // MTTR — mean time to resolve over resolved incidents
+    const resolved = incidents30d.filter((i) => i.status === 'resolved' && (i.durationSeconds ?? 0) > 0)
+    const mttrSec = resolved.length > 0
+      ? Math.round(resolved.reduce((s, i) => s + (i.durationSeconds ?? 0), 0) / resolved.length)
+      : null
+
+    // Streak — time since last incident ended. 0 if an incident is active.
+    let streakSec: number | null = null
+    const active = incidents30d.find((i) => i.status === 'active')
+    if (active) {
+      streakSec = 0
+    } else {
+      const endTimes = incidents30d
+        .filter((i) => i.status === 'resolved' && i.resolvedAt)
+        .map((i) => new Date(i.resolvedAt!).getTime())
+      if (endTimes.length > 0) {
+        streakSec = Math.floor((now - Math.max(...endTimes)) / 1000)
+      } else if (endpoint) {
+        // No incidents ever → streak equals endpoint age
+        streakSec = Math.floor((now - new Date(endpoint.createdAt).getTime()) / 1000)
+      }
+    }
+
+    return {
+      uptimePct,
+      downtimeSec: Math.round(downtimeSec),
+      avgResponse,
+      incidentCount: incidents30d.length,
+      mttrSec,
+      streakSec,
+    }
+  }, [daily30d, incidents30d, endpoint])
+
+  const history30d = useMemo(() => buildHistory(daily30d, 30), [daily30d])
 
   // --- Early returns (after all hooks) ---
 
@@ -461,7 +546,7 @@ export default function EndpointDetailPage() {
           <Link to="/endpoints" className="hover:text-foreground transition-colors">
             Endpoints
           </Link>
-          <Icon icon="solar:alt-arrow-right-linear" width={12} />
+          <Icon icon="solar:alt-arrow-right-linear" width={16} />
           <span className="text-foreground">{endpoint.name}</span>
         </div>
 
@@ -484,7 +569,7 @@ export default function EndpointDetailPage() {
             <div>
               <h1 className="text-xl font-semibold text-foreground">{endpoint.name}</h1>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-wd-muted font-mono">
+                <span className="text-xs font-mono text-wd-muted">
                   {endpoint.type === 'http' ? endpoint.url : `${endpoint.host}:${endpoint.port}`}
                 </span>
                 <span className="text-xs text-wd-muted/40">|</span>
@@ -504,7 +589,7 @@ export default function EndpointDetailPage() {
               onPress={handleRecheck}
               isDisabled={endpoint.status !== 'active'}
             >
-              <Icon icon="solar:refresh-linear" width={14} />
+              <Icon icon="solar:refresh-linear" width={16} />
               Recheck
             </Button>
             <Button
@@ -519,14 +604,14 @@ export default function EndpointDetailPage() {
                     ? 'solar:pause-linear'
                     : 'solar:play-linear'
                 }
-                width={14}
+                width={16}
               />
               {endpoint.status === 'active' ? 'Pause' : 'Resume'}
             </Button>
             <Dropdown>
               <Dropdown.Trigger>
                 <div className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-wd-border/50 bg-wd-surface hover:bg-wd-surface-hover transition-colors cursor-pointer">
-                  <Icon icon="solar:menu-dots-bold" width={14} className="text-wd-muted" />
+                  <Icon icon="solar:menu-dots-bold" width={16} className="text-wd-muted" />
                 </div>
               </Dropdown.Trigger>
               <Dropdown.Popover placement="bottom end" className="!min-w-[140px]">
@@ -537,11 +622,11 @@ export default function EndpointDetailPage() {
                   }}
                 >
                   <Dropdown.Item id="edit" className="!text-xs">
-                    <Icon icon="solar:pen-linear" width={14} className="mr-1.5" />
+                    <Icon icon="solar:pen-linear" width={16} className="mr-1.5" />
                     Edit
                   </Dropdown.Item>
                   <Dropdown.Item id="delete" className="!text-xs !text-wd-danger">
-                    <Icon icon="solar:trash-bin-minimalistic-linear" width={14} className="mr-1.5" />
+                    <Icon icon="solar:trash-bin-minimalistic-linear" width={16} className="mr-1.5" />
                     Delete
                   </Dropdown.Item>
                 </Dropdown.Menu>
@@ -550,79 +635,94 @@ export default function EndpointDetailPage() {
           </div>
         </div>
 
-        {/* KPI strip */}
-        <div className="flex items-center flex-wrap gap-x-6 gap-y-3 mt-4">
-          {/* Runtime */}
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg bg-wd-primary/10 p-1.5">
-              <Icon icon="solar:clock-circle-linear" width={14} className="text-wd-primary" />
-            </div>
-            <div>
-              <div className="text-[10px] text-wd-muted">Runtime</div>
-              <div className="text-sm font-semibold text-foreground">{formatRuntime(endpointRuntime)}</div>
-            </div>
+        {/* KPI strip + 30d uptime visualization */}
+        <div className="flex items-start gap-6 mt-4">
+          {/* Stats — 30d rolling window. Flex row with vertical separators
+              between cells; wraps to new rows when viewport is narrow. */}
+          <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-3 gap-y-2.5">
+            {([
+              {
+                key: 'runtime',
+                icon: 'solar:clock-circle-linear',
+                accent: 'primary',
+                label: 'Runtime',
+                value: <LiveRuntime createdAt={endpoint.createdAt} />,
+              },
+              {
+                key: 'uptime',
+                icon: 'solar:shield-check-linear',
+                accent: 'success',
+                label: 'Uptime',
+                value: stats30d.uptimePct != null ? `${stats30d.uptimePct.toFixed(2)}%` : '—',
+                valueClass: stats30d.uptimePct != null ? uptimeColor(stats30d.uptimePct) : undefined,
+              },
+              {
+                key: 'downtime',
+                icon: 'solar:close-circle-linear',
+                accent: 'danger',
+                label: 'Downtime',
+                value: stats30d.downtimeSec > 0 ? formatRuntime(stats30d.downtimeSec) : '0m',
+                valueClass: stats30d.downtimeSec > 0 ? 'text-wd-danger' : undefined,
+              },
+              {
+                key: 'avg',
+                icon: 'solar:graph-up-linear',
+                accent: 'warning',
+                label: 'Avg Response',
+                value: stats30d.avgResponse != null ? `${stats30d.avgResponse}ms` : '—',
+                valueClass: stats30d.avgResponse != null ? latencyColor(stats30d.avgResponse) : undefined,
+              },
+              {
+                key: 'incidents',
+                icon: 'solar:danger-triangle-linear',
+                accent: 'danger',
+                label: 'Incidents',
+                value: String(stats30d.incidentCount),
+                valueClass: stats30d.incidentCount > 0 ? 'text-wd-danger' : undefined,
+              },
+              {
+                key: 'mttr',
+                icon: 'solar:restart-circle-linear',
+                accent: 'muted',
+                label: 'MTTR',
+                value: stats30d.mttrSec != null ? formatDuration(stats30d.mttrSec) : '—',
+              },
+              {
+                key: 'streak',
+                icon: 'solar:medal-ribbon-star-linear',
+                accent: 'success',
+                label: 'Streak',
+                value:
+                  stats30d.streakSec == null
+                    ? '—'
+                    : stats30d.streakSec === 0
+                      ? 'Active Incident'
+                      : formatRuntime(stats30d.streakSec),
+                valueClass: stats30d.streakSec === 0 ? 'text-wd-danger' : undefined,
+              },
+            ] as const).map((s, i) => (
+              <Fragment key={s.key}>
+                {i > 0 && (
+                  <Separator orientation="vertical" className="!h-7 !bg-wd-border/50" />
+                )}
+                <StatCell
+                  icon={s.icon}
+                  accent={s.accent}
+                  label={s.label}
+                  value={s.value}
+                  valueClass={s.valueClass}
+                />
+              </Fragment>
+            ))}
           </div>
 
-          <div className="w-px h-8 bg-wd-border/50" />
-
-          {/* Uptime 24h */}
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg bg-wd-success/10 p-1.5">
-              <Icon icon="solar:shield-check-linear" width={14} className="text-wd-success" />
+          {/* Daily uptime — 30d visualization */}
+          <div className="w-[360px] shrink-0">
+            <div className="flex items-baseline justify-between mb-1.5">
+              <span className="text-[11px] font-semibold text-foreground">Daily Uptime</span>
+              <span className="text-[10px] font-mono text-wd-muted">1 cell = 24h · 30d</span>
             </div>
-            <div>
-              <div className="text-[10px] text-wd-muted">Uptime (24h)</div>
-              <div className="text-sm font-semibold text-foreground">
-                {uptime24h != null ? `${uptime24h.toFixed(2)}%` : '—'}
-              </div>
-            </div>
-          </div>
-
-          <div className="w-px h-8 bg-wd-border/50" />
-
-          {/* Avg response */}
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg bg-wd-warning/10 p-1.5">
-              <Icon icon="solar:graph-up-linear" width={14} className="text-wd-warning" />
-            </div>
-            <div>
-              <div className="text-[10px] text-wd-muted">Latest Response</div>
-              <div className="text-sm font-semibold text-foreground">
-                {endpoint.lastResponseTime != null ? `${endpoint.lastResponseTime}ms` : '—'}
-              </div>
-            </div>
-          </div>
-
-          <div className="w-px h-8 bg-wd-border/50" />
-
-          {/* Check interval */}
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg bg-wd-surface-hover p-1.5">
-              <Icon icon="solar:stopwatch-linear" width={14} className="text-wd-muted" />
-            </div>
-            <div>
-              <div className="text-[10px] text-wd-muted">Interval</div>
-              <div className="text-sm font-semibold text-foreground">
-                {endpoint.checkInterval >= 60
-                  ? `${Math.floor(endpoint.checkInterval / 60)}m`
-                  : `${endpoint.checkInterval}s`}
-              </div>
-            </div>
-          </div>
-
-          <div className="w-px h-8 bg-wd-border/50" />
-
-          {/* Last check */}
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg bg-wd-surface-hover p-1.5">
-              <Icon icon="solar:history-linear" width={14} className="text-wd-muted" />
-            </div>
-            <div>
-              <div className="text-[10px] text-wd-muted">Last Check</div>
-              <div className="text-sm font-semibold text-foreground">
-                {endpoint.lastCheckAt ? timeAgo(endpoint.lastCheckAt) : '—'}
-              </div>
-            </div>
+            <UptimeBar history={history30d} loading={aggLoading} />
           </div>
         </div>
       </div>
@@ -644,7 +744,7 @@ export default function EndpointDetailPage() {
                 : 'border-transparent text-wd-muted hover:text-foreground',
             )}
           >
-            <Icon icon={tab.icon} width={14} />
+            <Icon icon={tab.icon} width={16} />
             {tab.label}
           </button>
         ))}
@@ -682,6 +782,13 @@ export default function EndpointDetailPage() {
         <IncidentsTab endpointId={id!} initialExpandedId={focusedIncidentId} />
       )}
 
+      {activeTab === 'notifications' && (
+        <NotificationsTab
+          endpoint={endpoint}
+          onJumpToSettings={() => setActiveTab('settings')}
+        />
+      )}
+
       {activeTab === 'settings' && (
         <SettingsTab
           endpoint={endpoint}
@@ -703,7 +810,7 @@ export default function EndpointDetailPage() {
           <div className="relative bg-wd-surface border border-wd-border rounded-xl p-6 w-full max-w-md shadow-xl">
             <div className="flex items-center gap-3 mb-4">
               <div className="rounded-full bg-wd-danger/10 p-2">
-                <Icon icon="solar:trash-bin-minimalistic-linear" width={20} className="text-wd-danger" />
+                <Icon icon="solar:trash-bin-minimalistic-linear" width={24} className="text-wd-danger" />
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Delete Endpoint</h3>
@@ -737,7 +844,7 @@ export default function EndpointDetailPage() {
                   <Spinner size="sm" />
                 ) : (
                   <>
-                    <Icon icon="solar:trash-bin-minimalistic-linear" width={14} />
+                    <Icon icon="solar:trash-bin-minimalistic-linear" width={16} />
                     Archive Endpoint
                   </>
                 )}
@@ -836,7 +943,7 @@ function OverviewTab({
                     : 'text-wd-muted hover:text-foreground hover:bg-wd-surface-hover',
                 )}
               >
-                <Icon icon={m.icon} width={13} />
+                <Icon icon={m.icon} width={16} />
                 {m.label}
               </button>
             ))}
@@ -849,7 +956,7 @@ function OverviewTab({
                   type="button"
                   onClick={() => onTimeRangeChange(r)}
                   className={cn(
-                    'px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer',
+                    'px-2.5 py-1 rounded-md text-[11px] font-mono font-medium transition-colors cursor-pointer',
                     timeRange === r
                       ? 'bg-wd-surface text-foreground shadow-sm'
                       : 'text-wd-muted hover:text-foreground',
@@ -869,7 +976,7 @@ function OverviewTab({
                 className="p-1.5 rounded-lg text-wd-muted hover:text-foreground hover:bg-wd-surface-hover/50 transition-colors cursor-pointer"
                 aria-label="Chart options"
               >
-                <Icon icon="solar:menu-dots-bold" width={16} />
+                <Icon icon="solar:menu-dots-bold" width={20} />
               </button>
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom end" className="!min-w-[160px]">
@@ -1042,7 +1149,7 @@ function OverviewTab({
         <div className="bg-wd-surface border border-wd-border/50 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Icon icon="solar:danger-triangle-linear" width={14} className="text-wd-muted" />
+              <Icon icon="solar:danger-triangle-linear" width={16} className="text-wd-muted" />
               <h3 className="text-sm font-semibold text-foreground">Recent Incidents</h3>
               {incidents.length > 0 && (
                 <span className="text-[10px] text-wd-muted">({incidents.length})</span>
@@ -1109,7 +1216,7 @@ function OverviewTab({
         <div className="bg-wd-surface border border-wd-border/50 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Icon icon="solar:pulse-2-linear" width={14} className="text-wd-muted" />
+              <Icon icon="solar:pulse-2-linear" width={16} className="text-wd-muted" />
               <h3 className="text-sm font-semibold text-foreground">Live Checks</h3>
               <span className="text-[10px] text-wd-muted">({recentChecks.length})</span>
             </div>
@@ -1139,14 +1246,14 @@ function OverviewTab({
                     <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', csc.dot)} />
                     <div className="flex-1 min-w-0 flex items-center justify-between">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-xs font-medium text-foreground">
+                        <span className="text-xs font-mono font-medium text-foreground">
                           {check.responseTime}ms
                         </span>
                         {check.statusCode && (
-                          <span className="text-[10px] text-wd-muted">{check.statusCode}</span>
+                          <span className="text-[10px] font-mono text-wd-muted">{check.statusCode}</span>
                         )}
                       </div>
-                      <span className="text-[10px] text-wd-muted shrink-0">
+                      <span className="text-[10px] font-mono text-wd-muted shrink-0">
                         {timeAgo(check.timestamp)}
                       </span>
                     </div>
@@ -1164,37 +1271,37 @@ function OverviewTab({
         <div className="bg-wd-surface border border-wd-border/50 rounded-xl p-3.5">
           {/* Performance */}
           <div className="flex items-center gap-2 mb-2.5">
-            <Icon icon="solar:graph-up-linear" width={13} className="text-wd-primary" />
+            <Icon icon="solar:graph-up-linear" width={16} className="text-wd-primary" />
             <h3 className="text-xs font-semibold text-foreground">Performance</h3>
             {perfStats && (
-              <span className="text-[10px] text-wd-muted ml-auto">{perfStats.totalChecks} checks</span>
+              <span className="text-[10px] text-wd-muted ml-auto"><span className="font-mono">{perfStats.totalChecks}</span> checks</span>
             )}
           </div>
           {perfStats ? (
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-lg bg-wd-surface-hover/50 px-2.5 py-1.5">
                 <div className="text-[10px] text-wd-muted">Avg</div>
-                <div className="text-sm font-semibold text-foreground">{perfStats.avg}<span className="text-[10px] text-wd-muted font-normal">ms</span></div>
+                <div className="text-sm font-mono font-semibold text-foreground">{perfStats.avg}<span className="text-[10px] text-wd-muted font-normal">ms</span></div>
               </div>
               <div className="rounded-lg bg-wd-surface-hover/50 px-2.5 py-1.5">
                 <div className="text-[10px] text-wd-muted">Min</div>
-                <div className="text-sm font-semibold text-wd-success">{perfStats.min}<span className="text-[10px] text-wd-muted font-normal">ms</span></div>
+                <div className="text-sm font-mono font-semibold text-wd-success">{perfStats.min}<span className="text-[10px] text-wd-muted font-normal">ms</span></div>
               </div>
               <div className="rounded-lg bg-wd-surface-hover/50 px-2.5 py-1.5">
                 <div className="text-[10px] text-wd-muted">Max</div>
-                <div className="text-sm font-semibold text-wd-danger">{perfStats.max}<span className="text-[10px] text-wd-muted font-normal">ms</span></div>
+                <div className="text-sm font-mono font-semibold text-wd-danger">{perfStats.max}<span className="text-[10px] text-wd-muted font-normal">ms</span></div>
               </div>
               <div className="rounded-lg bg-wd-surface-hover/50 px-2.5 py-1.5">
                 <div className="text-[10px] text-wd-muted">P95</div>
-                <div className="text-sm font-semibold text-wd-warning">{perfStats.p95}<span className="text-[10px] text-wd-muted font-normal">ms</span></div>
+                <div className="text-sm font-mono font-semibold text-wd-warning">{perfStats.p95}<span className="text-[10px] text-wd-muted font-normal">ms</span></div>
               </div>
               <div className="rounded-lg bg-wd-surface-hover/50 px-2.5 py-1.5">
                 <div className="text-[10px] text-wd-muted">P99</div>
-                <div className="text-sm font-semibold text-wd-warning">{perfStats.p99}<span className="text-[10px] text-wd-muted font-normal">ms</span></div>
+                <div className="text-sm font-mono font-semibold text-wd-warning">{perfStats.p99}<span className="text-[10px] text-wd-muted font-normal">ms</span></div>
               </div>
               <div className="rounded-lg bg-wd-surface-hover/50 px-2.5 py-1.5">
                 <div className="text-[10px] text-wd-muted">Checks</div>
-                <div className="text-sm font-semibold text-foreground">{perfStats.totalChecks}</div>
+                <div className="text-sm font-mono font-semibold text-foreground">{perfStats.totalChecks}</div>
               </div>
             </div>
           ) : (
@@ -1207,14 +1314,14 @@ function OverviewTab({
           
           {/* Uptime stats */}
           <div className="flex items-center gap-2 mb-2.5">
-            <Icon icon="solar:shield-check-linear" width={13} className="text-wd-success" />
+            <Icon icon="solar:shield-check-linear" width={16} className="text-wd-success" />
             <h3 className="text-xs font-semibold text-foreground">Uptime</h3>
           </div>
           <div className="grid grid-cols-2 gap-2">
             {(['24h', '7d', '30d', '90d'] as const).map((period) => (
               <div key={period} className="rounded-lg bg-wd-surface-hover/50 px-2.5 py-1.5">
-                <div className="text-[10px] text-wd-muted">{period}</div>
-                <div className="text-sm font-semibold text-foreground">
+                <div className="text-[10px] font-mono text-wd-muted">{period}</div>
+                <div className="text-sm font-mono font-semibold text-foreground">
                   {uptimeStats?.[period] != null ? `${uptimeStats[period]!.toFixed(2)}%` : '—'}
                 </div>
               </div>
@@ -1228,7 +1335,7 @@ function OverviewTab({
             {/* Configuration */}
             <div>
               <div className="flex items-center gap-2 mb-2.5">
-                <Icon icon="solar:settings-minimalistic-linear" width={13} className="text-wd-muted" />
+                <Icon icon="solar:settings-minimalistic-linear" width={16} className="text-wd-muted" />
                 <h3 className="text-xs font-semibold text-foreground">Configuration</h3>
               </div>
               <div className="space-y-2">
@@ -1237,7 +1344,7 @@ function OverviewTab({
                   <>
                     <InfoRow label="Method" value={endpoint.method ?? 'GET'} />
                     <InfoRow
-                      label="Status codes"
+                      label="Status Codes"
                       value={endpoint.expectedStatusCodes?.join(', ') ?? '200-299'}
                     />
                   </>
@@ -1250,28 +1357,29 @@ function OverviewTab({
                   : `${endpoint.checkInterval}s`}
                 />
                 <InfoRow label="Timeout" value={`${endpoint.timeout / 1000}s`} />
-                <InfoRow label="Latency limit" value={`${endpoint.latencyThreshold}ms`} />
+                <InfoRow label="Latency Limit" value={`${endpoint.latencyThreshold}ms`} />
               </div>
             </div>
 
             {/* Alerting */}
             <div>
               <div className="flex items-center gap-2 mb-2.5">
-                <Icon icon="solar:bell-linear" width={13} className="text-wd-warning" />
+                <Icon icon="solar:bell-linear" width={16} className="text-wd-warning" />
                 <h3 className="text-xs font-semibold text-foreground">Alerting</h3>
               </div>
               <div className="space-y-2">
-                <InfoRow label="Fail threshold" value={`${endpoint.failureThreshold} checks`} />
-                <InfoRow label="Cooldown" value={formatDuration(endpoint.alertCooldown)} />
-                <InfoRow label="Recovery alert" value={endpoint.recoveryAlert ? 'Yes' : 'No'} />
+                <InfoRow label="Fail Threshold" value={`${endpoint.failureThreshold} checks`} mono={false} />
+                <InfoRow label="Cooldown" value={formatDuration(endpoint.alertCooldown)} mono={false} />
+                <InfoRow label="Recovery Alert" value={endpoint.recoveryAlert ? 'Yes' : 'No'} mono={false} />
                 <InfoRow label="Escalation" value={endpoint.escalationDelay > 0
                   ? `after ${formatDuration(endpoint.escalationDelay)}`
                   : 'Off'}
+                  mono={false}
                 />
                 {endpoint.type === 'http' && (
-                  <InfoRow label="SSL warning" value={`${endpoint.sslWarningDays} days`} />
+                  <InfoRow label="SSL Warning" value={`${endpoint.sslWarningDays} days`} mono={false} />
                 )}
-                <InfoRow label="Channels" value={`${endpoint.notificationChannelIds.length} linked`} />
+                <InfoRow label="Channels" value={`${endpoint.notificationChannelIds.length} linked`} mono={false} />
               </div>
             </div>
           </div>
@@ -1285,11 +1393,60 @@ function OverviewTab({
 // Helpers — small subcomponents
 // ---------------------------------------------------------------------------
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoRow({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-center gap-2">
       <span className="text-[11px] text-wd-muted w-28 shrink-0">{label}</span>
-      <span className="text-[11px] font-medium text-foreground">{value}</span>
+      <span className={cn('text-[11px] font-medium text-foreground', mono && 'font-mono')}>{value}</span>
+    </div>
+  )
+}
+
+const statAccent: Record<'primary' | 'success' | 'warning' | 'danger' | 'muted', { bg: string; fg: string }> = {
+  primary: { bg: 'bg-wd-primary/10', fg: 'text-wd-primary' },
+  success: { bg: 'bg-wd-success/10', fg: 'text-wd-success' },
+  warning: { bg: 'bg-wd-warning/10', fg: 'text-wd-warning' },
+  danger: { bg: 'bg-wd-danger/10', fg: 'text-wd-danger' },
+  muted: { bg: 'bg-wd-surface-hover', fg: 'text-wd-muted' },
+}
+
+const LiveRuntime = memo(function LiveRuntime({ createdAt }: { createdAt: string }) {
+  const startMs = useMemo(() => new Date(createdAt).getTime(), [createdAt])
+  const [seconds, setSeconds] = useState(() =>
+    Math.max(0, Math.floor((Date.now() - startMs) / 1000)),
+  )
+  useEffect(() => {
+    const id = setInterval(() => {
+      setSeconds(Math.max(0, Math.floor((Date.now() - startMs) / 1000)))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [startMs])
+  return <>{formatRuntime(seconds)}</>
+})
+
+function StatCell({
+  icon,
+  accent,
+  label,
+  value,
+  valueClass,
+}: {
+  icon: string
+  accent: 'primary' | 'success' | 'warning' | 'danger' | 'muted'
+  label: string
+  value: ReactNode
+  valueClass?: string
+}) {
+  const a = statAccent[accent]
+  return (
+    <div className="flex items-center gap-2">
+      <div className={cn('rounded-lg p-1.5', a.bg)}>
+        <Icon icon={icon} width={16} className={a.fg} />
+      </div>
+      <div>
+        <div className="text-[10px] text-wd-muted">{label}</div>
+        <div className={cn('text-sm font-mono font-semibold text-foreground', valueClass)}>{value}</div>
+      </div>
     </div>
   )
 }

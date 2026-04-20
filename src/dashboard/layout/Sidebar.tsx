@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
 import { ScrollShadow, Tooltip, TooltipTrigger, TooltipContent } from '@heroui/react'
-import { Icon } from '@iconify/react'
 import { cn } from '@heroui/react'
 import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
@@ -141,13 +140,11 @@ export default function Sidebar({ isCompact }: SidebarProps) {
       >
         <Tooltip delay={300} closeDelay={0} isDisabled={!isCompact}>
           <TooltipTrigger>
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-wd-primary cursor-default shrink-0">
-              <Icon
-                icon="solar:shield-check-bold"
-                className="text-wd-primary-foreground"
-                width={22}
-              />
-            </div>
+            <img
+              src="/logo-mark.svg"
+              alt="WatchDeck"
+              className="h-9 w-9 shrink-0 cursor-default"
+            />
           </TooltipTrigger>
           <TooltipContent placement="right" className="px-2.5 py-1 text-xs font-medium">
             WatchDeck

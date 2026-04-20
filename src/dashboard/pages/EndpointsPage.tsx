@@ -16,11 +16,11 @@ import {
 } from '@heroui/react'
 import type { Selection } from '@heroui/react'
 import { Icon } from '@iconify/react'
-import { Area, AreaChart, ResponsiveContainer, YAxis } from 'recharts'
 import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
-import type { ApiEndpoint, ApiPagination, HourlySummary, UptimeStats, EndpointStatus } from '../types/api'
+import type { ApiEndpoint, ApiPagination, DailySummary, UptimeStats, EndpointStatus } from '../types/api'
 import { timeAgo, formatTime, latencyColor, uptimeColor } from '../utils/format'
+import UptimeBar, { buildHistory, avg30dResponse, avg30dUptime, type DailyBucket } from '../components/UptimeBar'
 
 // ---------------------------------------------------------------------------
 // SSE event types
@@ -116,11 +116,6 @@ const statusConfig: Record<EndpointStatus, { label: string; dot: string; text: s
 
 const pendingStatus = { label: 'Pending', dot: 'bg-wd-muted/50', text: 'text-wd-muted' }
 
-const typeConfig: Record<'http' | 'port', { label: string; icon: string; color: string }> = {
-  http: { label: 'HTTP', icon: 'solar:global-outline', color: 'text-wd-primary' },
-  port: { label: 'PORT', icon: 'solar:plug-circle-outline', color: 'text-wd-muted' },
-}
-
 const typeFilterLabels: Record<TypeFilter, string> = {
   all: 'All Types',
   http: 'HTTP',
@@ -129,11 +124,11 @@ const typeFilterLabels: Record<TypeFilter, string> = {
 
 const statusOrder: Record<EndpointStatus, number> = { down: 0, degraded: 1, healthy: 2 }
 
-function TipRow({ label, value, className }: { label: string; value: string; className?: string }) {
+function TipRow({ label, value, className, mono = true }: { label: string; value: string; className?: string; mono?: boolean }) {
   return (
     <div className="flex gap-4">
       <span className="text-wd-muted shrink-0 whitespace-nowrap">{label}</span>
-      <span className={cn('font-medium ml-auto text-right', className)}>{value}</span>
+      <span className={cn('font-medium ml-auto text-right', mono && 'font-mono', className)}>{value}</span>
     </div>
   )
 }
@@ -145,7 +140,8 @@ const TIP_CLS = 'px-3 py-2 text-[11px] leading-relaxed min-w-[220px] max-w-[320p
 // ---------------------------------------------------------------------------
 
 const FETCH_LIMIT = 100
-const GRID_COLS = 'grid-cols-[32px_32px_100px_minmax(0,1fr)_80px_80px_80px_120px_80px_80px]'
+const GRID_COLS =
+  'grid-cols-[32px_110px_minmax(0,1.2fr)_minmax(0,1.5fr)_80px_90px_110px_80px]'
 
 const statusFilters: { key: StatusFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -175,6 +171,13 @@ export default function EndpointsPage() {
   // Intersection observer sentinel for infinite scroll
   const sentinelRef = useRef<HTMLDivElement | null>(null)
 
+  // Measure the rows' scrollbar gutter so we can mirror it on the header.
+  // Without this, header's grid computes fr tracks against the full container
+  // width while rows' grid loses the scrollbar width — shifting every fixed
+  // column after the fr tracks by that gutter width.
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [scrollGutter, setScrollGutter] = useState(0)
+
   // UI state
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -182,13 +185,33 @@ export default function EndpointsPage() {
   const [sort, setSort] = useState({ col: 'status', asc: true })
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  // Rolling response time history from SSE (last N checks per endpoint)
-  const responseHistory = useRef<Map<string, number[]>>(new Map())
-  const HISTORY_SIZE = 20
-
-  // Aggregation data: uptime stats and hourly summaries per endpoint
+  // Aggregation data: uptime stats and daily summaries (30d) per endpoint
   const [uptimeMap, setUptimeMap] = useState<Map<string, UptimeStats>>(new Map())
-  const [hourlyMap, setHourlyMap] = useState<Map<string, HourlySummary[]>>(new Map())
+  const [dailyMap, setDailyMap] = useState<Map<string, DailySummary[]>>(new Map())
+  const [aggLoading, setAggLoading] = useState(true)
+
+  // Single-row delete confirm
+  const [confirmDelete, setConfirmDelete] = useState<Endpoint | null>(null)
+  const [deletingOne, setDeletingOne] = useState(false)
+
+  // Derived: 30d uptime bar history, rolling 30d uptime %, and avg response per endpoint
+  const historyMap = useMemo(() => {
+    const map = new Map<string, DailyBucket[]>()
+    for (const [id, dailies] of dailyMap) map.set(id, buildHistory(dailies))
+    return map
+  }, [dailyMap])
+
+  const avg30dMap = useMemo(() => {
+    const map = new Map<string, number | null>()
+    for (const [id, dailies] of dailyMap) map.set(id, avg30dResponse(dailies))
+    return map
+  }, [dailyMap])
+
+  const uptime30dMap = useMemo(() => {
+    const map = new Map<string, number | null>()
+    for (const [id, dailies] of dailyMap) map.set(id, avg30dUptime(dailies))
+    return map
+  }, [dailyMap])
 
   // Tick for relative time updates
   const [, setTick] = useState(0)
@@ -221,14 +244,33 @@ export default function EndpointsPage() {
     fetchEndpoints()
   }, [fetchEndpoints])
 
-  // Fetch aggregation data (uptime + hourly) for all loaded endpoints
+  // Keep the header's right padding in sync with the rows' scrollbar gutter.
+  // offsetWidth − clientWidth is the exact gutter (0 when no scrollbar).
+  const measureGutter = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const gutter = el.offsetWidth - el.clientWidth
+    setScrollGutter((prev) => (prev === gutter ? prev : gutter))
+  }, [])
+
+  useEffect(() => {
+    measureGutter()
+    const el = scrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver(measureGutter)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [measureGutter])
+
+  // Fetch aggregation data (uptime + 30d daily summaries) for all loaded endpoints
   useEffect(() => {
     if (endpoints.length === 0) return
     let cancelled = false
 
     const fetchAggregation = async () => {
+      setAggLoading(true)
       const ids = endpoints.map((ep) => ep.id)
-      const [uptimeResults, hourlyResults] = await Promise.all([
+      const [uptimeResults, dailyResults] = await Promise.all([
         Promise.allSettled(
           ids.map((id) =>
             request<{ data: UptimeStats }>(`/endpoints/${id}/uptime`).then((r) => ({ id, data: r.data.data })),
@@ -236,7 +278,7 @@ export default function EndpointsPage() {
         ),
         Promise.allSettled(
           ids.map((id) =>
-            request<{ data: HourlySummary[] }>(`/endpoints/${id}/hourly?limit=12`).then((r) => ({ id, data: r.data.data })),
+            request<{ data: DailySummary[] }>(`/endpoints/${id}/daily?limit=30`).then((r) => ({ id, data: r.data.data })),
           ),
         ),
       ])
@@ -252,14 +294,15 @@ export default function EndpointsPage() {
       }
       setUptimeMap(newUptime)
 
-      const newHourly = new Map<string, HourlySummary[]>()
-      for (let i = 0; i < hourlyResults.length; i++) {
-        const r = hourlyResults[i]
-        if (r.status === 'fulfilled') newHourly.set(r.value.id, r.value.data)
+      const newDaily = new Map<string, DailySummary[]>()
+      for (let i = 0; i < dailyResults.length; i++) {
+        const r = dailyResults[i]
+        if (r.status === 'fulfilled') newDaily.set(r.value.id, r.value.data)
         else failed.add(ids[i])
       }
-      setHourlyMap(newHourly)
+      setDailyMap(newDaily)
       setFailedAggIds(failed)
+      setAggLoading(false)
     }
 
     fetchAggregation()
@@ -303,36 +346,27 @@ export default function EndpointsPage() {
   const [failedAggIds, setFailedAggIds] = useState<Set<string>>(new Set())
 
   const retryAggregation = useCallback(async (id: string) => {
-    const [uptimeRes, hourlyRes] = await Promise.allSettled([
+    const [uptimeRes, dailyRes] = await Promise.allSettled([
       request<{ data: UptimeStats }>(`/endpoints/${id}/uptime`).then((r) => r.data.data),
-      request<{ data: HourlySummary[] }>(`/endpoints/${id}/hourly?limit=12`).then((r) => r.data.data),
+      request<{ data: DailySummary[] }>(`/endpoints/${id}/daily?limit=30`).then((r) => r.data.data),
     ])
     if (uptimeRes.status === 'fulfilled') {
       setUptimeMap((prev) => new Map(prev).set(id, uptimeRes.value))
     }
-    if (hourlyRes.status === 'fulfilled') {
-      setHourlyMap((prev) => new Map(prev).set(id, hourlyRes.value))
+    if (dailyRes.status === 'fulfilled') {
+      setDailyMap((prev) => new Map(prev).set(id, dailyRes.value))
     }
-    if (uptimeRes.status === 'fulfilled' && hourlyRes.status === 'fulfilled') {
+    if (uptimeRes.status === 'fulfilled' && dailyRes.status === 'fulfilled') {
       setFailedAggIds((prev) => { const n = new Set(prev); n.delete(id); return n })
     }
   }, [request])
 
   // ── SSE subscriptions ─────────────────────────────────────────────────────
 
-  // check:complete — update endpoint with live check data + track history
+  // check:complete — update endpoint with live check data
   useEffect(() => {
     return subscribe('check:complete', (raw) => {
       const evt = raw as CheckCompleteEvent
-
-      // Track response time history
-      if (evt.responseTime > 0) {
-        const hist = responseHistory.current
-        const arr = hist.get(evt.endpointId) ?? []
-        arr.push(evt.responseTime)
-        if (arr.length > HISTORY_SIZE) arr.shift()
-        hist.set(evt.endpointId, arr)
-      }
 
       setEndpoints((prev) =>
         prev.map((ep) =>
@@ -405,6 +439,19 @@ export default function EndpointsPage() {
     [request],
   )
 
+  const [recheckingAll, setRecheckingAll] = useState(false)
+  const handleRecheckAll = useCallback(async () => {
+    if (recheckingAll) return
+    setRecheckingAll(true)
+    try {
+      await Promise.all(
+        endpoints.map((ep) => request(`/endpoints/${ep.id}/recheck`, { method: 'POST' })),
+      )
+    } finally {
+      setRecheckingAll(false)
+    }
+  }, [endpoints, request, recheckingAll])
+
   const handleToggle = useCallback(
     async (id: string) => {
       // Optimistic update
@@ -427,6 +474,17 @@ export default function EndpointsPage() {
     },
     [request],
   )
+
+  const handleConfirmDeleteOne = useCallback(async () => {
+    if (!confirmDelete || deletingOne) return
+    setDeletingOne(true)
+    try {
+      await request(`/endpoints/${confirmDelete.id}`, { method: 'DELETE' })
+      setConfirmDelete(null)
+    } finally {
+      setDeletingOne(false)
+    }
+  }, [confirmDelete, deletingOne, request])
 
   const handleBulkRecheck = useCallback(
     async (ids: Set<string>) => {
@@ -490,19 +548,23 @@ export default function EndpointsPage() {
         return (aOrder - bOrder) * dir
       }
       if (col === 'responseTime') {
-        return ((a.responseTime ?? 0) - (b.responseTime ?? 0)) * dir
+        return ((avg30dMap.get(a.id) ?? 0) - (avg30dMap.get(b.id) ?? 0)) * dir
       }
       if (col === 'uptime') {
-        const aUp = uptimeMap.get(a.id)?.['24h'] ?? -2
-        const bUp = uptimeMap.get(b.id)?.['24h'] ?? -2
-        return (aUp - bUp) * dir
+        return ((uptime30dMap.get(a.id) ?? -2) - (uptime30dMap.get(b.id) ?? -2)) * dir
       }
       const aVal = a[col as keyof Endpoint] ?? ''
       const bVal = b[col as keyof Endpoint] ?? ''
       if (typeof aVal === 'number' && typeof bVal === 'number') return (aVal - bVal) * dir
       return String(aVal).localeCompare(String(bVal)) * dir
     })
-  }, [filtered, sort, uptimeMap])
+  }, [filtered, sort, uptime30dMap, avg30dMap])
+
+  // Re-measure the scrollbar gutter after rows render — scrollbar appearance
+  // changes clientWidth but may not trigger ResizeObserver on all browsers.
+  useEffect(() => {
+    measureGutter()
+  }, [sorted.length, measureGutter])
 
   const toggleSelectAll = useCallback(() => {
     setSelected((prev) =>
@@ -564,11 +626,11 @@ export default function EndpointsPage() {
         >
           <SearchField.Group className="!bg-wd-surface !border !border-wd-border/50 !rounded-lg !h-8">
             <SearchField.SearchIcon>
-              <Icon icon="solar:magnifer-outline" width={15} className="text-wd-muted" />
+              <Icon icon="solar:magnifer-outline" width={16} className="text-wd-muted" />
             </SearchField.SearchIcon>
             <SearchField.Input placeholder="Search name, URL..." className="!text-xs" />
             <SearchField.ClearButton>
-              <Icon icon="solar:close-circle-outline" width={14} className="text-wd-muted" />
+              <Icon icon="solar:close-circle-outline" width={16} className="text-wd-muted" />
             </SearchField.ClearButton>
           </SearchField.Group>
         </SearchField>
@@ -589,11 +651,10 @@ export default function EndpointsPage() {
               className={cn(
                 '!text-xs !px-3',
                 'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
-                'dark:data-[selected=true]:!bg-wd-primary/50',
               )}
             >
               {f.label}
-              <span className="ml-1 text-[10px] opacity-60">{statusCounts[f.key]}</span>
+              <span className="ml-1 text-[10px] font-mono opacity-60">{statusCounts[f.key]}</span>
             </ToggleButton>
           ))}
         </ToggleButtonGroup>
@@ -601,7 +662,7 @@ export default function EndpointsPage() {
         <Dropdown>
           <Dropdown.Trigger>
             <div className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs cursor-pointer hover:bg-wd-surface-hover transition-colors">
-              <Icon icon="solar:filter-outline" width={14} className="text-wd-muted" />
+              <Icon icon="solar:filter-outline" width={16} className="text-wd-muted" />
               <span className="text-foreground">{typeFilterLabels[typeFilter]}</span>
             </div>
           </Dropdown.Trigger>
@@ -636,33 +697,42 @@ export default function EndpointsPage() {
               size="sm"
               variant="ghost"
               className="!min-w-8 !h-8"
-              onPress={fetchEndpoints}
+              isDisabled={recheckingAll || endpoints.length === 0}
+              onPress={handleRecheckAll}
             >
-              <Icon icon="solar:refresh-outline" width={16} className="text-wd-muted" />
+              {recheckingAll ? (
+                <Spinner size="sm" />
+              ) : (
+                <Icon icon="solar:refresh-outline" width={20} className="text-wd-muted" />
+              )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent className="px-2 py-1 text-[11px]">Refresh all</TooltipContent>
+          <TooltipContent className="px-2 py-1 text-[11px]">Recheck all endpoints</TooltipContent>
         </Tooltip>
         <Button
           size="sm"
-          className="!bg-wd-primary dark:!bg-wd-primary/50 !text-wd-primary-foreground !text-xs !px-4"
+          className="!bg-wd-primary !text-wd-primary-foreground !text-xs !px-4"
           onPress={() => navigate('/endpoints/add')}
         >
-          <Icon icon="solar:add-circle-outline" width={22} />
+          <Icon icon="solar:add-circle-outline" width={24} />
           Add Endpoint
         </Button>
       </div>
 
       {/* Table */}
       <div className="wd-endpoints-table-container flex flex-col flex-1 min-h-0 border border-wd-border/30 rounded-lg overflow-hidden">
-        {/* Column header */}
+        {/* Column header — stays outside the scroll container so it doesn't
+            scroll with rows. We measure the rows' scrollbar gutter and mirror
+            it as the header's right padding so both grids compute fr tracks
+            against the same content width. */}
         <div
           className={cn(
-            'grid items-center gap-x-2 px-3 py-2 shrink-0',
+            'grid items-center gap-x-3 px-3 py-2 shrink-0',
             'bg-[var(--surface-secondary)] border-b border-wd-border/30',
             'text-[11px] font-medium text-wd-muted select-none',
             GRID_COLS,
           )}
+          style={{ paddingRight: `calc(0.75rem + ${scrollGutter}px)` }}
         >
           <Checkbox
             isSelected={sorted.length > 0 && selected.size === sorted.length}
@@ -675,37 +745,54 @@ export default function EndpointsPage() {
               <Checkbox.Indicator />
             </Checkbox.Control>
           </Checkbox>
-          <span>#</span>
           {(
             [
               ['status', 'Status'],
               ['name', 'Name'],
-              ['type', 'Type'],
-              ['uptime', 'Uptime'],
+            ] as const
+          ).map(([col, label]) => (
+            <button
+              key={col}
+              onClick={() => handleSort(col)}
+              className="flex items-center gap-1 w-full justify-start hover:text-foreground transition-colors text-left"
+            >
+              {label}
+              {sort.col === col && (
+                <Icon
+                  icon={sort.asc ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'}
+                  width={16}
+                />
+              )}
+            </button>
+          ))}
+          <span className="block w-full text-left">Uptime · 30d</span>
+          {(
+            [
+              ['uptime', '30d %'],
               ['responseTime', 'Response'],
             ] as const
           ).map(([col, label]) => (
             <button
               key={col}
               onClick={() => handleSort(col)}
-              className="flex items-center gap-1 hover:text-foreground transition-colors text-left"
+              className="flex items-center gap-1 w-full justify-start hover:text-foreground transition-colors text-left"
             >
               {label}
               {sort.col === col && (
                 <Icon
                   icon={sort.asc ? 'solar:alt-arrow-up-linear' : 'solar:alt-arrow-down-linear'}
-                  width={12}
+                  width={16}
                 />
               )}
             </button>
           ))}
-          <span>Trend</span>
-          <span>Last Checked</span>
+          <span className="block w-full text-left">Last Checked</span>
           <span />
         </div>
 
         {/* Rows */}
         <ScrollShadow
+          ref={scrollRef}
           orientation="vertical"
           size={10}
           className="wd-endpoints-table-wrap flex-1 min-h-0 bg-[var(--surface)]"
@@ -719,27 +806,27 @@ export default function EndpointsPage() {
               {endpoints.length === 0 && (
                 <Button
                   size="sm"
-                  className="!bg-wd-primary dark:!bg-wd-primary/50 !text-wd-primary-foreground !text-xs !px-4"
+                  className="!bg-wd-primary !text-wd-primary-foreground !text-xs !px-4"
                   onPress={() => navigate('/endpoints/add')}
                 >
-                  <Icon icon="solar:add-circle-outline" width={22} />
+                  <Icon icon="solar:add-circle-outline" width={24} />
                   Add Endpoint
                 </Button>
               )}
             </div>
           ) : (
             <>
-              {sorted.map((ep, idx) => {
+              {sorted.map((ep) => {
                 const sc = ep.status ? statusConfig[ep.status] : pendingStatus
-                const tc = typeConfig[ep.type]
                 return (
                   <div
                     key={ep.id}
                     role="row"
                     className={cn(
-                      'grid items-center gap-x-2 px-3 py-2 cursor-pointer transition-colors',
-                      'border-b border-wd-border/10 hover:bg-wd-surface-hover',
-                      ep.endpointStatus === 'paused' && 'bg-wd-warning/[0.03] border-l-2 border-l-wd-warning/30',
+                      'grid items-center gap-x-3 px-3 py-2 cursor-pointer transition-colors relative',
+                      'border-b border-wd-border/10 hover:bg-black/[0.04] dark:hover:bg-black/25',
+                      ep.endpointStatus === 'paused' &&
+                        "bg-wd-warning/[0.03] before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-0.5 before:bg-wd-warning/30 before:pointer-events-none",
                       GRID_COLS,
                     )}
                     onClick={() => navigate(`/endpoints/${ep.id}`)}
@@ -758,15 +845,12 @@ export default function EndpointsPage() {
                       </Checkbox>
                     </div>
 
-                    {/* # */}
-                    <span className="text-[11px] text-wd-muted/50">{idx + 1}</span>
-
                     {/* Status */}
                     <Tooltip delay={400} closeDelay={0}>
-                      <TooltipTrigger>
+                      <TooltipTrigger className="!block !w-full !text-left !justify-start">
                         {ep.endpointStatus === 'paused' ? (
                           <div className="flex items-center gap-1.5">
-                            <Icon icon="solar:pause-circle-outline" width={14} className="text-wd-warning/70" />
+                            <Icon icon="solar:pause-circle-outline" width={16} className="text-wd-warning/70" />
                             <span className="text-xs font-medium text-wd-warning/70">Paused</span>
                           </div>
                         ) : (
@@ -782,7 +866,7 @@ export default function EndpointsPage() {
                             <div className="text-wd-warning">Monitoring paused</div>
                             <div className="text-wd-muted/60 text-[10px] mt-0.5">Checks are skipped while paused</div>
                             {ep.status && (
-                              <TipRow label="Last status" value={sc.label} className={sc.text} />
+                              <TipRow label="Last status" value={sc.label} className={sc.text} mono={false} />
                             )}
                           </>
                         ) : (
@@ -792,6 +876,7 @@ export default function EndpointsPage() {
                                 label="Reason"
                                 value={ep.errorMessage}
                                 className="text-wd-danger"
+                                mono={false}
                               />
                             )}
                             {ep.statusCode != null && (
@@ -802,6 +887,7 @@ export default function EndpointsPage() {
                                 label="Failures"
                                 value={`${ep.consecutiveFailures} consecutive`}
                                 className="text-wd-danger"
+                                mono={false}
                               />
                             )}
                             {ep.status === 'healthy' && !ep.errorMessage && ep.endpointStatus !== 'paused' && (
@@ -817,10 +903,10 @@ export default function EndpointsPage() {
 
                     {/* Name + URL */}
                     <Tooltip delay={400} closeDelay={0}>
-                      <TooltipTrigger>
+                      <TooltipTrigger className="!block !w-full !text-left !justify-start">
                         <div className="flex flex-col min-w-0 text-left">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-medium text-foreground truncate">
+                            <span className="text-[12.5px] font-medium text-foreground truncate">
                               {ep.name}
                             </span>
                             {ep.endpointStatus === 'paused' && (
@@ -829,11 +915,16 @@ export default function EndpointsPage() {
                               </span>
                             )}
                           </div>
-                          <span className="text-[11px] text-wd-muted truncate">{ep.url}</span>
+                          <span className="text-[10px] font-mono text-wd-muted/70 truncate">
+                            {ep.type === 'http' && ep.method
+                              ? `${ep.method} ${ep.url}`
+                              : ep.url}
+                          </span>
                         </div>
                       </TooltipTrigger>
                       <TooltipContent className={TIP_CLS}>
-                        <TipRow label="Interval" value={`Every ${ep.checkInterval}s`} />
+                        <TipRow label="Type" value={ep.type.toUpperCase()} />
+                        <TipRow label="Interval" value={`Every ${ep.checkInterval}s`} mono={false} />
                         {ep.method && (
                           <TipRow
                             label="Method"
@@ -844,33 +935,44 @@ export default function EndpointsPage() {
                       </TooltipContent>
                     </Tooltip>
 
-                    {/* Type */}
-                    <div className="flex items-center gap-1.5">
-                      <Icon icon={tc.icon} width={14} className={tc.color} />
-                      <span className="text-[11px] font-medium text-wd-muted">{tc.label}</span>
-                    </div>
-
-                    {/* Uptime (24h) */}
+                    {/* Uptime bar (30d) */}
                     {(() => {
                       const aggFailed = failedAggIds.has(ep.id)
+                      const history = historyMap.get(ep.id)
+                      if (aggFailed && !history) {
+                        return (
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => retryAggregation(ep.id)}
+                              className="text-wd-muted/40 hover:text-wd-muted transition-colors flex items-center gap-1.5 text-[11px]"
+                            >
+                              <Icon icon="solar:refresh-outline" width={16} />
+                              Retry
+                            </button>
+                          </div>
+                        )
+                      }
+                      return (
+                        <div
+                          className="w-full"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <UptimeBar history={history ?? buildHistory([])} loading={aggLoading} />
+                        </div>
+                      )
+                    })()}
+
+                    {/* Uptime % — rolling 30d from daily summaries */}
+                    {(() => {
+                      const rolling = uptime30dMap.get(ep.id)
                       const stats = uptimeMap.get(ep.id)
-                      const pct = stats?.['24h']
                       const hasAny = stats && (stats['24h'] != null || stats['7d'] != null || stats['30d'] != null || stats['90d'] != null)
                       return (
                         <Tooltip delay={400} closeDelay={0}>
-                          <TooltipTrigger>
-                            {aggFailed && !stats ? (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); retryAggregation(ep.id) }}
-                                className="text-wd-muted/40 hover:text-wd-muted transition-colors"
-                              >
-                                <Icon icon="solar:refresh-outline" width={13} />
-                              </button>
-                            ) : (
-                              <span className={cn('text-xs font-medium', pct != null ? uptimeColor(pct) : 'text-wd-muted/40')}>
-                                {pct != null ? `${pct}%` : '—'}
-                              </span>
-                            )}
+                          <TooltipTrigger className="!block !w-full !text-left !justify-start">
+                            <span className={cn('block w-full text-left text-xs font-mono font-medium', rolling != null ? uptimeColor(rolling) : 'text-wd-muted/40')}>
+                              {rolling != null ? `${rolling.toFixed(2)}%` : '—'}
+                            </span>
                           </TooltipTrigger>
                           <TooltipContent className={TIP_CLS}>
                             {hasAny ? (
@@ -881,6 +983,7 @@ export default function EndpointsPage() {
                                     ? <TipRow key={key} label={label} value={`${v}%`} className={uptimeColor(v)} />
                                     : <TipRow key={key} label={label} value="—" className="text-wd-muted" />
                                 })}
+                                <div className="text-wd-muted/60 mt-1 text-[10px]">Cell shows rolling 30d</div>
                               </>
                             ) : (
                               <div className="text-wd-muted">Waiting for check data</div>
@@ -890,128 +993,47 @@ export default function EndpointsPage() {
                       )
                     })()}
 
-                    {/* Response time */}
+                    {/* Response time (30d avg) */}
                     {(() => {
-                      const hourlies = hourlyMap.get(ep.id)
-                      const hasHourly = hourlies && hourlies.length > 0
+                      const avg30d = avg30dMap.get(ep.id)
+                      const dailies = dailyMap.get(ep.id)
+                      const hasDaily = dailies && dailies.length > 0
                       return (
                         <Tooltip delay={400} closeDelay={0}>
-                          <TooltipTrigger>
+                          <TooltipTrigger className="!block !w-full !text-left !justify-start">
                             <span
                               className={cn(
-                                'text-sm font-medium',
-                                ep.responseTime != null
-                                  ? latencyColor(ep.responseTime)
-                                  : 'text-wd-muted',
+                                'block w-full text-left text-xs font-mono font-medium',
+                                avg30d != null
+                                  ? latencyColor(avg30d)
+                                  : 'text-wd-muted/40',
                               )}
                             >
-                              {ep.responseTime != null ? `${ep.responseTime}ms` : '—'}
+                              {avg30d != null ? `${avg30d}ms` : '—'}
                             </span>
                           </TooltipTrigger>
                           <TooltipContent className={TIP_CLS}>
-                            {hasHourly ? (
+                            {hasDaily ? (
                               <>
                                 {ep.responseTime != null && (
                                   <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime)} />
                                 )}
-                                <TipRow label="Avg (hourly)" value={`${Math.round(hourlies.reduce((s, h) => s + h.avgResponseTime, 0) / hourlies.length)}ms`} className={latencyColor(Math.round(hourlies.reduce((s, h) => s + h.avgResponseTime, 0) / hourlies.length))} />
-                                <TipRow label="P95" value={`${Math.max(...hourlies.map((h) => h.p95ResponseTime))}ms`} />
-                                <TipRow label="Min" value={`${Math.min(...hourlies.map((h) => h.minResponseTime))}ms`} />
-                                <TipRow label="Max" value={`${Math.max(...hourlies.map((h) => h.maxResponseTime))}ms`} className={latencyColor(Math.max(...hourlies.map((h) => h.maxResponseTime)))} />
-                                <div className="text-wd-muted/60 mt-1 text-[10px]">Last {hourlies.length}h aggregated</div>
+                                {avg30d != null && (
+                                  <TipRow label="Avg (30d)" value={`${avg30d}ms`} className={latencyColor(avg30d)} />
+                                )}
+                                <TipRow label="P95" value={`${Math.max(...dailies.map((d) => d.p95ResponseTime))}ms`} />
+                                <TipRow label="Min" value={`${Math.min(...dailies.map((d) => d.minResponseTime))}ms`} />
+                                <TipRow label="Max" value={`${Math.max(...dailies.map((d) => d.maxResponseTime))}ms`} className={latencyColor(Math.max(...dailies.map((d) => d.maxResponseTime)))} />
+                                <div className="text-wd-muted/60 mt-1 text-[10px]">Rolling 30-day window</div>
                               </>
-                            ) : (() => {
-                              const hist = responseHistory.current.get(ep.id)
-                              if (hist && hist.length > 1) {
-                                const min = Math.min(...hist)
-                                const max = Math.max(...hist)
-                                const avg = Math.round(hist.reduce((a, b) => a + b, 0) / hist.length)
-                                return (
-                                  <>
-                                    <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime!)} />
-                                    <TipRow label="Avg" value={`${avg}ms`} className={latencyColor(avg)} />
-                                    <TipRow label="Min" value={`${min}ms`} />
-                                    <TipRow label="Max" value={`${max}ms`} className={latencyColor(max)} />
-                                    <div className="text-wd-muted/60 mt-1 text-[10px]">Last {hist.length} checks this session</div>
-                                  </>
-                                )
-                              }
-                              if (ep.responseTime != null) {
-                                return (
-                                  <>
-                                    <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime)} />
-                                    <div className="text-wd-muted/60 mt-1 text-[10px]">More stats after aggregation runs</div>
-                                  </>
-                                )
-                              }
-                              return <div className="text-wd-muted">No response data yet</div>
-                            })()}
-                          </TooltipContent>
-                        </Tooltip>
-                      )
-                    })()}
-
-                    {/* Sparkline — last 12h avg response time */}
-                    {(() => {
-                      const hourlies = hourlyMap.get(ep.id)
-                      if (!hourlies || hourlies.length < 2) {
-                        return (
-                          <Tooltip delay={400} closeDelay={0}>
-                            <TooltipTrigger>
-                              <span className="text-xs text-wd-muted/40">—</span>
-                            </TooltipTrigger>
-                            <TooltipContent className={TIP_CLS}>
-                              <div className="text-wd-muted">Waiting for aggregated data</div>
-                            </TooltipContent>
-                          </Tooltip>
-                        )
-                      }
-                      // Reverse so oldest is first (API returns newest first)
-                      const reversed = [...hourlies].reverse()
-                      const chartData = reversed.map((h) => ({ value: h.avgResponseTime }))
-                      const values = chartData.map((d) => d.value)
-                      const oldest = values[0]!
-                      const newest = values[values.length - 1]!
-                      const diffPct = oldest === 0 ? 0 : Math.round(((newest - oldest) / oldest) * 100)
-                      const trendDir = diffPct > 5 ? 'up' : diffPct < -5 ? 'down' : 'stable'
-                      const trendLabel = trendDir === 'up' ? 'Trending up' : trendDir === 'down' ? 'Trending down' : 'Stable'
-                      const trendColor = trendDir === 'up' ? 'text-wd-warning' : trendDir === 'down' ? 'text-wd-success' : 'text-wd-muted'
-                      const chartColor = trendDir === 'up' ? 'var(--wd-warning)' : trendDir === 'down' ? 'var(--wd-success)' : 'var(--wd-primary)'
-                      const avgAll = Math.round(values.reduce((a, b) => a + b, 0) / values.length)
-                      return (
-                        <Tooltip delay={400} closeDelay={0}>
-                          <TooltipTrigger>
-                            <div className="h-[24px] w-full pr-4">
-                              <ResponsiveContainer width="100%" height={24}>
-                                <AreaChart data={chartData} margin={{ top: 2, right: 0, bottom: 2, left: 0 }}>
-                                  <defs>
-                                    <linearGradient id={`spark-${ep.id}`} x1="0" x2="0" y1="0" y2="1">
-                                      <stop offset="5%" stopColor={chartColor} stopOpacity={0.2} />
-                                      <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
-                                    </linearGradient>
-                                  </defs>
-                                  <YAxis domain={[Math.min(...values) * 0.8, Math.max(...values) * 1.1]} hide />
-                                  <Area
-                                    dataKey="value"
-                                    stroke={chartColor}
-                                    strokeWidth={1.5}
-                                    fill={`url(#spark-${ep.id})`}
-                                    type="monotone"
-                                    fillOpacity={1}
-                                    dot={false}
-                                    isAnimationActive={false}
-                                  />
-                                </AreaChart>
-                              </ResponsiveContainer>
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent className={TIP_CLS}>
-                            <TipRow label="Trend" value={trendLabel} className={trendColor} />
-                            <TipRow label="Change" value={`${diffPct > 0 ? '+' : ''}${diffPct}% (${newest - oldest > 0 ? '+' : ''}${newest - oldest}ms)`} className={trendColor} />
-                            <TipRow label="Avg" value={`${avgAll}ms`} className={latencyColor(avgAll)} />
-                            <TipRow label="Oldest" value={`${oldest}ms`} />
-                            <TipRow label="Latest" value={`${newest}ms`} className={latencyColor(newest)} />
-                            <div className="text-wd-muted/60 mt-1 text-[10px]">Last {hourlies.length}h response time</div>
+                            ) : ep.responseTime != null ? (
+                              <>
+                                <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime)} />
+                                <div className="text-wd-muted/60 mt-1 text-[10px]">More stats after aggregation runs</div>
+                              </>
+                            ) : (
+                              <div className="text-wd-muted">No response data yet</div>
+                            )}
                           </TooltipContent>
                         </Tooltip>
                       )
@@ -1019,8 +1041,8 @@ export default function EndpointsPage() {
 
                     {/* Last Checked */}
                     <Tooltip delay={400} closeDelay={0}>
-                      <TooltipTrigger>
-                        <span className="text-xs text-wd-muted">
+                      <TooltipTrigger className="!block !w-full !text-left !justify-start">
+                        <span className="block w-full text-left text-xs font-mono text-wd-muted">
                           {timeAgo(ep.lastCheckAt)}
                         </span>
                       </TooltipTrigger>
@@ -1031,51 +1053,65 @@ export default function EndpointsPage() {
                     </Tooltip>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                      <Tooltip delay={300} closeDelay={0}>
-                        <TooltipTrigger>
-                          <Button
-                            isIconOnly
-                            size="sm"
-                            variant="ghost"
-                            className="!min-w-7 !h-7"
-                            onPress={() => handleRecheck(ep.id)}
+                    <div className="flex items-center justify-end" onClick={(e) => e.stopPropagation()}>
+                      <Dropdown>
+                        <Dropdown.Trigger>
+                          <div
+                            className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-wd-border/40 transition-colors cursor-pointer"
+                            aria-label={`Actions for ${ep.name}`}
                           >
-                            <Icon
-                              icon="solar:refresh-outline"
-                              width={15}
-                              className="text-wd-muted"
-                            />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent className="px-2 py-1 text-[11px]">
-                          Recheck now
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip delay={300} closeDelay={0}>
-                        <TooltipTrigger>
-                          <Button
-                            isIconOnly
-                            size="sm"
-                            variant="ghost"
-                            className="!min-w-7 !h-7"
-                            onPress={() => handleToggle(ep.id)}
-                          >
-                            <Icon
-                              icon={
-                                ep.endpointStatus !== 'paused'
-                                  ? 'solar:pause-outline'
-                                  : 'solar:play-outline'
+                            <Icon icon="solar:menu-dots-bold" width={16} className="text-wd-muted" />
+                          </div>
+                        </Dropdown.Trigger>
+                        <Dropdown.Popover placement="bottom end" className="!min-w-[180px]">
+                          <Dropdown.Menu
+                            onAction={(key) => {
+                              if (key === 'recheck') handleRecheck(ep.id)
+                              else if (key === 'toggle') handleToggle(ep.id)
+                              else if (key === 'settings') navigate(`/endpoints/${ep.id}?tab=settings`)
+                              else if (key === 'copy-url') {
+                                if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                                  navigator.clipboard.writeText(ep.url).catch(() => {})
+                                }
                               }
-                              width={15}
-                              className="text-wd-muted"
-                            />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent className="px-2 py-1 text-[11px]">
-                          {ep.endpointStatus !== 'paused' ? 'Pause' : 'Resume'}
-                        </TooltipContent>
-                      </Tooltip>
+                              else if (key === 'delete') setConfirmDelete(ep)
+                            }}
+                          >
+                            <Dropdown.Item id="recheck" className="!text-xs">
+                              <Icon icon="solar:refresh-linear" width={16} className="mr-1.5" />
+                              Check Now
+                            </Dropdown.Item>
+                            <Dropdown.Item id="toggle" className="!text-xs !text-wd-warning">
+                              <Icon
+                                icon={
+                                  ep.endpointStatus !== 'paused'
+                                    ? 'solar:pause-linear'
+                                    : 'solar:play-linear'
+                                }
+                                width={16}
+                                className="mr-1.5"
+                              />
+                              {ep.endpointStatus !== 'paused' ? 'Pause Monitoring' : 'Resume Monitoring'}
+                            </Dropdown.Item>
+                            <Dropdown.Item id="copy-url" className="!text-xs">
+                              <Icon icon="solar:copy-linear" width={16} className="mr-1.5" />
+                              Copy {ep.type === 'http' ? 'URL' : 'Address'}
+                            </Dropdown.Item>
+                            <Dropdown.Item id="settings" className="!text-xs">
+                              <Icon icon="solar:settings-linear" width={16} className="mr-1.5" />
+                              Settings
+                            </Dropdown.Item>
+                            <Dropdown.Item id="delete" className="!text-xs !text-wd-danger">
+                              <Icon
+                                icon="solar:trash-bin-minimalistic-linear"
+                                width={16}
+                                className="mr-1.5"
+                              />
+                              Delete Endpoint
+                            </Dropdown.Item>
+                          </Dropdown.Menu>
+                        </Dropdown.Popover>
+                      </Dropdown>
                     </div>
                   </div>
                 )
@@ -1094,7 +1130,7 @@ export default function EndpointsPage() {
           {selected.size > 0 ? (
             <>
               <span className="text-[11px] font-medium text-foreground">
-                {selected.size} selected
+                <span className="font-mono">{selected.size}</span> selected
               </span>
               <div className="flex items-center gap-1.5">
                 <Tooltip delay={300} closeDelay={0}>
@@ -1106,7 +1142,7 @@ export default function EndpointsPage() {
                       className="!min-w-7 !h-7"
                       onPress={() => handleBulkToggle(selected)}
                     >
-                      <Icon icon="solar:pause-outline" width={14} className="text-wd-muted" />
+                      <Icon icon="solar:pause-outline" width={16} className="text-wd-muted" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent className="px-2 py-1 text-[11px]">
@@ -1122,7 +1158,7 @@ export default function EndpointsPage() {
                       className="!min-w-7 !h-7"
                       onPress={() => handleBulkRecheck(selected)}
                     >
-                      <Icon icon="solar:refresh-outline" width={14} className="text-wd-muted" />
+                      <Icon icon="solar:refresh-outline" width={16} className="text-wd-muted" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent className="px-2 py-1 text-[11px]">
@@ -1140,7 +1176,7 @@ export default function EndpointsPage() {
                     >
                       <Icon
                         icon="solar:trash-bin-minimalistic-outline"
-                        width={14}
+                        width={16}
                         className="text-wd-danger"
                       />
                     </Button>
@@ -1155,16 +1191,75 @@ export default function EndpointsPage() {
                 onClick={() => setSelected(new Set())}
                 className="text-[11px] text-wd-muted hover:text-foreground transition-colors"
               >
-                Clear selection
+                Clear Selection
               </button>
             </>
           ) : (
             <span className="text-[11px] text-wd-muted">
-              Showing {sorted.length} of {totalEndpoints}
+              Showing <span className="font-mono">{sorted.length}</span> of <span className="font-mono">{totalEndpoints}</span>
             </span>
           )}
         </div>
       </div>
+
+      {/* ── Delete confirm modal ─────────────────────────────────────── */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => !deletingOne && setConfirmDelete(null)}
+          />
+          <div className="relative bg-wd-surface border border-wd-border rounded-xl p-6 w-full max-w-md shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="rounded-full bg-wd-danger/10 p-2">
+                <Icon
+                  icon="solar:trash-bin-minimalistic-linear"
+                  width={24}
+                  className="text-wd-danger"
+                />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Delete Endpoint</h3>
+                <p className="text-xs text-wd-muted">This action cannot be undone</p>
+              </div>
+            </div>
+            <p className="text-sm text-wd-muted mb-1">
+              Are you sure you want to archive{' '}
+              <span className="font-medium text-foreground">{confirmDelete.name}</span>?
+            </p>
+            <p className="text-xs text-wd-muted/60 mb-6">
+              The endpoint will be moved to the archived list. Check history and incident data will
+              be preserved.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                size="sm"
+                variant="bordered"
+                className="!text-xs"
+                isDisabled={deletingOne}
+                onPress={() => setConfirmDelete(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="!text-xs !bg-wd-danger !text-white"
+                onPress={handleConfirmDeleteOne}
+                isDisabled={deletingOne}
+              >
+                {deletingOne ? (
+                  <Spinner size="sm" />
+                ) : (
+                  <>
+                    <Icon icon="solar:trash-bin-minimalistic-linear" width={16} />
+                    Archive Endpoint
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -141,7 +141,7 @@ function InfoTip({ text }: { text: string }) {
     <Tooltip delay={200} closeDelay={0}>
       <TooltipTrigger>
         <span className="inline-flex cursor-help ml-1">
-          <Icon icon="solar:info-circle-linear" width={13} className="text-wd-muted/50" />
+          <Icon icon="solar:info-circle-linear" width={16} className="text-wd-muted/50" />
         </span>
       </TooltipTrigger>
       <TooltipContent placement="top" className="px-2.5 py-1.5 text-[11px] max-w-[280px] text-center leading-snug font-medium [word-break:normal] [overflow-wrap:normal]">
@@ -187,7 +187,7 @@ function FormSelect({
             )}
           >
             <span className="text-foreground">{selectedLabel}</span>
-            <Icon icon="solar:alt-arrow-down-linear" width={14} className="text-wd-muted" />
+            <Icon icon="solar:alt-arrow-down-linear" width={16} className="text-wd-muted" />
           </div>
         </Dropdown.Trigger>
         <Dropdown.Popover placement="bottom start" className="!min-w-[180px]">
@@ -357,9 +357,9 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                   icon={
                     endpoint.type === 'http' ? 'solar:global-outline' : 'solar:plug-circle-outline'
                   }
-                  width={14}
+                  width={16}
                 />
-                {endpoint.type.toUpperCase()}
+                <span className="font-mono">{endpoint.type.toUpperCase()}</span>
                 <span className="text-[10px] text-wd-muted/60 ml-1">(cannot be changed)</span>
               </div>
             </div>
@@ -391,7 +391,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                       {...field}
                       value={field.value ?? ''}
                       placeholder="https://api.example.com/health"
-                      className="!text-sm"
+                      className="!text-sm !font-mono"
                     />
                   </TextField>
                 )}
@@ -408,7 +408,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                         {...field}
                         value={field.value ?? ''}
                         placeholder="db.example.com"
-                        className="!text-sm"
+                        className="!text-sm !font-mono"
                       />
                     </TextField>
                   )}
@@ -429,7 +429,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                         }
                         onBlur={field.onBlur}
                         placeholder="5432"
-                        className="!text-sm"
+                        className="!text-sm !font-mono"
                       />
                     </TextField>
                   )}
@@ -458,10 +458,10 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                             'bg-wd-surface-hover/50 border border-wd-border/50 hover:bg-wd-surface-hover transition-colors',
                           )}
                         >
-                          <span className="text-foreground">{field.value ?? 'GET'}</span>
+                          <span className="text-foreground font-mono">{field.value ?? 'GET'}</span>
                           <Icon
                             icon="solar:alt-arrow-down-linear"
-                            width={14}
+                            width={16}
                             className="text-wd-muted"
                           />
                         </div>
@@ -476,7 +476,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                           }}
                         >
                           {METHOD_OPTIONS.map((m) => (
-                            <Dropdown.Item key={m} id={m} className="!text-xs">
+                            <Dropdown.Item key={m} id={m} className="!text-xs !font-mono">
                               {m}
                             </Dropdown.Item>
                           ))}
@@ -542,7 +542,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
               control={control}
               render={({ field }) => (
                 <FormSelect
-                  label="Check every"
+                  label="Check Every"
                   options={INTERVAL_OPTIONS}
                   value={field.value}
                   onChange={field.onChange}
@@ -568,7 +568,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
               control={control}
               render={({ field }) => (
                 <FormSelect
-                  label="Degraded after"
+                  label="Degraded After"
                   options={LATENCY_OPTIONS}
                   value={field.value}
                   onChange={field.onChange}
@@ -581,7 +581,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
               control={control}
               render={({ field }) => (
                 <FormSelect
-                  label="Failure threshold"
+                  label="Failure Threshold"
                   options={FAILURE_OPTIONS}
                   value={field.value}
                   onChange={field.onChange}
@@ -615,7 +615,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                           key={d}
                           value={String(d)}
                           className={cn(
-                            '!text-xs !px-3 !py-1.5 !rounded-lg !border !cursor-pointer',
+                            '!text-xs !font-mono !px-3 !py-1.5 !rounded-lg !border !cursor-pointer',
                             'data-[selected=true]:!border-wd-primary data-[selected=true]:!bg-wd-primary/10',
                             'data-[selected=false]:!border-wd-border/50 data-[selected=false]:!bg-wd-surface-hover/30',
                           )}
@@ -640,7 +640,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col gap-0.5">
                     <span className="text-xs font-medium text-foreground">
-                      Recovery alert
+                      Recovery Alert
                       <InfoTip text="Sends a notification when the endpoint recovers from a downtime incident" />
                     </span>
                     <span className="text-[11px] text-wd-muted/60">
@@ -662,7 +662,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                 control={control}
                 render={({ field }) => (
                   <FormSelect
-                    label="Alert cooldown"
+                    label="Alert Cooldown"
                     options={COOLDOWN_OPTIONS}
                     value={field.value}
                     onChange={field.onChange}
@@ -675,7 +675,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                 control={control}
                 render={({ field }) => (
                   <FormSelect
-                    label="Escalation delay"
+                    label="Escalation Delay"
                     options={ESCALATION_OPTIONS}
                     value={field.value}
                     onChange={field.onChange}
@@ -694,7 +694,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                   return (
                     <div className="flex flex-col gap-1">
                       <span className="text-xs font-medium text-wd-muted">
-                        Escalate to
+                        Escalate To
                         <InfoTip text="Secondary notification channel that receives alerts if the incident is not resolved" />
                       </span>
                       <Dropdown>
@@ -706,11 +706,11 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                             )}
                           >
                             <span className={selectedCh ? 'text-foreground' : 'text-wd-muted/60'}>
-                              {selectedCh?.name ?? 'Select a channel'}
+                              {selectedCh?.name ?? 'Select a Channel'}
                             </span>
                             <Icon
                               icon="solar:alt-arrow-down-linear"
-                              width={14}
+                              width={16}
                               className="text-wd-muted"
                             />
                           </div>
@@ -735,7 +735,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                                           ? 'simple-icons:slack'
                                           : 'solar:letter-outline'
                                     }
-                                    width={12}
+                                    width={16}
                                     className="text-wd-muted"
                                   />
                                   {ch.name}
@@ -766,7 +766,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
             <div className="flex items-center gap-2 rounded-lg bg-wd-surface-hover/30 px-3 py-2.5">
               <Icon
                 icon="solar:info-circle-outline"
-                width={14}
+                width={16}
                 className="text-wd-muted/60 shrink-0"
               />
               <span className="text-xs text-wd-muted/60">
@@ -801,7 +801,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                                 ? 'simple-icons:slack'
                                 : 'solar:letter-outline'
                           }
-                          width={14}
+                          width={16}
                           className="text-wd-muted"
                         />
                         <span>{ch.name}</span>
@@ -817,7 +817,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
         {/* Danger Zone */}
         <div className="bg-wd-surface border border-wd-danger/20 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4">
-            <Icon icon="solar:danger-triangle-linear" width={16} className="text-wd-danger" />
+            <Icon icon="solar:danger-triangle-linear" width={20} className="text-wd-danger" />
             <h3 className="text-sm font-semibold text-wd-danger">Danger Zone</h3>
           </div>
           <p className="text-xs text-wd-muted/60 mb-4">
@@ -829,7 +829,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                 icon={
                   endpoint.status === 'active' ? 'solar:pause-linear' : 'solar:play-linear'
                 }
-                width={14}
+                width={16}
               />
               {endpoint.status === 'active' ? 'Pause Endpoint' : 'Resume Endpoint'}
             </Button>
@@ -839,7 +839,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
               className="!text-xs !border-wd-danger/30 !text-wd-danger"
               onPress={() => setShowDeleteModal(true)}
             >
-              <Icon icon="solar:trash-bin-minimalistic-linear" width={14} />
+              <Icon icon="solar:trash-bin-minimalistic-linear" width={16} />
               Delete Endpoint
             </Button>
           </div>
@@ -849,14 +849,14 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
       {/* ── Save bar ──────────────────────────────────────────────── */}
       {saveError && (
         <div className="flex items-center gap-2 rounded-lg border border-wd-danger/30 bg-wd-danger/5 px-3 py-2">
-          <Icon icon="solar:danger-triangle-outline" width={16} className="text-wd-danger shrink-0" />
+          <Icon icon="solar:danger-triangle-outline" width={20} className="text-wd-danger shrink-0" />
           <span className="text-xs text-wd-danger">{saveError}</span>
         </div>
       )}
 
       {saveSuccess && (
         <div className="flex items-center gap-2 rounded-lg border border-wd-success/30 bg-wd-success/5 px-3 py-2">
-          <Icon icon="solar:check-circle-linear" width={16} className="text-wd-success shrink-0" />
+          <Icon icon="solar:check-circle-linear" width={20} className="text-wd-success shrink-0" />
           <span className="text-xs text-wd-success">Settings saved successfully</span>
         </div>
       )}
@@ -874,7 +874,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
         <Button
           type="submit"
           size="sm"
-          className="!bg-wd-primary dark:!bg-wd-primary/50 !text-wd-primary-foreground !text-xs !px-6 !font-medium"
+          className="!bg-wd-primary !text-wd-primary-foreground !text-xs !px-6 !font-medium"
           isDisabled={!isDirty || saving}
         >
           {saving ? (
@@ -884,7 +884,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
             </>
           ) : (
             <>
-              <Icon icon="solar:diskette-linear" width={16} className="mr-1" />
+              <Icon icon="solar:diskette-linear" width={20} className="mr-1" />
               Save Changes
             </>
           )}
@@ -900,7 +900,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
               <div className="rounded-full bg-wd-danger/10 p-2">
                 <Icon
                   icon="solar:trash-bin-minimalistic-linear"
-                  width={20}
+                  width={24}
                   className="text-wd-danger"
                 />
               </div>
@@ -936,7 +936,7 @@ export default function SettingsTab({ endpoint, onUpdate, onDelete, onToggle }: 
                   <Spinner size="sm" />
                 ) : (
                   <>
-                    <Icon icon="solar:trash-bin-minimalistic-linear" width={14} />
+                    <Icon icon="solar:trash-bin-minimalistic-linear" width={16} />
                     Archive Endpoint
                   </>
                 )}
@@ -965,7 +965,7 @@ function SectionCard({
   return (
     <div className="bg-wd-surface border border-wd-border/50 rounded-xl p-5">
       <div className="flex items-center gap-2 mb-4">
-        <Icon icon={icon} width={16} className="text-wd-muted" />
+        <Icon icon={icon} width={20} className="text-wd-muted" />
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       </div>
       {children}

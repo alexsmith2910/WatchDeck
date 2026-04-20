@@ -584,10 +584,10 @@ export default function OverviewPage() {
             response times, and alert you when things go wrong.
           </p>
           <Button
-            className="!bg-wd-primary dark:!bg-wd-primary/50 !text-wd-primary-foreground !rounded-lg !font-medium"
+            className="!bg-wd-primary !text-wd-primary-foreground !rounded-lg !font-medium"
             onPress={() => navigate('/endpoints/add')}
           >
-            <Icon icon="solar:add-circle-outline" width={18} />
+            <Icon icon="solar:add-circle-outline" width={20} />
             Add Endpoint
           </Button>
         </div>
@@ -647,8 +647,7 @@ export default function OverviewPage() {
                 id={r.key}
                 className={cn(
                   '!text-xs !px-3',
-                  'data-[selected=true]:!bg-wd-primary dark:data-[selected=true]:!bg-wd-primary/50 data-[selected=true]:!text-wd-primary-foreground',
-                  'dark:data-[selected=true]:!bg-wd-primary/50',
+                  'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
                 )}
               >
                 {r.label}
@@ -661,15 +660,15 @@ export default function OverviewPage() {
       {/* Data warning */}
       {dataInsufficient && (
         <div className="flex items-center gap-2 rounded-lg border border-wd-warning/30 bg-wd-warning/5 px-3 py-2">
-          <Icon icon="solar:info-circle-outline" width={16} className="text-wd-warning shrink-0" />
+          <Icon icon="solar:info-circle-outline" width={20} className="text-wd-warning shrink-0" />
           <span className="text-xs text-wd-warning">
-            Only {humanDuration(dataHours!)} of data available for the selected {selectedRange.label} range
+            Only <span className="font-mono">{humanDuration(dataHours!)}</span> of data available for the selected <span className="font-mono">{selectedRange.label}</span> range
           </span>
         </div>
       )}
       {dataHours === null && !chartLoading && endpoints.length > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-wd-border/30 bg-wd-surface-hover/30 px-3 py-2">
-          <Icon icon="solar:clock-circle-outline" width={16} className="text-wd-muted shrink-0" />
+          <Icon icon="solar:clock-circle-outline" width={20} className="text-wd-muted shrink-0" />
           <span className="text-xs text-wd-muted">
             Waiting for aggregated data &mdash; charts will populate after the first hourly rollup
           </span>

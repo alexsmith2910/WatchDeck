@@ -224,7 +224,7 @@ function FormSelect({
             )}
           >
             <span className="text-foreground">{selectedLabel}</span>
-            <Icon icon="solar:alt-arrow-down-linear" width={14} className="text-wd-muted" />
+            <Icon icon="solar:alt-arrow-down-linear" width={16} className="text-wd-muted" />
           </div>
         </Dropdown.Trigger>
         <Dropdown.Popover placement="bottom start" className="!min-w-[180px]">
@@ -442,7 +442,7 @@ export default function AddEndpointPage() {
             }
           }}
         >
-          <Icon icon="solar:arrow-left-linear" width={18} />
+          <Icon icon="solar:arrow-left-linear" width={20} />
         </Button>
         <h1 className="text-xl font-semibold text-foreground">Add Endpoint</h1>
       </div>
@@ -465,20 +465,20 @@ export default function AddEndpointPage() {
               id="http"
               className={cn(
                 '!text-xs !px-4',
-                'data-[selected=true]:!bg-wd-primary dark:data-[selected=true]:!bg-wd-primary/50 data-[selected=true]:!text-wd-primary-foreground',
+                'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
               )}
             >
-              <Icon icon="solar:global-outline" width={14} className="mr-1" />
+              <Icon icon="solar:global-outline" width={16} className="mr-1" />
               HTTP
             </ToggleButton>
             <ToggleButton
               id="port"
               className={cn(
                 '!text-xs !px-4',
-                'data-[selected=true]:!bg-wd-primary dark:data-[selected=true]:!bg-wd-primary/50 data-[selected=true]:!text-wd-primary-foreground',
+                'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
               )}
             >
-              <Icon icon="solar:plug-circle-outline" width={14} className="mr-1" />
+              <Icon icon="solar:plug-circle-outline" width={16} className="mr-1" />
               Port
             </ToggleButton>
           </ToggleButtonGroup>
@@ -514,7 +514,7 @@ export default function AddEndpointPage() {
                     {...field}
                     value={field.value ?? ''}
                     placeholder="https://api.example.com/health"
-                    className="!text-sm"
+                    className="!text-sm !font-mono"
                     onBlur={(e) => {
                       // Auto-prepend https:// if user typed a bare domain
                       const v = (e.target as HTMLInputElement).value.trim()
@@ -545,8 +545,8 @@ export default function AddEndpointPage() {
                           'bg-wd-surface-hover/50 border border-wd-border/50 hover:bg-wd-surface-hover transition-colors',
                         )}
                       >
-                        <span className="text-foreground">{field.value ?? 'GET'}</span>
-                        <Icon icon="solar:alt-arrow-down-linear" width={14} className="text-wd-muted" />
+                        <span className="font-mono text-foreground">{field.value ?? 'GET'}</span>
+                        <Icon icon="solar:alt-arrow-down-linear" width={16} className="text-wd-muted" />
                       </div>
                     </Dropdown.Trigger>
                     <Dropdown.Popover placement="bottom start" className="!min-w-[140px]">
@@ -559,7 +559,7 @@ export default function AddEndpointPage() {
                         }}
                       >
                         {METHOD_OPTIONS.map((m) => (
-                          <Dropdown.Item key={m} id={m} className="!text-xs">
+                          <Dropdown.Item key={m} id={m} className="!text-xs !font-mono">
                             {m}
                           </Dropdown.Item>
                         ))}
@@ -585,7 +585,7 @@ export default function AddEndpointPage() {
                     {...field}
                     value={field.value ?? ''}
                     placeholder="db.example.com"
-                    className="!text-sm"
+                    className="!text-sm !font-mono"
                   />
                   {(errors as any).host && (
                     <FieldError className="!text-[11px]">{(errors as any).host?.message}</FieldError>
@@ -607,7 +607,7 @@ export default function AddEndpointPage() {
                     onChange={(e) => field.onChange(e.target.value ? Number(e.target.value) : undefined)}
                     onBlur={field.onBlur}
                     placeholder="5432"
-                    className="!text-sm"
+                    className="!text-sm !font-mono"
                   />
                   {(errors as any).port && (
                     <FieldError className="!text-[11px]">{(errors as any).port?.message}</FieldError>
@@ -634,7 +634,7 @@ export default function AddEndpointPage() {
               </>
             ) : (
               <>
-                <Icon icon="solar:pulse-2-linear" width={14} className="mr-1" />
+                <Icon icon="solar:pulse-2-linear" width={16} className="mr-1" />
                 Test Connection
               </>
             )}
@@ -648,19 +648,19 @@ export default function AddEndpointPage() {
             )}>
               <Icon
                 icon={testResult.success ? 'solar:check-circle-linear' : 'solar:close-circle-linear'}
-                width={14}
+                width={16}
               />
               <span className="font-medium">
                 {testResult.success
-                  ? `Connected — ${testResult.responseTime}ms`
+                  ? <>Connected &mdash; <span className="font-mono">{testResult.responseTime}ms</span></>
                   : testResult.errorMessage ?? 'Connection failed'}
               </span>
               {testResult.success && testResult.statusCode != null && (
-                <span className="text-wd-muted">({testResult.statusCode})</span>
+                <span className="font-mono text-wd-muted">({testResult.statusCode})</span>
               )}
               {testResult.success && testResult.sslDaysRemaining != null && (
                 <span className={cn(
-                  'text-[10px]',
+                  'text-[10px] font-mono',
                   testResult.sslDaysRemaining > 14 ? 'text-wd-muted' : 'text-wd-warning',
                 )}>
                   SSL: {testResult.sslDaysRemaining}d
@@ -681,11 +681,11 @@ export default function AddEndpointPage() {
               <Accordion.Heading>
                 <Accordion.Trigger className="!px-0 !py-3 group">
                   <div className="flex items-center gap-2 flex-1">
-                    <Icon icon="solar:checklist-outline" width={16} className="text-wd-muted" />
+                    <Icon icon="solar:checklist-outline" width={20} className="text-wd-muted" />
                     <span className="text-sm font-medium text-foreground">Expected Response</span>
                   </div>
                   <Accordion.Indicator className="text-wd-muted transition-transform duration-200 group-data-[expanded]:rotate-180">
-                    <Icon icon="solar:alt-arrow-down-linear" width={16} />
+                    <Icon icon="solar:alt-arrow-down-linear" width={20} />
                   </Accordion.Indicator>
                 </Accordion.Trigger>
               </Accordion.Heading>
@@ -724,11 +724,11 @@ export default function AddEndpointPage() {
               <Accordion.Heading>
                 <Accordion.Trigger className="!px-0 !py-3 group">
                   <div className="flex items-center gap-2 flex-1">
-                    <Icon icon="solar:code-square-outline" width={16} className="text-wd-muted" />
+                    <Icon icon="solar:code-square-outline" width={20} className="text-wd-muted" />
                     <span className="text-sm font-medium text-foreground">Custom Headers</span>
                   </div>
                   <Accordion.Indicator className="text-wd-muted transition-transform duration-200 group-data-[expanded]:rotate-180">
-                    <Icon icon="solar:alt-arrow-down-linear" width={16} />
+                    <Icon icon="solar:alt-arrow-down-linear" width={20} />
                   </Accordion.Indicator>
                 </Accordion.Trigger>
               </Accordion.Heading>
@@ -754,11 +754,11 @@ export default function AddEndpointPage() {
             <Accordion.Heading>
               <Accordion.Trigger className="!px-0 !py-3 group">
                 <div className="flex items-center gap-2 flex-1">
-                  <Icon icon="solar:clock-circle-outline" width={16} className="text-wd-muted" />
+                  <Icon icon="solar:clock-circle-outline" width={20} className="text-wd-muted" />
                   <span className="text-sm font-medium text-foreground">Schedule & Thresholds</span>
                 </div>
                 <Accordion.Indicator className="text-wd-muted transition-transform duration-200 group-data-[expanded]:rotate-180">
-                  <Icon icon="solar:alt-arrow-down-linear" width={16} />
+                  <Icon icon="solar:alt-arrow-down-linear" width={20} />
                 </Accordion.Indicator>
               </Accordion.Trigger>
             </Accordion.Heading>
@@ -770,7 +770,7 @@ export default function AddEndpointPage() {
                     control={control}
                     render={({ field }) => (
                       <FormSelect
-                        label="Check every"
+                        label="Check Every"
                         options={INTERVAL_OPTIONS}
                         value={field.value}
                         onChange={field.onChange}
@@ -796,7 +796,7 @@ export default function AddEndpointPage() {
                     control={control}
                     render={({ field }) => (
                       <FormSelect
-                        label="Degraded after"
+                        label="Degraded After"
                         options={LATENCY_OPTIONS}
                         value={field.value}
                         onChange={field.onChange}
@@ -809,7 +809,7 @@ export default function AddEndpointPage() {
                     control={control}
                     render={({ field }) => (
                       <FormSelect
-                        label="Failure threshold"
+                        label="Failure Threshold"
                         options={FAILURE_OPTIONS}
                         value={field.value}
                         onChange={field.onChange}
@@ -828,18 +828,18 @@ export default function AddEndpointPage() {
               <Accordion.Heading>
                 <Accordion.Trigger className="!px-0 !py-3 group">
                   <div className="flex items-center gap-2 flex-1">
-                    <Icon icon="solar:lock-outline" width={16} className="text-wd-muted" />
+                    <Icon icon="solar:lock-outline" width={20} className="text-wd-muted" />
                     <span className="text-sm font-medium text-foreground">SSL Certificate</span>
                   </div>
                   <Accordion.Indicator className="text-wd-muted transition-transform duration-200 group-data-[expanded]:rotate-180">
-                    <Icon icon="solar:alt-arrow-down-linear" width={16} />
+                    <Icon icon="solar:alt-arrow-down-linear" width={20} />
                   </Accordion.Indicator>
                 </Accordion.Trigger>
               </Accordion.Heading>
               <Accordion.Panel>
                 <Accordion.Body className="!px-0 !pb-4 !pt-0">
                   <div className="flex flex-col gap-2">
-                    <span className="text-xs font-medium text-wd-muted">Warn before expiry</span>
+                    <span className="text-xs font-medium text-wd-muted">Warn Before Expiry</span>
                     <Controller
                       name="sslWarningDays"
                       control={control}
@@ -881,11 +881,11 @@ export default function AddEndpointPage() {
             <Accordion.Heading>
               <Accordion.Trigger className="!px-0 !py-3 group">
                 <div className="flex items-center gap-2 flex-1">
-                  <Icon icon="solar:bell-outline" width={16} className="text-wd-muted" />
+                  <Icon icon="solar:bell-outline" width={20} className="text-wd-muted" />
                   <span className="text-sm font-medium text-foreground">Notifications</span>
                 </div>
                 <Accordion.Indicator className="text-wd-muted transition-transform duration-200 group-data-[expanded]:rotate-180">
-                  <Icon icon="solar:alt-arrow-down-linear" width={16} />
+                  <Icon icon="solar:alt-arrow-down-linear" width={20} />
                 </Accordion.Indicator>
               </Accordion.Trigger>
             </Accordion.Heading>
@@ -894,7 +894,7 @@ export default function AddEndpointPage() {
                 <div className="flex flex-col gap-5">
                   {/* Channel checkboxes */}
                   <div className="flex flex-col gap-2">
-                    <span className="text-xs font-medium text-wd-muted">Alert channels</span>
+                    <span className="text-xs font-medium text-wd-muted">Alert Channels</span>
                     {channelsLoading ? (
                       <div className="flex items-center gap-2 py-2">
                         <Spinner size="sm" />
@@ -902,7 +902,7 @@ export default function AddEndpointPage() {
                       </div>
                     ) : channels.length === 0 ? (
                       <div className="flex items-center gap-2 rounded-lg bg-wd-surface-hover/30 px-3 py-2.5">
-                        <Icon icon="solar:info-circle-outline" width={14} className="text-wd-muted/60 shrink-0" />
+                        <Icon icon="solar:info-circle-outline" width={16} className="text-wd-muted/60 shrink-0" />
                         <span className="text-xs text-wd-muted/60">
                           No notification channels configured.{' '}
                           <span
@@ -935,7 +935,7 @@ export default function AddEndpointPage() {
                                           ? 'simple-icons:slack'
                                           : 'solar:letter-outline'
                                     }
-                                    width={14}
+                                    width={16}
                                     className="text-wd-muted"
                                   />
                                   <span>{ch.name}</span>
@@ -957,7 +957,7 @@ export default function AddEndpointPage() {
                     render={({ field }) => (
                       <div className="flex items-center justify-between">
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-xs font-medium text-foreground">Recovery alert</span>
+                          <span className="text-xs font-medium text-foreground">Recovery Alert</span>
                           <span className="text-[11px] text-wd-muted/60">
                             Send notification when endpoint recovers
                           </span>
@@ -981,7 +981,7 @@ export default function AddEndpointPage() {
                     control={control}
                     render={({ field }) => (
                       <FormSelect
-                        label="Alert cooldown"
+                        label="Alert Cooldown"
                         options={COOLDOWN_OPTIONS}
                         value={field.value}
                         onChange={field.onChange}
@@ -996,7 +996,7 @@ export default function AddEndpointPage() {
                     control={control}
                     render={({ field }) => (
                       <FormSelect
-                        label="Escalation delay"
+                        label="Escalation Delay"
                         options={ESCALATION_OPTIONS}
                         value={field.value}
                         onChange={field.onChange}
@@ -1014,7 +1014,7 @@ export default function AddEndpointPage() {
                         const selectedCh = channels.find((c) => c._id === field.value)
                         return (
                           <div className="flex flex-col gap-1">
-                            <span className="text-xs font-medium text-wd-muted">Escalate to</span>
+                            <span className="text-xs font-medium text-wd-muted">Escalate To</span>
                             <Dropdown>
                               <Dropdown.Trigger>
                                 <div
@@ -1024,9 +1024,9 @@ export default function AddEndpointPage() {
                                   )}
                                 >
                                   <span className={selectedCh ? 'text-foreground' : 'text-wd-muted/60'}>
-                                    {selectedCh?.name ?? 'Select a channel'}
+                                    {selectedCh?.name ?? 'Select a Channel'}
                                   </span>
-                                  <Icon icon="solar:alt-arrow-down-linear" width={14} className="text-wd-muted" />
+                                  <Icon icon="solar:alt-arrow-down-linear" width={16} className="text-wd-muted" />
                                 </div>
                               </Dropdown.Trigger>
                               <Dropdown.Popover placement="bottom start" className="!min-w-[180px]">
@@ -1049,7 +1049,7 @@ export default function AddEndpointPage() {
                                                 ? 'simple-icons:slack'
                                                 : 'solar:letter-outline'
                                           }
-                                          width={12}
+                                          width={16}
                                           className="text-wd-muted"
                                         />
                                         {ch.name}
@@ -1076,7 +1076,7 @@ export default function AddEndpointPage() {
         {/* ── Submit Error ──────────────────────────────────────────── */}
         {submitError && (
           <div className="flex items-center gap-2 rounded-lg border border-wd-danger/30 bg-wd-danger/5 px-3 py-2">
-            <Icon icon="solar:danger-triangle-outline" width={16} className="text-wd-danger shrink-0" />
+            <Icon icon="solar:danger-triangle-outline" width={20} className="text-wd-danger shrink-0" />
             <span className="text-xs text-wd-danger">{submitError}</span>
           </div>
         )}
@@ -1099,7 +1099,7 @@ export default function AddEndpointPage() {
           <Button
             type="submit"
             size="sm"
-            className="!bg-wd-primary dark:!bg-wd-primary/50 !text-wd-primary-foreground !text-xs !px-6 !font-medium"
+            className="!bg-wd-primary !text-wd-primary-foreground !text-xs !px-6 !font-medium"
             isDisabled={submitting}
           >
             {submitting ? (
@@ -1109,7 +1109,7 @@ export default function AddEndpointPage() {
               </>
             ) : (
               <>
-                <Icon icon="solar:add-circle-outline" width={16} className="mr-1" />
+                <Icon icon="solar:add-circle-outline" width={20} className="mr-1" />
                 Create Endpoint
               </>
             )}

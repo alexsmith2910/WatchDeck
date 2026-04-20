@@ -44,7 +44,7 @@ function CountBadge({ count, color }: { count: number; color: string }) {
   return (
     <span
       className={cn(
-        'ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold leading-none',
+        'ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold font-mono leading-none',
         color,
       )}
     >
@@ -114,7 +114,7 @@ function NavButton({
     >
       <Icon
         icon={item.icon}
-        width={20}
+        width={24}
         className={cn(
           'text-wd-muted shrink-0 transition-colors',
           isActive && 'text-foreground',

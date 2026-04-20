@@ -389,7 +389,7 @@ export default function MetricsTab({ endpointId }: MetricsTabProps) {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-wd-success opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-wd-success" />
               </span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-wd-success">Live</span>
+              <span className="text-[10px] font-mono font-semibold uppercase tracking-wider text-wd-success">Live</span>
             </div>
           )}
           <div className="flex items-center gap-0.5 rounded-lg bg-wd-surface-hover/50 p-0.5">
@@ -399,7 +399,7 @@ export default function MetricsTab({ endpointId }: MetricsTabProps) {
                 type="button"
                 onClick={() => selectPreset(r)}
                 className={cn(
-                  'px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer',
+                  'px-2.5 py-1 rounded-md text-[11px] font-mono font-medium transition-colors cursor-pointer',
                   timeRange === r
                     ? 'bg-wd-surface text-foreground shadow-sm'
                     : 'text-wd-muted hover:text-foreground',
@@ -496,11 +496,11 @@ export default function MetricsTab({ endpointId }: MetricsTabProps) {
             <div className="bg-wd-surface border border-wd-border/50 rounded-xl p-3.5 cursor-help">
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="rounded-lg bg-wd-primary/10 p-1.5">
-                  <Icon icon="solar:graph-up-linear" width={14} className="text-wd-primary" />
+                  <Icon icon="solar:graph-up-linear" width={16} className="text-wd-primary" />
                 </div>
                 <span className="text-[11px] text-wd-muted">Avg Response</span>
               </div>
-              <div className="text-xl font-semibold text-foreground">
+              <div className="text-xl font-mono font-semibold text-foreground">
                 {kpiStats.avg}<span className="text-xs text-wd-muted font-normal">ms</span>
               </div>
             </div>
@@ -509,11 +509,11 @@ export default function MetricsTab({ endpointId }: MetricsTabProps) {
             <div className="bg-wd-surface border border-wd-border/50 rounded-xl p-3.5 cursor-help">
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="rounded-lg bg-wd-warning/10 p-1.5">
-                  <Icon icon="solar:graph-up-linear" width={14} className="text-wd-warning" />
+                  <Icon icon="solar:graph-up-linear" width={16} className="text-wd-warning" />
                 </div>
                 <span className="text-[11px] text-wd-muted">P95 Response</span>
               </div>
-              <div className="text-xl font-semibold text-foreground">
+              <div className="text-xl font-mono font-semibold text-foreground">
                 {kpiStats.p95}<span className="text-xs text-wd-muted font-normal">ms</span>
               </div>
             </div>
@@ -522,11 +522,11 @@ export default function MetricsTab({ endpointId }: MetricsTabProps) {
             <div className="bg-wd-surface border border-wd-border/50 rounded-xl p-3.5 cursor-help">
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="rounded-lg bg-wd-success/10 p-1.5">
-                  <Icon icon="solar:shield-check-linear" width={14} className="text-wd-success" />
+                  <Icon icon="solar:shield-check-linear" width={16} className="text-wd-success" />
                 </div>
                 <span className="text-[11px] text-wd-muted">Uptime</span>
               </div>
-              <div className="text-xl font-semibold text-foreground">
+              <div className="text-xl font-mono font-semibold text-foreground">
                 {kpiStats.uptime}<span className="text-xs text-wd-muted font-normal">%</span>
               </div>
             </div>
@@ -535,11 +535,11 @@ export default function MetricsTab({ endpointId }: MetricsTabProps) {
             <div className="bg-wd-surface border border-wd-border/50 rounded-xl p-3.5 cursor-help">
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="rounded-lg bg-wd-surface-hover p-1.5">
-                  <Icon icon="solar:checklist-minimalistic-linear" width={14} className="text-wd-muted" />
+                  <Icon icon="solar:checklist-minimalistic-linear" width={16} className="text-wd-muted" />
                 </div>
                 <span className="text-[11px] text-wd-muted">Total Checks</span>
               </div>
-              <div className="text-xl font-semibold text-foreground">
+              <div className="text-xl font-mono font-semibold text-foreground">
                 {kpiStats.total.toLocaleString()}
               </div>
             </div>
@@ -564,7 +564,7 @@ export default function MetricsTab({ endpointId }: MetricsTabProps) {
                     : 'text-wd-muted hover:text-foreground hover:bg-wd-surface-hover',
                 )}
               >
-                <Icon icon={m.icon} width={13} />
+                <Icon icon={m.icon} width={16} />
                 {m.label}
               </button>
             ))}
@@ -615,7 +615,7 @@ export default function MetricsTab({ endpointId }: MetricsTabProps) {
                 className="p-1.5 rounded-lg text-wd-muted hover:text-foreground hover:bg-wd-surface-hover/50 transition-colors cursor-pointer"
                 aria-label="Chart options"
               >
-                <Icon icon="solar:menu-dots-bold" width={16} />
+                <Icon icon="solar:menu-dots-bold" width={20} />
               </button>
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom end" className="!min-w-[160px]">
@@ -918,13 +918,13 @@ function ResponseDistribution({ data }: { data: Record<string, string | number>[
     <div className="bg-wd-surface border border-wd-border/50 rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Icon icon="solar:chart-2-linear" width={14} className="text-wd-muted" />
+          <Icon icon="solar:chart-2-linear" width={16} className="text-wd-muted" />
           <span className="text-sm font-semibold text-foreground">Response Time Distribution</span>
         </div>
         <div className="flex items-center gap-4 text-[11px] text-wd-muted">
-          <span>Median: <span className="font-semibold text-foreground">{median}ms</span></span>
-          <span>P90: <span className="font-semibold text-foreground">{p90}ms</span></span>
-          <span>Std Dev: <span className="font-semibold text-foreground">±{stddev}ms</span></span>
+          <span>Median: <span className="font-mono font-semibold text-foreground">{median}ms</span></span>
+          <span>P90: <span className="font-mono font-semibold text-foreground">{p90}ms</span></span>
+          <span>Std Dev: <span className="font-mono font-semibold text-foreground">±{stddev}ms</span></span>
         </div>
       </div>
       <div className="space-y-1">

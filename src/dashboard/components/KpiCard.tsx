@@ -88,8 +88,8 @@ function ChartTooltipContent({ active, payload, unit }: { active?: boolean; payl
   const data = payload[0]
   return (
     <div className="rounded-lg bg-wd-surface border border-wd-border px-2.5 py-1.5 shadow-lg">
-      <div className="text-[11px] text-wd-muted">{data.payload.label}</div>
-      <div className="text-xs font-semibold text-foreground">{data.value}{unit}</div>
+      <div className="text-[11px] font-mono text-wd-muted">{data.payload.label}</div>
+      <div className="text-xs font-mono font-semibold text-foreground">{data.value}{unit}</div>
     </div>
   )
 }
@@ -120,7 +120,7 @@ const KpiCard = React.forwardRef<HTMLDivElement, KpiCardProps>(
                 tabIndex={0}
                 className="inline-flex items-center justify-center w-6 h-6 rounded-full hover:bg-wd-surface-hover cursor-pointer transition-colors"
               >
-                <Icon className="text-wd-muted" height={14} icon="solar:menu-dots-bold" width={14} />
+                <Icon className="text-wd-muted" height={16} icon="solar:menu-dots-bold" width={16} />
               </div>
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom end" className="!min-w-[120px]">
@@ -137,11 +137,11 @@ const KpiCard = React.forwardRef<HTMLDivElement, KpiCardProps>(
             <div className="flex flex-col gap-y-3">
               <div className="flex items-center gap-x-2.5">
                 <div className={cn('rounded-lg p-1.5', colors.iconBg, colors.iconText)}>
-                  <Icon className="text-inherit" height={16} icon={icon} width={16} />
+                  <Icon className="text-inherit" height={20} icon={icon} width={20} />
                 </div>
                 <dt className="text-sm font-medium text-wd-muted">{title}</dt>
               </div>
-              <dd className="text-3xl font-semibold text-foreground">{value}</dd>
+              <dd className="text-3xl font-mono font-semibold tracking-tight text-foreground">{value}</dd>
             </div>
             <div className="mt-1 flex items-center gap-x-1 text-xs font-medium">
               {changeSegments ? (
@@ -152,8 +152,8 @@ const KpiCard = React.forwardRef<HTMLDivElement, KpiCardProps>(
                 </div>
               ) : (
                 <>
-                  {trend && <Icon height={16} icon={trendIcons[trend]} width={16} className={changeColor ? changeColorClass[changeColor] : ''} />}
-                  {change && <span className={changeColor ? changeColorClass[changeColor] : ''}>{change}</span>}
+                  {trend && <Icon height={20} icon={trendIcons[trend]} width={20} className={changeColor ? changeColorClass[changeColor] : ''} />}
+                  {change && <span className={cn('font-mono', changeColor ? changeColorClass[changeColor] : '')}>{change}</span>}
                   {changeLabel && <span className="text-wd-muted"> {changeLabel}</span>}
                 </>
               )}

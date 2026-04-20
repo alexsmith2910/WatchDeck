@@ -69,19 +69,19 @@ function ChartTooltipContent({
 
   return (
     <div className="rounded-lg bg-wd-surface border border-wd-border px-3 py-2 shadow-lg max-w-[280px]">
-      <div className="text-[11px] text-wd-muted mb-1.5">{label}</div>
+      <div className="text-[11px] font-mono text-wd-muted mb-1.5">{label}</div>
       <div className="flex flex-col gap-1">
         {payload.map((entry) => {
           const s = series.find((s) => s.key === entry.dataKey)
           return (
             <div key={entry.dataKey} className="flex items-center gap-2 text-xs">
               {s?.icon ? (
-                <Icon icon={s.icon} width={12} style={{ color: entry.color }} className="shrink-0" />
+                <Icon icon={s.icon} width={16} style={{ color: entry.color }} className="shrink-0" />
               ) : (
                 <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
               )}
               <span className="text-wd-muted [word-break:normal] [overflow-wrap:normal]">{s?.label ?? entry.dataKey}:</span>
-              <span className="font-semibold text-foreground">
+              <span className="font-mono font-semibold text-foreground">
                 {entry.value}
                 {unit}
               </span>
@@ -147,7 +147,7 @@ export default function OverviewChart({ title, icon: titleIcon, series, data, un
               tabIndex={0}
               className="inline-flex items-center justify-center w-6 h-6 rounded-full hover:bg-wd-surface-hover cursor-pointer transition-colors"
             >
-              <Icon className="text-wd-muted" height={14} icon="solar:menu-dots-bold" width={14} />
+              <Icon className="text-wd-muted" height={16} icon="solar:menu-dots-bold" width={16} />
             </div>
           </Dropdown.Trigger>
           <Dropdown.Popover placement="bottom end" className="!min-w-[120px]">
@@ -163,7 +163,7 @@ export default function OverviewChart({ title, icon: titleIcon, series, data, un
       <div className="p-4 pb-0">
         {/* Title with icon */}
         <div className="flex items-center gap-2 mb-4">
-          <Icon icon={titleIcon} width={16} className="text-wd-muted" />
+          <Icon icon={titleIcon} width={20} className="text-wd-muted" />
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
         </div>
 
@@ -183,14 +183,14 @@ export default function OverviewChart({ title, icon: titleIcon, series, data, un
                 )}
               >
                 <div className="flex items-center gap-1.5">
-                  <Icon icon={s.icon} width={14} style={{ color: s.color }} className="shrink-0" />
+                  <Icon icon={s.icon} width={16} style={{ color: s.color }} className="shrink-0" />
                   <span className="text-[11px] text-wd-muted">{s.label}</span>
                 </div>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-lg font-semibold text-foreground">{s.value}</span>
+                  <span className="text-lg font-mono font-semibold tracking-tight text-foreground">{s.value}</span>
                   <span
                     className={cn(
-                      'inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-medium',
+                      'inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-mono font-medium',
                       changeBg(s.changeType),
                       changeColor(s.changeType),
                     )}
