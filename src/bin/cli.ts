@@ -43,10 +43,22 @@ program
 program
   .command('status')
   .description('Show the current status of the WatchDeck server')
+  .option('--ping', 'minimal liveness check (up/down only)')
   .option('--json', 'output status as JSON')
-  .action(async (options: { json: boolean }) => {
-    await runStatus(options)
-  })
+  .option('--host <host>', 'override host (defaults to localhost)')
+  .option('--port <number>', 'override port (defaults to config port)')
+  .option('--config <path>', 'path to a custom config file')
+  .action(
+    async (options: {
+      ping: boolean
+      json: boolean
+      host?: string
+      port?: string
+      config?: string
+    }) => {
+      await runStatus(options)
+    },
+  )
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   console.error(err)
