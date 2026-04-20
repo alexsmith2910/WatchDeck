@@ -1,8 +1,12 @@
-// System Health API response types — mirror src/core/systemMetrics.ts
+/**
+ * Frontend mirror of the SystemHealthSnapshot returned by GET /api/health.
+ * Keep aligned with src/core/health/snapshot.ts — these types intentionally
+ * have no runtime dependency on the backend module.
+ */
 
-export type SubsystemStatus = 'healthy' | 'degraded' | 'down'
+export type ProbeStatus = 'healthy' | 'degraded' | 'down' | 'standby' | 'disabled'
 export type OverallStateKey = 'operational' | 'degraded' | 'outage'
-export type TimeRangeKey = '1h' | '24h' | '7d'
+export type SubsystemGroup = 'core' | 'non-core'
 
 export interface SubsystemMetric {
   lbl: string
@@ -10,23 +14,19 @@ export interface SubsystemMetric {
   unit?: string
 }
 
-export interface WorkerCounts {
-  up: number
-  warn: number
-  down: number
-  idle: number
-}
-
 export interface SubsystemSnapshot {
   id: string
   title: string
   icon: string
   sub: string
-  status: SubsystemStatus
+  status: ProbeStatus
+  latencyMs: number | null
   metrics: SubsystemMetric[]
-  workers: WorkerCounts
   sparkline: number[]
-  group: 'core' | 'edge' | 'workers' | 'deps'
+  group: SubsystemGroup
+  cadenceMs: number
+  lastProbedAt: number | null
+  error?: string
 }
 
 export interface InternalIncident {
@@ -41,21 +41,19 @@ export interface InternalIncident {
   durationSeconds?: number
   ack: string | null
   commits: number
-  detectorKey: string
+  timeline: Array<{ at: number; event: string; detail?: string }>
+}
+
+export interface HeatmapCell {
+  count: number
+  degraded: number
+  down: number
 }
 
 export interface HeatmapRow {
   id: string
   title: string
-  values: number[]
-}
-
-export interface TimeSeriesPoint {
-  label: string
-  ts: number
-  throughput: number
-  latency: number
-  errors: number
+  values: HeatmapCell[]
 }
 
 export interface OverallState {
@@ -68,19 +66,20 @@ export interface OverallState {
   p1Count: number
   p2Count: number
   p3Count: number
-  errorBudget: number
-  uptime30d: number
+  slowestProbe: { id: string; title: string; latencyMs: number } | null
+  processUptimeSeconds: number
 }
 
 export interface SystemHealthSnapshot {
   overall: OverallState
   kpis: {
-    checksPerSec: number
-    queueLagMs: number
+    dbPingMs: number | null
+    dbPingSpark: number[]
+    schedulerDriftMs: number | null
+    schedulerDriftSpark: number[]
+    bufferLatencyMs: number | null
+    bufferLatencySpark: number[]
     activeIncidents: number
-    errorRate: number
-    checksPerSecDelta: number
-    queueLagDelta: number
     lastUpdatedSeconds: number
   }
   subsystems: SubsystemSnapshot[]
@@ -88,13 +87,16 @@ export interface SystemHealthSnapshot {
   heatmap: {
     rows: HeatmapRow[]
     labels: string[]
+    bucketMinutes: number
   }
-  timeSeries: {
-    range: TimeRangeKey
-    points: TimeSeriesPoint[]
+  probeHistory: {
+    points: Array<{ ts: number; bySubsystem: Record<string, number | null> }>
+  }
+  activity: {
+    points: Array<{ ts: number; checksPerSec: number }>
   }
   topology: {
-    nodes: Array<{ id: string; label: string; x: number; y: number; group: string; status: SubsystemStatus }>
+    nodes: Array<{ id: string; label: string; x: number; y: number; group: string; status: ProbeStatus }>
     edges: Array<{ from: string; to: string; flow: 'active' | 'hot' | 'idle' }>
   }
   meta: {

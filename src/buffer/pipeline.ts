@@ -11,18 +11,29 @@ import type { OutageTracker } from './outageTracker.js'
  * Buffer pipeline — routes check results from the check engine to MongoDB,
  * falling back to an in-memory buffer (then disk) when the DB is unavailable.
  *
- * Boot sequence (start.ts):
- *   1. Call register() to attach event bus subscribers.
- *   2. Separately check diskBuffer.isEmpty() and call replayFromDisk() for
- *      any data buffered during a previous process run.
+ * Modes (exposed to the health probe):
+ *   - `live`       — DB connected; checks are written through directly.
+ *   - `standby`    — DB connected, memory buffer empty, no recent write
+ *                    failures. The default resting state with no traffic.
+ *   - `buffering`  — DB disconnected; new checks land in the memory buffer.
+ *   - `disk-spill` — Memory buffer is full and we are spilling to disk.
+ *   - `replaying`  — DB reconnected and we are draining memory + disk.
  *
- * Runtime:
- *   - In live mode, each check:complete event writes directly to the DB.
- *   - On db:disconnected the pipeline switches to buffer mode.
- *   - On db:reconnected the pipeline drains memory then replays disk.
+ * `simulateWrite()` exercises the pipeline through the same `handleCheck()`
+ * path that real traffic takes, but with a synthetic payload that is never
+ * persisted. The health probe calls it to measure end-to-end buffer latency.
  */
+
+export type BufferMode = 'live' | 'standby' | 'buffering' | 'disk-spill' | 'replaying'
+
+const RECENT_FAILURE_WINDOW_MS = 60_000 // 1 minute
+
 export class BufferPipeline {
-  private mode: 'live' | 'buffering' = 'live'
+  private mode: BufferMode = 'standby'
+  /** Epoch ms of the most recent successful live write. 0 until one happens. */
+  private lastLiveWriteAt = 0
+  /** Epoch ms of the most recent write failure. 0 until one happens. */
+  private lastFailureAt = 0
 
   constructor(
     private readonly adapter: StorageAdapter,
@@ -31,20 +42,67 @@ export class BufferPipeline {
     private readonly outageTracker: OutageTracker,
   ) {}
 
-  /** Current write mode — read by the system metrics collector. */
-  getMode(): 'live' | 'buffering' {
-    return this.mode
+  /**
+   * Current write mode. Also called from inside the class after state
+   * changes so the computed `standby` result is always fresh.
+   */
+  getMode(): BufferMode {
+    if (this.mode === 'buffering' || this.mode === 'disk-spill' || this.mode === 'replaying') {
+      return this.mode
+    }
+    // `live` and `standby` are computed from runtime state — not stored.
+    if (!this.adapter.isConnected()) return 'buffering'
+    if (this.lastFailureAt > Date.now() - RECENT_FAILURE_WINDOW_MS) return 'live'
+    if (!this.memBuffer.isEmpty()) return 'live'
+    if (this.lastLiveWriteAt === 0) return 'standby'
+    // Within the last RECENT_FAILURE_WINDOW_MS someone wrote successfully? Call it live.
+    if (this.lastLiveWriteAt > Date.now() - RECENT_FAILURE_WINDOW_MS) return 'live'
+    return 'standby'
   }
 
   register(): void {
-    // Switch to buffering as soon as the topology closes.
     eventBus.subscribe('db:disconnected', () => { this.mode = 'buffering' }, 'critical')
-
-    // Every check result comes through here.
     eventBus.subscribe('check:complete', (payload) => { void this.handleCheck(payload) }, 'critical')
-
-    // When the DB comes back, drain buffers.
     eventBus.subscribe('db:reconnected', () => { void this.handleReconnect() }, 'critical')
+  }
+
+  // ---------------------------------------------------------------------------
+  // Synthetic write for health probe
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Run a synthetic write through the same happy path real traffic uses. The
+   * payload is never persisted: in live mode we only measure the adapter ping
+   * latency; in buffered modes we push and immediately remove the sentinel.
+   * Returns the round-trip time in ms.
+   */
+  async simulateWrite(): Promise<number> {
+    const start = performance.now()
+    const mode = this.getMode()
+
+    if ((mode === 'live' || mode === 'standby') && this.adapter.isConnected()) {
+      // Exercise the adapter end of the hot path without persisting a row.
+      // Implementations do a ping which is the same round-trip a real write
+      // would experience before the insert.
+      await this.adapter.healthCheck()
+      return performance.now() - start
+    }
+
+    // In buffering / disk-spill / replaying we measure the memory path. The
+    // sentinel must not leak into the real buffered set.
+    const sentinel: CheckWritePayload = {
+      timestamp: new Date(),
+      endpointId: '000000000000000000000000',
+      status: 'healthy',
+      responseTime: 0,
+      statusCode: null,
+      errorMessage: '__watchdeck_synthetic_probe__',
+    }
+    if (this.memBuffer.push(sentinel)) {
+      // Remove it immediately — we only wanted the push/pop timing.
+      this.memBuffer.flush().filter((x) => x.errorMessage !== '__watchdeck_synthetic_probe__')
+    }
+    return performance.now() - start
   }
 
   // ---------------------------------------------------------------------------
@@ -61,13 +119,20 @@ export class BufferPipeline {
       errorMessage: payload.errorMessage,
     }
 
-    // Happy path: live mode and DB is up.
-    if (this.mode === 'live' && this.adapter.isConnected()) {
+    // Happy path: DB connected and we are not actively draining.
+    if (
+      (this.mode === 'live' || this.mode === 'standby') &&
+      this.adapter.isConnected()
+    ) {
       try {
         await this.adapter.saveCheck(item)
+        this.lastLiveWriteAt = Date.now()
         return
       } catch {
-        // Unexpected write failure — switch to buffering.
+        // Unexpected write failure — switch to buffering until we understand
+        // why. The mongo topology handler will usually fire db:disconnected
+        // shortly, but we don't rely on it.
+        this.lastFailureAt = Date.now()
         this.mode = 'buffering'
       }
     }
@@ -79,6 +144,7 @@ export class BufferPipeline {
     }
 
     // Memory full — flush to disk.
+    this.mode = 'disk-spill'
     const flushed = this.memBuffer.flush()
     const toWrite = [...flushed, item]
     try {
@@ -90,35 +156,47 @@ export class BufferPipeline {
         module: 'buffer-pipeline',
         message: `Disk buffer write failed — ${toWrite.length} check${toWrite.length === 1 ? '' : 's'} lost: ${err instanceof Error ? err.message : String(err)}`,
       })
+    } finally {
+      // If the DB is still down we remain in buffering; otherwise reconnect
+      // handler will clear the flag.
+      if (this.mode === 'disk-spill' && this.adapter.isConnected()) {
+        this.mode = 'buffering'
+      }
     }
   }
 
   private async handleReconnect(): Promise<void> {
-    this.mode = 'live'
+    this.mode = 'replaying'
 
-    // Drain in-memory buffer first.
-    if (!this.memBuffer.isEmpty()) {
-      const items = this.memBuffer.flush()
-      try {
-        await this.adapter.saveManyChecks(items)
-      } catch {
-        // Couldn't write — spill to disk so replay can pick it up.
+    try {
+      // Drain in-memory buffer first.
+      if (!this.memBuffer.isEmpty()) {
+        const items = this.memBuffer.flush()
         try {
-          await this.diskBuffer.append(items)
+          await this.adapter.saveManyChecks(items)
         } catch {
-          eventBus.emit('system:warning', {
-            timestamp: new Date(),
-            module: 'buffer-pipeline',
-            message: 'Memory buffer drain failed and disk fallback also failed — checks lost',
-          })
+          // Couldn't write — spill to disk so replay can pick it up.
+          try {
+            await this.diskBuffer.append(items)
+          } catch {
+            eventBus.emit('system:warning', {
+              timestamp: new Date(),
+              module: 'buffer-pipeline',
+              message: 'Memory buffer drain failed and disk fallback also failed — checks lost',
+            })
+          }
+          // Stay in replaying until the next reconnect cycle.
+          return
         }
-        return
       }
-    }
 
-    // Replay any disk entries.
-    if (!(await this.diskBuffer.isEmpty())) {
-      await replayFromDisk(this.adapter, this.diskBuffer)
+      // Replay any disk entries.
+      if (!(await this.diskBuffer.isEmpty())) {
+        await replayFromDisk(this.adapter, this.diskBuffer)
+      }
+    } finally {
+      this.mode = 'live'
+      this.lastLiveWriteAt = Date.now()
     }
   }
 }

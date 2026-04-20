@@ -123,6 +123,14 @@ class MinHeap {
 // Scheduler
 // ---------------------------------------------------------------------------
 
+/** Maximum drift samples kept for the scheduler health probe (~1 minute). */
+const DRIFT_SAMPLE_CAPACITY = 60
+
+export interface TickDriftSample {
+  ts: number
+  driftMs: number
+}
+
 export class CheckScheduler {
   private readonly heap = new MinHeap()
   private tickInterval: ReturnType<typeof setInterval> | null = null
@@ -131,6 +139,19 @@ export class CheckScheduler {
   private readonly lastHostCheckTime = new Map<string, number>()
   /** Per-endpoint consecutive failure count — seeded from DB on boot. */
   private readonly consecutiveFailures = new Map<string, number>()
+
+  /** Expected ms timestamp of the next tick — used to measure drift. */
+  private expectedNextTick: number | null = null
+  /** Rolling ring of recent tick drifts (ms). Oldest dropped first. */
+  private driftRing: TickDriftSample[] = []
+  /**
+   * Peak `activeChecks` seen since the start of the current second, plus the
+   * fully-settled peak from the PREVIOUS second. Used to surface sub-second
+   * concurrency activity that a straight instantaneous sample would miss.
+   */
+  private runningPeakCurrent = 0
+  private runningPeakFrozen = 0
+  private peakWindowSec = Math.floor(Date.now() / 1000)
 
   constructor(
     private readonly adapter: StorageAdapter,
@@ -161,7 +182,8 @@ export class CheckScheduler {
     this.subscribeToEndpointEvents()
     this.subscribeToCheckComplete()
 
-    this.tickInterval = setInterval(() => { void this.tick() }, 1000)
+    this.expectedNextTick = Date.now() + 1000
+    this.tickInterval = setInterval(() => { void this.tickWithDrift() }, 1000)
   }
 
   /** Stop the tick loop. In-flight checks complete normally. */
@@ -187,6 +209,30 @@ export class CheckScheduler {
 
   get runningChecks(): number {
     return this.activeChecks
+  }
+
+  /** Ring of the most recent tick-drift samples, oldest first. */
+  driftSamples(): readonly TickDriftSample[] {
+    return this.driftRing
+  }
+
+  /**
+   * Peak concurrent in-flight checks seen during the previous full second.
+   * This is the value the health page should display — a single instantaneous
+   * sample of `runningChecks` almost always reads 0 because checks typically
+   * complete in <100ms, faster than the sample rate.
+   */
+  runningChecksPeakLastSecond(): number {
+    // If the frozen peak is stale (no peak was ever frozen this window),
+    // fall back to the current window's running peak.
+    return Math.max(this.runningPeakFrozen, this.runningPeakCurrent)
+  }
+
+  /** Milliseconds until the nearest heap entry is due, or null when the queue is empty. */
+  nextDueInMs(): number | null {
+    const top = this.heap.peek()
+    if (!top) return null
+    return Math.max(0, top.nextDue - Date.now())
   }
 
   // ---------------------------------------------------------------------------
@@ -276,6 +322,40 @@ export class CheckScheduler {
   // Tick loop
   // ---------------------------------------------------------------------------
 
+  /**
+   * Outer tick wrapper: records the setInterval drift (difference between
+   * when the tick *should* have fired and when it actually did) into the
+   * rolling sample ring, and rolls the runningChecks high-water mark at the
+   * top of each wall-clock second. Then delegates to `tick()` for the actual
+   * scheduler work.
+   */
+  private async tickWithDrift(): Promise<void> {
+    const now = Date.now()
+    if (this.expectedNextTick !== null) {
+      const drift = now - this.expectedNextTick
+      this.driftRing.push({ ts: now, driftMs: drift })
+      if (this.driftRing.length > DRIFT_SAMPLE_CAPACITY) {
+        this.driftRing.splice(0, this.driftRing.length - DRIFT_SAMPLE_CAPACITY)
+      }
+    }
+    this.expectedNextTick = now + 1000
+
+    // Roll the concurrency peak at second boundaries.
+    this.rollRunningPeak(now)
+
+    await this.tick()
+  }
+
+  /** If a second has passed since the last roll, freeze and reset the peak. */
+  private rollRunningPeak(now: number): void {
+    const sec = Math.floor(now / 1000)
+    if (sec !== this.peakWindowSec) {
+      this.runningPeakFrozen = this.runningPeakCurrent
+      this.runningPeakCurrent = this.activeChecks
+      this.peakWindowSec = sec
+    }
+  }
+
   private async tick(): Promise<void> {
     const now = Date.now()
     const maxConcurrent = this.config.rateLimits.maxConcurrentChecks
@@ -317,6 +397,7 @@ export class CheckScheduler {
 
       // Dispatch the check.
       this.activeChecks++
+      if (this.activeChecks > this.runningPeakCurrent) this.runningPeakCurrent = this.activeChecks
       this.lastHostCheckTime.set(host, now)
 
       void runCheck(endpoint, { captureSsl: this.config.modules.sslChecks }).finally(() => {

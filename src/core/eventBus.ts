@@ -170,6 +170,20 @@ class TypedEventBus extends EventEmitter {
   resizeHistory(capacity: number): void {
     this.history.resize(capacity)
   }
+
+  /** Number of records currently held in the in-memory event history buffer. */
+  historySize(): number {
+    return this.history.toArray().length
+  }
+
+  /** Sum of listener counts across every registered event name. */
+  totalListeners(): number {
+    let total = 0
+    for (const name of this.eventNames()) {
+      total += this.listenerCount(name as string)
+    }
+    return total
+  }
 }
 
 // ---------------------------------------------------------------------------

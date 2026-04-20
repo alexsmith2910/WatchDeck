@@ -89,4 +89,14 @@ export class DiskBuffer {
     const lines = await this.readLines()
     return lines.length
   }
+
+  /** Size of the buffer file in bytes (0 if it does not exist). */
+  async sizeBytes(): Promise<number> {
+    try {
+      const content = await readFile(this.filePath, 'utf8')
+      return Buffer.byteLength(content, 'utf8')
+    } catch {
+      return 0
+    }
+  }
 }

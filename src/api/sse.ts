@@ -27,6 +27,28 @@ export function getClientCount(): number {
 }
 
 // ---------------------------------------------------------------------------
+// Liveness — used by the SSE health probe.
+// ---------------------------------------------------------------------------
+
+/**
+ * Epoch ms of the most recent heartbeat the broker emitted to any connected
+ * client. Initialised to the module-load time so a freshly-booted process
+ * with zero clients does not immediately appear "stale".
+ */
+let lastHeartbeatTs = Date.now()
+
+/** Configured heartbeat interval in ms (set when the first plugin is built). */
+let heartbeatIntervalMsValue = 0
+
+export function lastHeartbeatAt(): number {
+  return lastHeartbeatTs
+}
+
+export function heartbeatIntervalMs(): number {
+  return heartbeatIntervalMsValue
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -75,6 +97,10 @@ const SSE_EVENTS: (keyof EventMap)[] = [
   'db:reconnecting',
   'db:reconnected',
   'db:fatal',
+  'probe:completed',
+  'probe:degraded',
+  'probe:recovered',
+  'aggregation:run',
 ]
 
 const unsubscribers: Array<() => void> = []
@@ -101,9 +127,23 @@ export function unsubscribeAll(): void {
 // Fastify route plugin
 // ---------------------------------------------------------------------------
 
+/** Global heartbeat that ticks lastHeartbeatTs even with zero clients. */
+let brokerHeartbeat: ReturnType<typeof setInterval> | null = null
+
+function startBrokerHeartbeat(intervalMs: number): void {
+  if (brokerHeartbeat) clearInterval(brokerHeartbeat)
+  brokerHeartbeat = setInterval(() => { lastHeartbeatTs = Date.now() }, intervalMs)
+  // Don't keep the event loop alive just for this — we want clean shutdowns.
+  brokerHeartbeat.unref?.()
+}
+
 export function sseRoutes(ctx: AppContext) {
   // Subscribe to events once when the plugin is created
   subscribeAll()
+  // Capture interval at plugin construction so the SSE probe has a value
+  // even when no client is connected to drive the per-connection setInterval.
+  heartbeatIntervalMsValue = ctx.config.sse.heartbeatInterval * 1000
+  startBrokerHeartbeat(heartbeatIntervalMsValue)
 
   return async (fastify: FastifyInstance): Promise<void> => {
     fastify.get('/stream', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -134,8 +174,10 @@ export function sseRoutes(ctx: AppContext) {
 
       // Heartbeat timer
       const heartbeatMs = ctx.config.sse.heartbeatInterval * 1000
+      heartbeatIntervalMsValue = heartbeatMs
       const heartbeat = setInterval(() => {
         reply.raw.write(': heartbeat\n\n')
+        lastHeartbeatTs = Date.now()
       }, heartbeatMs)
 
       // Cleanup on disconnect

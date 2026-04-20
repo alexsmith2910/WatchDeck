@@ -7,7 +7,7 @@
 export class MemoryBuffer<T> {
   private readonly items: T[] = []
 
-  constructor(private readonly capacity: number) {}
+  constructor(public readonly capacity: number) {}
 
   /**
    * Add an item.
