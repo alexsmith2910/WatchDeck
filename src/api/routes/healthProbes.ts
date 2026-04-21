@@ -9,14 +9,13 @@
  * probes hit it unauthenticated. The two auth-gated handlers are returned as
  * a separate plugin and registered inside the auth scope.
  *
- * Also preserves the dev-only simulated-outage and incident-ack endpoints
- * from the old /health/system route surface.
+ * Also preserves the dev-only simulated-outage endpoints from the old
+ * /health/system route surface.
  */
 
 import type { FastifyInstance } from 'fastify'
 import { probeRegistry } from '../../core/health/probeRegistry.js'
 import { buildSnapshot } from '../../core/health/snapshot.js'
-import { internalIncidents } from '../../alerts/internalIncidents.js'
 import { eventBus } from '../../core/eventBus.js'
 import { metaFor } from '../../core/health/subsystems.js'
 import { formatError } from '../../utils/errors.js'
@@ -89,18 +88,6 @@ export function healthProbeAuthedRoutes(_ctx: AppContext) {
         bufferedResults: 0,
       })
       return reply.send({ data: { simulated: true, outageDurationSeconds } })
-    })
-
-    // ── Internal-incident acknowledgement — preserved per §4.3. ──────────
-    fastify.post('/health/system/incidents/:id/ack', async (request, reply) => {
-      const { id } = request.params as { id: string }
-      const body = (request.body ?? {}) as { by?: string }
-      const by = typeof body.by === 'string' && body.by.length > 0 ? body.by : 'operator'
-      const ok = internalIncidents.acknowledge(id, by)
-      if (!ok) {
-        return reply.code(404).send(formatError('NOT_FOUND', `Active internal incident ${id} not found`))
-      }
-      return reply.send({ data: { id, ack: by } })
     })
   }
 }

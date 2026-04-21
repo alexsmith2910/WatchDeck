@@ -49,7 +49,6 @@ export interface InternalIncident {
   startedAt: number
   resolvedAt?: number
   durationSeconds?: number
-  ack: string | null
   /** Number of probe completions that have reinforced this incident. */
   commits: number
   timeline: InternalIncidentTimelineEntry[]
@@ -81,7 +80,6 @@ function toDoc(inc: InternalIncident): InternalIncidentDoc {
     title: inc.title,
     cause: inc.cause,
     startedAt: new Date(inc.startedAt),
-    ack: inc.ack,
     commits: inc.commits,
     timeline: inc.timeline.map((t) => {
       const e: { at: Date; event: string; detail?: string } = {
@@ -109,7 +107,6 @@ function fromDoc(d: InternalIncidentDoc): InternalIncident {
     title: d.title,
     cause: d.cause,
     startedAt: new Date(d.startedAt).getTime(),
-    ack: d.ack,
     commits: d.commits,
     timeline: (d.timeline ?? []).map((t) => {
       const e: InternalIncidentTimelineEntry = { at: new Date(t.at).getTime(), event: t.event }
@@ -212,16 +209,6 @@ class InternalIncidentTracker {
     return latest
   }
 
-  /** Attach an acknowledgement tag to an active incident. */
-  acknowledge(id: string, by: string): boolean {
-    const inc = this.incidents.find((i) => i.id === id)
-    if (!inc || inc.status !== 'active') return false
-    inc.ack = by
-    inc.timeline.push({ at: Date.now(), event: 'acknowledged', detail: `by ${by}` })
-    this.persist(inc)
-    return true
-  }
-
   /** Test-only: wipe all state. */
   reset(): void {
     this.incidents = []
@@ -270,7 +257,6 @@ class InternalIncidentTracker {
       title: titleFor(result.subsystemId, result.status),
       cause: result.error ?? `${result.subsystemId} is ${result.status}`,
       startedAt: result.probedAt,
-      ack: null,
       commits: 1,
       timeline: [
         { at: result.probedAt, event: 'opened', detail: result.error ?? `${result.status}` },
