@@ -353,3 +353,89 @@ svg {
     background: var(--cell-bg);
   }
 }
+
+/* ── HeroUI Dropdown — match incidents filter Select aesthetic ──────────
+   HeroUI's Dropdown defaults (rounded-3xl popover, rounded-2xl min-h-9 items,
+   bg-overlay, big paddings) look oversized beside the rest of the dashboard.
+   These overrides tighten dropdown popovers + items to match the compact
+   Select styling used in the incidents filter bar (temp/incidents). Scoped
+   to `.dropdown__popover` so Popover / Tooltip usages elsewhere stay intact. */
+
+.dropdown__popover {
+  border-radius: 10px !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--wd-border) !important;
+  box-shadow: var(--wd-shadow-popover) !important;
+  padding: 0 !important;
+  max-width: none !important;
+  font-size: 12px !important;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wd-border) transparent;
+}
+
+.dropdown__popover::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.dropdown__popover::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+
+.dropdown__popover::-webkit-scrollbar-thumb {
+  background: var(--wd-border) !important;
+  border-radius: 9999px;
+  transition: background 0.15s;
+}
+
+.dropdown__popover::-webkit-scrollbar-thumb:hover {
+  background: var(--wd-muted) !important;
+}
+
+.dropdown__popover [data-slot="dropdown-menu"],
+.dropdown__popover .dropdown__menu {
+  padding: 4px !important;
+  gap: 0 !important;
+}
+
+.dropdown__popover [data-slot="menu-item"] {
+  min-height: 0 !important;
+  border-radius: 6px !important;
+  padding: 6px 8px !important;
+  font-size: 12px !important;
+  gap: 8px !important;
+  color: var(--foreground);
+}
+
+.dropdown__popover [data-slot="menu-item"]:has(.menu-item__indicator) {
+  padding-left: 8px !important;
+}
+
+.dropdown__popover [data-slot="menu-item-indicator"] {
+  display: none !important;
+}
+
+.dropdown__popover [data-slot="menu-item"]:hover,
+.dropdown__popover [data-slot="menu-item"][data-hovered="true"],
+.dropdown__popover [data-slot="menu-item"][data-focused="true"] {
+  background: var(--wd-surface-hover) !important;
+}
+
+.dropdown__popover [data-slot="menu-item"][data-selected="true"],
+.dropdown__popover [data-slot="menu-item"][aria-selected="true"] {
+  background: color-mix(in srgb, var(--wd-primary) 10%, transparent) !important;
+  color: var(--wd-primary) !important;
+  font-weight: 500 !important;
+}
+
+.dropdown__popover [data-slot="menu-item"][data-selected="true"][data-hovered="true"],
+.dropdown__popover [data-slot="menu-item"][aria-selected="true"]:hover {
+  background: color-mix(in srgb, var(--wd-primary) 14%, transparent) !important;
+}
+
+/* Separator inside dropdowns — thin surface line */
+.dropdown__popover [data-slot="separator"] {
+  background: var(--wd-border) !important;
+  margin: 4px 6px !important;
+}
