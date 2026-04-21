@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Spinner, ToggleButtonGroup, ToggleButton, cn } from '@heroui/react'
+import { Button, Spinner } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
 import KpiCard from '../components/KpiCard'
 import OverviewChart from '../components/OverviewChart'
+import { Segmented } from '../components/endpoint-detail/primitives'
 import { getIncidentRanges } from '../utils/format'
 
 // ---------------------------------------------------------------------------
@@ -632,28 +633,13 @@ export default function OverviewPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-foreground">Overview</h1>
         <div className="flex items-center gap-3">
-          <ToggleButtonGroup
-            selectionMode="single"
-            selectedKeys={new Set([timeRange])}
-            onSelectionChange={(keys) => {
-              const sel = [...keys][0] as TimeRange | undefined
-              if (sel) setTimeRange(sel)
-            }}
-            size="sm"
-          >
-            {TIME_RANGES.map((r) => (
-              <ToggleButton
-                key={r.key}
-                id={r.key}
-                className={cn(
-                  '!text-xs !px-3',
-                  'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
-                )}
-              >
-                {r.label}
-              </ToggleButton>
-            ))}
-          </ToggleButtonGroup>
+          <Segmented<TimeRange>
+            ariaLabel="Time range"
+            options={TIME_RANGES.map((r) => ({ key: r.key, label: r.label }))}
+            value={timeRange}
+            onChange={setTimeRange}
+            mono
+          />
         </div>
       </div>
 

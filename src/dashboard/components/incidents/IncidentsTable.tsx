@@ -15,11 +15,10 @@ import {
   ScrollShadow,
   SearchField,
   Spinner,
-  ToggleButton,
-  ToggleButtonGroup,
   cn,
 } from '@heroui/react'
 import type { Selection } from '@heroui/react'
+import { Segmented } from '../endpoint-detail/primitives'
 import { Icon } from '@iconify/react'
 import type { ApiIncident } from '../../types/api'
 import type { ApiChannel, ChannelType } from '../../types/notifications'
@@ -235,11 +234,6 @@ function FilterBar({
   onChange: (patch: Partial<IncidentFilters>) => void
   count: number
 }) {
-  const toggleClass = cn(
-    '!text-xs !px-3',
-    'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
-  )
-
   const selectedEndpointLabel =
     filters.endpointId === 'all'
       ? 'All Endpoints'
@@ -251,19 +245,16 @@ function FilterBar({
 
   return (
     <div className="flex flex-wrap items-center gap-2 min-w-0">
-      <ToggleButtonGroup
-        selectionMode="single"
-        selectedKeys={new Set([filters.status])}
-        onSelectionChange={(keys: Selection) => {
-          const sel = [...keys][0] as StatusFilter | undefined
-          if (sel) onChange({ status: sel })
-        }}
-        size="sm"
-      >
-        <ToggleButton key="all" id="all" className={toggleClass}>All</ToggleButton>
-        <ToggleButton key="active" id="active" className={toggleClass}>Active</ToggleButton>
-        <ToggleButton key="resolved" id="resolved" className={toggleClass}>Resolved</ToggleButton>
-      </ToggleButtonGroup>
+      <Segmented<StatusFilter>
+        ariaLabel="Incident status"
+        options={[
+          { key: 'all', label: 'All' },
+          { key: 'active', label: 'Active' },
+          { key: 'resolved', label: 'Resolved' },
+        ]}
+        value={filters.status}
+        onChange={(sel) => onChange({ status: sel })}
+      />
 
       <FilterDropdown label="Severity" value={selectedSeverityLabel}>
         <Dropdown.Menu
@@ -319,21 +310,18 @@ function FilterBar({
         </Dropdown.Menu>
       </FilterDropdown>
 
-      <ToggleButtonGroup
-        selectionMode="single"
-        selectedKeys={new Set([filters.range])}
-        onSelectionChange={(keys: Selection) => {
-          const sel = [...keys][0] as TimeRange | undefined
-          if (sel) onChange({ range: sel })
-        }}
-        size="sm"
-      >
-        {(['24h', '7d', '30d', 'all'] as const).map((r) => (
-          <ToggleButton key={r} id={r} className={toggleClass}>
-            {r === 'all' ? 'All' : r}
-          </ToggleButton>
-        ))}
-      </ToggleButtonGroup>
+      <Segmented<TimeRange>
+        ariaLabel="Time range"
+        options={[
+          { key: '24h', label: '24h' },
+          { key: '7d', label: '7d' },
+          { key: '30d', label: '30d' },
+          { key: 'all', label: 'All' },
+        ]}
+        value={filters.range}
+        onChange={(sel) => onChange({ range: sel })}
+        mono
+      />
 
       <div className="ml-auto flex items-center gap-3">
         <span className="text-[11px] text-wd-muted font-mono">{count} shown</span>

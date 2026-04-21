@@ -13,8 +13,6 @@ import {
   Dropdown,
   SearchField,
   Spinner,
-  ToggleButton,
-  ToggleButtonGroup,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -41,6 +39,7 @@ import {
   STATUS_STYLE,
 } from '../../types/notifications'
 import { readableReason } from './notificationHelpers'
+import { Segmented } from '../endpoint-detail/primitives'
 
 export interface LogFilters {
   channelId?: string
@@ -193,29 +192,14 @@ export function DeliveryLog({ channels, filters, onFilterChange, onOpenRow, refr
           </SearchField.Group>
         </SearchField>
 
-        <ToggleButtonGroup
-          selectionMode="single"
-          selectedKeys={new Set([activeStatus])}
-          onSelectionChange={(keys) => {
-            const sel = [...keys][0] as (DeliveryStatus | 'all') | undefined
-            if (!sel) return
+        <Segmented<DeliveryStatus | 'all'>
+          ariaLabel="Delivery status"
+          options={STATUS_PILLS}
+          value={activeStatus}
+          onChange={(sel) =>
             onFilterChange({ status: sel === 'all' ? undefined : sel })
-          }}
-          size="sm"
-        >
-          {STATUS_PILLS.map((p) => (
-            <ToggleButton
-              key={p.key}
-              id={p.key}
-              className={cn(
-                '!text-xs !px-3',
-                'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
-              )}
-            >
-              {p.label}
-            </ToggleButton>
-          ))}
-        </ToggleButtonGroup>
+          }
+        />
 
         <SelectDropdown
           label="channel"

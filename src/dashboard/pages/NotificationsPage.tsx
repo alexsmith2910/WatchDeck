@@ -16,10 +16,11 @@
  * re-fetch, and re-pulls the stats/channels/mutes/escalations endpoints.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, ToggleButton, ToggleButtonGroup, cn } from '@heroui/react'
+import { Button } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
+import { Segmented } from '../components/endpoint-detail/primitives'
 import { NotificationKpis } from '../components/notifications/NotificationKpis'
 import { DeliveryBanner } from '../components/notifications/DeliveryBanner'
 import { ChannelsGrid } from '../components/notifications/ChannelsGrid'
@@ -219,28 +220,13 @@ export default function NotificationsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <ToggleButtonGroup
-            selectionMode="single"
-            selectedKeys={new Set([timeRange])}
-            onSelectionChange={(keys) => {
-              const sel = [...keys][0] as TimeRange | undefined
-              if (sel) setTimeRange(sel)
-            }}
-            size="sm"
-          >
-            {TIME_RANGES.map((r) => (
-              <ToggleButton
-                key={r.key}
-                id={r.key}
-                className={cn(
-                  '!text-xs !px-3 !font-mono',
-                  'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
-                )}
-              >
-                {r.label}
-              </ToggleButton>
-            ))}
-          </ToggleButtonGroup>
+          <Segmented<TimeRange>
+            ariaLabel="Time range"
+            options={TIME_RANGES}
+            value={timeRange}
+            onChange={setTimeRange}
+            mono
+          />
           <Button
             size="sm"
             variant="outline"
