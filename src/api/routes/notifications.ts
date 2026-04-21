@@ -224,18 +224,25 @@ function parseLogFilters(q: Record<string, string | undefined>): {
 function moduleGate(
   ctx: AppContext,
   type: NotificationChannelType,
+  body: Record<string, unknown>,
 ): { ok: true } | { ok: false; response: ReturnType<typeof formatError> } {
   if (type === 'discord' && !ctx.config.modules.discord) {
-    return {
-      ok: false,
-      response: formatError('MODULE_DISABLED', 'Discord notifications are disabled', [
-        {
-          field: 'body.type',
-          value: 'discord',
-          expected: 'modules.discord to be true',
-          fix: 'Set modules.discord to true in watchdeck.config.js and restart',
-        },
-      ]),
+    // Discord webhook transport does not require the Discord module — it's a
+    // plain HTTPS POST to a user-supplied webhook URL and never touches
+    // MX_DISCORD_TOKEN. Only the bot transport is gated.
+    const transport = (body.discordTransport as string | undefined) ?? 'webhook'
+    if (transport !== 'webhook') {
+      return {
+        ok: false,
+        response: formatError('MODULE_DISABLED', 'Discord bot transport is disabled', [
+          {
+            field: 'body.discordTransport',
+            value: transport,
+            expected: 'modules.discord to be true (or use the webhook transport)',
+            fix: 'Set modules.discord to true in watchdeck.config.js and restart, or switch to the Discord webhook transport',
+          },
+        ]),
+      }
     }
   }
   if (type === 'slack' && !ctx.config.modules.slack) {
@@ -281,7 +288,7 @@ export function notificationsRoutes(ctx: AppContext) {
         const body = request.body as Record<string, unknown>
         const type = body.type as NotificationChannelType
 
-        const gate = moduleGate(ctx, type)
+        const gate = moduleGate(ctx, type, body)
         if (!gate.ok) return reply.code(409).send(gate.response)
 
         const provider = ctx.notifications?.channels.getProvider(type)

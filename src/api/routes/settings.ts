@@ -38,6 +38,14 @@ export function settingsRoutes(ctx: AppContext) {
       return reply.send({ data: settings })
     })
 
+    // ── Module toggles (read-only view of ctx.config.modules) ────────────────
+    // The dashboard uses this to disable channel types / transports whose
+    // backing module is off. Changing module state still requires editing
+    // watchdeck.config.js and restarting.
+    fastify.get('/modules', async (_request, reply) => {
+      return reply.send({ data: ctx.config.modules })
+    })
+
     fastify.put('/settings', async (request, reply) => {
       const body = request.body as Record<string, unknown>
       const { _id: _d, ...changes } = body
