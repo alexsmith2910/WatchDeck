@@ -218,10 +218,10 @@ export function DeliveryLog({ channels, filters, onFilterChange, onOpenRow, refr
           value={filters.severity ?? '__any__'}
           options={[
             { id: '__any__', label: 'Any Severity' },
-            { id: 'critical', label: 'Critical' },
-            { id: 'warning', label: 'Warning' },
-            { id: 'info', label: 'Info' },
-            { id: 'success', label: 'Success' },
+            { id: 'critical', label: 'Critical', dot: 'var(--wd-danger)' },
+            { id: 'warning', label: 'Warning', dot: 'var(--wd-warning)' },
+            { id: 'info', label: 'Info', dot: 'var(--wd-primary)' },
+            { id: 'success', label: 'Success', dot: 'var(--wd-success)' },
           ]}
           onChange={(id) =>
             onFilterChange({ severity: id !== '__any__' ? (id as NotificationSeverity) : undefined })
@@ -442,7 +442,7 @@ function SelectDropdown({
 }: {
   label: string
   value: string
-  options: Array<{ id: string; label: string }>
+  options: Array<{ id: string; label: string; dot?: string }>
   onChange: (id: string) => void
 }) {
   const current = options.find((o) => o.id === value) ?? options[0]
@@ -456,7 +456,16 @@ function SelectDropdown({
             'bg-wd-surface border border-wd-border/50 hover:bg-wd-surface-hover transition-colors',
           )}
         >
-          <span className="text-foreground truncate">{current?.label ?? '—'}</span>
+          <span className="inline-flex items-center gap-1.5 min-w-0">
+            {current?.dot && (
+              <span
+                aria-hidden="true"
+                className="inline-block w-2 h-2 rounded-full shrink-0"
+                style={{ background: current.dot }}
+              />
+            )}
+            <span className="text-foreground truncate">{current?.label ?? '—'}</span>
+          </span>
           <Icon icon="solar:alt-arrow-down-linear" width={16} className="text-wd-muted shrink-0" />
         </div>
       </Dropdown.Trigger>
@@ -471,6 +480,13 @@ function SelectDropdown({
         >
           {options.map((opt) => (
             <Dropdown.Item key={opt.id} id={opt.id} className="!text-xs">
+              {opt.dot && (
+                <span
+                  aria-hidden="true"
+                  className="inline-block w-2 h-2 rounded-full mr-2 shrink-0"
+                  style={{ background: opt.dot }}
+                />
+              )}
               {opt.label}
             </Dropdown.Item>
           ))}

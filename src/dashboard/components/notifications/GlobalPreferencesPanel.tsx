@@ -30,6 +30,12 @@ const SEVERITY_LABELS: Record<SeverityFilter, string> = {
   critical: 'critical only',
 }
 
+const SEVERITY_DOTS: Record<SeverityFilter, string> = {
+  'info+': 'var(--wd-primary)',
+  'warning+': 'var(--wd-warning)',
+  critical: 'var(--wd-danger)',
+}
+
 const MUTE_PRESETS: Array<{ id: string; label: string; seconds: number | null }> = [
   { id: 'none', label: 'Not muted', seconds: null },
   { id: '30m', label: '30 minutes', seconds: 30 * 60 },
@@ -175,8 +181,15 @@ export function GlobalPreferencesPanel() {
                     'bg-wd-surface-hover/50 border border-wd-border/50 hover:bg-wd-surface-hover transition-colors',
                   )}
                 >
-                  <span className="text-foreground">
-                    {SEVERITY_LABELS[draft.defaultSeverityFilter]}
+                  <span className="inline-flex items-center gap-1.5 min-w-0">
+                    <span
+                      aria-hidden="true"
+                      className="inline-block w-2 h-2 rounded-full shrink-0"
+                      style={{ background: SEVERITY_DOTS[draft.defaultSeverityFilter] }}
+                    />
+                    <span className="text-foreground truncate">
+                      {SEVERITY_LABELS[draft.defaultSeverityFilter]}
+                    </span>
                   </span>
                   <Icon icon="solar:alt-arrow-down-linear" width={16} className="text-wd-muted" />
                 </div>
@@ -190,9 +203,18 @@ export function GlobalPreferencesPanel() {
                     if (id) setDraft((d) => ({ ...d, defaultSeverityFilter: id }))
                   }}
                 >
-                  <Dropdown.Item key="info+" id="info+" className="!text-xs">info+ (all alerts)</Dropdown.Item>
-                  <Dropdown.Item key="warning+" id="warning+" className="!text-xs">warning+ (skip info)</Dropdown.Item>
-                  <Dropdown.Item key="critical" id="critical" className="!text-xs">critical only</Dropdown.Item>
+                  <Dropdown.Item key="info+" id="info+" className="!text-xs">
+                    <span aria-hidden="true" className="inline-block w-2 h-2 rounded-full mr-2 shrink-0" style={{ background: SEVERITY_DOTS['info+'] }} />
+                    info+ (all alerts)
+                  </Dropdown.Item>
+                  <Dropdown.Item key="warning+" id="warning+" className="!text-xs">
+                    <span aria-hidden="true" className="inline-block w-2 h-2 rounded-full mr-2 shrink-0" style={{ background: SEVERITY_DOTS['warning+'] }} />
+                    warning+ (skip info)
+                  </Dropdown.Item>
+                  <Dropdown.Item key="critical" id="critical" className="!text-xs">
+                    <span aria-hidden="true" className="inline-block w-2 h-2 rounded-full mr-2 shrink-0" style={{ background: SEVERITY_DOTS.critical }} />
+                    critical only
+                  </Dropdown.Item>
                 </Dropdown.Menu>
               </Dropdown.Popover>
             </Dropdown>

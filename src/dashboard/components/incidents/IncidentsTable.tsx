@@ -256,7 +256,11 @@ function FilterBar({
         onChange={(sel) => onChange({ status: sel })}
       />
 
-      <FilterDropdown label="Severity" value={selectedSeverityLabel}>
+      <FilterDropdown
+        label="Severity"
+        value={selectedSeverityLabel}
+        dot={SEVERITY_OPTIONS.find((o) => o.key === filters.severity)?.dot}
+      >
         <Dropdown.Menu
           selectionMode="single"
           selectedKeys={new Set([filters.severity])}
@@ -352,10 +356,12 @@ function FilterBar({
 function FilterDropdown({
   label,
   value,
+  dot,
   children,
 }: {
   label: string
   value: string
+  dot?: string
   children: React.ReactNode
 }) {
   return (
@@ -367,6 +373,13 @@ function FilterDropdown({
           className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs cursor-pointer border border-wd-border/50 bg-wd-surface hover:bg-wd-surface-hover transition-colors"
         >
           <span className="text-wd-muted">{label}:</span>
+          {dot && (
+            <span
+              aria-hidden="true"
+              className="inline-block w-2 h-2 rounded-full shrink-0"
+              style={{ background: dot }}
+            />
+          )}
           <span className="text-foreground truncate max-w-[140px]">{value}</span>
           <Icon icon="solar:alt-arrow-down-linear" width={16} className="text-wd-muted" />
         </div>
