@@ -47,6 +47,17 @@ svg {
   shape-rendering: geometricPrecision;
 }
 
+/* Recharts' ResponsiveContainer renders a focusable SVG surface; clicking it
+   shows a browser focus outline (the "white box") that reads as a visual bug
+   around charts. Charts aren't interactive targets — suppress the outline and
+   prevent focus entirely. */
+.recharts-wrapper,
+.recharts-wrapper *,
+.recharts-surface,
+.recharts-responsive-container {
+  outline: none !important;
+}
+
 /* Specialized typography utilities (spec §"Utility classes"). Use these when
    the Tailwind font-mono/font-sans defaults aren't enough — they bundle size,
    weight, and tracking for two recurring patterns. */
