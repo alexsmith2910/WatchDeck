@@ -66,7 +66,7 @@ export function checksRoutes(ctx: AppContext) {
       }
 
       const query = request.query as { limit?: string }
-      const limit = query.limit ? Math.min(parseInt(query.limit, 10) || 48, 200) : 48
+      const limit = query.limit ? Math.min(parseInt(query.limit, 10) || 48, 1000) : 48
 
       const now = new Date()
       const currentHourStart = truncateToHour(now)

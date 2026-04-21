@@ -480,7 +480,7 @@ export class MongoDBAdapter extends StorageAdapter {
     opts: DbPaginationOpts,
   ): Promise<HourlySummaryDoc[]> {
     if (!this.db) return []
-    const limit = Math.min(opts.limit ?? 48, 200)
+    const limit = Math.min(opts.limit ?? 48, 1000)
     return this.db
       .collection<HourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
       .find({ endpointId: new ObjectId(endpointId) })
