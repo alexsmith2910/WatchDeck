@@ -74,7 +74,6 @@ function ChecksTabBase({ endpoint }: Props) {
         const tz = getLocalTimeZone();
         const from = filters.customRange.start.toDate(tz);
         const to = filters.customRange.end.toDate(tz);
-        to.setHours(23, 59, 59, 999);
         params.set("from", from.toISOString());
         params.set("to", to.toISOString());
       } else {

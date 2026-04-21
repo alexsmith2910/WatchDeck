@@ -10,6 +10,7 @@ import {
   Dropdown,
   RangeCalendar,
   SearchField,
+  TimeField,
   ToggleButton,
   ToggleButtonGroup,
   cn,
@@ -214,9 +215,11 @@ export function FilterSearch({
 }
 
 // ---------------------------------------------------------------------------
-// Custom date-range filter — HeroUI DateRangePicker + RangeCalendar, restyled
-// so the trigger matches the rest of the filter bar (h-8, rounded-lg, bordered)
-// and the popover reads like our other dropdown surfaces.
+// Custom date-range filter — HeroUI DateRangePicker + RangeCalendar + TimeField
+// pair, restyled so the trigger matches the filter bar (h-8, rounded-lg,
+// bordered) and the popover offers both day and minute precision. Without
+// time granularity a "Apr 5" range lumps a full day's checks together; the
+// TimeField slots let the user pin the exact hour/minute an incident landed.
 // ---------------------------------------------------------------------------
 
 interface DateRangeFilterProps {
@@ -226,10 +229,43 @@ interface DateRangeFilterProps {
   placeholder?: string;
 }
 
-function formatDayMonth(d: DateValue): string {
-  return d
-    .toDate(getLocalTimeZone())
-    .toLocaleDateString(undefined, { month: "short", day: "numeric" });
+function hasTimeSegments(
+  d: DateValue,
+): d is DateValue & { hour: number; minute: number; second: number } {
+  return "hour" in d;
+}
+
+function isMidnight(d: DateValue): boolean {
+  if (!hasTimeSegments(d)) return true;
+  return d.hour === 0 && d.minute === 0 && d.second === 0;
+}
+
+function isEndOfDay(d: DateValue): boolean {
+  if (!hasTimeSegments(d)) return false;
+  return d.hour === 23 && d.minute === 59;
+}
+
+function formatRangeLabel(v: RangeValue<DateValue>): string {
+  const tz = getLocalTimeZone();
+  const fmtDate = (d: DateValue) =>
+    d.toDate(tz).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+  const fmtTime = (d: DateValue) =>
+    d.toDate(tz).toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  // Hide times only when the range still reads as "full-day" on both ends
+  // (start at 00:00, end at 23:59 or 00:00). Any user-set time surfaces in
+  // the label so the filter state is self-describing.
+  const showTime = !(
+    isMidnight(v.start) &&
+    (isMidnight(v.end) || isEndOfDay(v.end))
+  );
+  if (!showTime) return `${fmtDate(v.start)} – ${fmtDate(v.end)}`;
+  return `${fmtDate(v.start)} ${fmtTime(v.start)} – ${fmtDate(v.end)} ${fmtTime(v.end)}`;
 }
 
 export function DateRangeFilter({
@@ -240,17 +276,45 @@ export function DateRangeFilter({
 }: DateRangeFilterProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const hasValue = value != null;
-  const label = hasValue
-    ? `${formatDayMonth(value.start)} – ${formatDayMonth(value.end)}`
-    : placeholder;
+  const label = hasValue ? formatRangeLabel(value) : placeholder;
   const maxValue = today(getLocalTimeZone());
+  const handleChange = (next: RangeValue<DateValue> | null) => {
+    if (!next) {
+      onChange(null);
+      return;
+    }
+    // First calendar selection from a cleared state yields midnight on both
+    // endpoints; expand the end to 23:59:59 so "Apr 5 – Apr 6" covers both
+    // full days. Any user-adjusted end time (non-midnight) is preserved.
+    if (
+      isMidnight(next.start) &&
+      isMidnight(next.end) &&
+      hasTimeSegments(next.end) &&
+      "set" in next.end &&
+      typeof (next.end as { set?: unknown }).set === "function"
+    ) {
+      const end = (
+        next.end as unknown as {
+          set: (v: {
+            hour: number;
+            minute: number;
+            second: number;
+          }) => DateValue;
+        }
+      ).set({ hour: 23, minute: 59, second: 59 });
+      next = { start: next.start, end };
+    }
+    onChange(next);
+  };
   return (
     <div className="relative inline-flex">
       <DateRangePicker
         aria-label={ariaLabel}
         value={value}
-        onChange={onChange}
+        onChange={handleChange}
         maxValue={maxValue}
+        granularity="minute"
+        hourCycle={12}
       >
         <DateRangePicker.Trigger
           ref={triggerRef}
@@ -309,6 +373,10 @@ export function DateRangeFilter({
               </RangeCalendar.GridBody>
             </RangeCalendar.Grid>
           </RangeCalendar>
+          <div className="mt-3 pt-3 border-t border-wd-border/50 grid grid-cols-2 gap-2">
+            <TimeFieldSlot slot="start" label="Start" />
+            <TimeFieldSlot slot="end" label="End" />
+          </div>
         </DateRangePicker.Popover>
       </DateRangePicker>
       {hasValue && (
@@ -325,6 +393,53 @@ export function DateRangeFilter({
           <Icon icon="solar:close-circle-outline" width={14} />
         </button>
       )}
+    </div>
+  );
+}
+
+// HeroUI's TimeField picks up its bound time via react-aria's slot system when
+// it's a descendant of DateRangePicker. slot="start"/"end" edit only the time
+// portion of the corresponding endpoint, leaving the date parts alone.
+function TimeFieldSlot({
+  slot,
+  label,
+}: {
+  slot: "start" | "end";
+  label: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[10px] uppercase tracking-wider text-wd-muted font-semibold">
+        {label}
+      </span>
+      <TimeField
+        slot={slot}
+        granularity="minute"
+        hourCycle={12}
+        aria-label={`${label} time`}
+      >
+        <TimeField.Group
+          className={cn(
+            "!inline-flex !items-center !h-8 !px-2 !gap-0.5",
+            "!rounded-md !border !border-wd-border/50 !bg-wd-surface-hover/40",
+            "!text-[11.5px] !font-mono !text-foreground",
+            "focus-within:!border-wd-primary/50",
+          )}
+        >
+          <TimeField.Input className="!inline-flex !items-center !gap-[1px]">
+            {(segment) => (
+              <TimeField.Segment
+                segment={segment}
+                className={cn(
+                  "!px-[1px] !rounded-[3px] !outline-none !caret-transparent",
+                  "focus:!bg-wd-primary/15 focus:!text-wd-primary",
+                  "data-[placeholder=true]:!text-wd-muted",
+                )}
+              />
+            )}
+          </TimeField.Input>
+        </TimeField.Group>
+      </TimeField>
     </div>
   );
 }
