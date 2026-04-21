@@ -34,6 +34,25 @@ const statusTextColor: Record<DailyStatus, string> = {
   nodata: 'text-wd-muted',
 }
 
+// Swatch backgrounds that mirror statusTextColor — used for the tooltip's
+// leading swatches so the category reads at a glance without parsing the text.
+const statusSwatch: Record<DailyStatus, string> = {
+  healthy: 'bg-wd-success',
+  degraded: 'bg-wd-warning',
+  down: 'bg-wd-danger',
+  paused: 'bg-wd-paused',
+  nodata: 'bg-wd-muted/60',
+}
+
+// Same ladder as utils/format.ts::latencyColor so response-time rows get the
+// same semantic tint the table cells already use.
+function latencyTone(ms: number): { tint: string; swatch: string } {
+  if (ms === 0) return { tint: 'text-wd-muted', swatch: 'bg-wd-muted/60' }
+  if (ms < 200) return { tint: 'text-wd-success', swatch: 'bg-wd-success' }
+  if (ms < 500) return { tint: 'text-wd-warning', swatch: 'bg-wd-warning' }
+  return { tint: 'text-wd-danger', swatch: 'bg-wd-danger' }
+}
+
 export function buildHistory(dailies: DailySummary[], days = 30): DailyBucket[] {
   const byKey = new Map<string, DailySummary>()
   for (const d of dailies) {
@@ -230,9 +249,13 @@ function UptimeTooltip({ hovered, rect }: { hovered: DailyBucket; rect: DOMRect 
         transform: above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
       }}
     >
-      <div className="bg-wd-surface border border-wd-border rounded-md shadow-lg px-3 py-2 text-[11px] min-w-[220px]">
-        <div className="flex items-center justify-between gap-3 mb-1.5">
-          <span className="font-mono text-[10.5px] text-wd-muted">
+      <div className="bg-wd-surface border border-wd-border rounded-lg shadow-lg px-3 py-2.5 text-[11px] min-w-[220px] flex flex-col gap-1.5">
+        <div
+          className={cn(
+            'flex items-center justify-between gap-3 text-[10px] font-semibold uppercase tracking-wider font-mono border-b border-wd-border/50 pb-1.5',
+          )}
+        >
+          <span className="text-wd-muted/80">
             {hovered.date.toLocaleDateString(undefined, {
               month: 'short',
               day: 'numeric',
@@ -240,17 +263,12 @@ function UptimeTooltip({ hovered, rect }: { hovered: DailyBucket; rect: DOMRect 
               timeZone: 'UTC',
             })}
           </span>
-          <span
-            className={cn(
-              'text-[10px] font-semibold uppercase tracking-wider',
-              statusTextColor[hovered.status],
-            )}
-          >
+          <span className={statusTextColor[hovered.status]}>
             {statusLabel[hovered.status]}
           </span>
         </div>
         {hovered.status !== 'nodata' && hovered.status !== 'paused' ? (
-          <div className="space-y-1">
+          <>
             <TipRow
               label="Uptime"
               value={
@@ -258,6 +276,8 @@ function UptimeTooltip({ hovered, rect }: { hovered: DailyBucket; rect: DOMRect 
                   ? `${hovered.uptimePercent.toFixed(2)}%`
                   : '—'
               }
+              color={statusSwatch[hovered.status]}
+              valueClass={statusTextColor[hovered.status]}
             />
             <TipRow
               label="Checks"
@@ -266,17 +286,48 @@ function UptimeTooltip({ hovered, rect }: { hovered: DailyBucket; rect: DOMRect 
                   ? `${hovered.totalChecks.toLocaleString()} · ${hovered.failCount} failed`
                   : hovered.totalChecks.toLocaleString()
               }
+              color={hovered.failCount > 0 ? 'bg-wd-danger' : 'bg-wd-success'}
+              valueClass={hovered.failCount > 0 ? 'text-wd-danger' : 'text-foreground'}
             />
-            <TipRow label="Avg" value={`${hovered.avgResponseTime}ms`} />
-            {hovered.p95ResponseTime > 0 && (
-              <TipRow label="P95" value={`${hovered.p95ResponseTime}ms`} />
-            )}
+            {(() => {
+              const tone = latencyTone(hovered.avgResponseTime)
+              return (
+                <TipRow
+                  label="Avg"
+                  value={`${hovered.avgResponseTime}ms`}
+                  color={tone.swatch}
+                  valueClass={tone.tint}
+                />
+              )
+            })()}
+            {hovered.p95ResponseTime > 0 && (() => {
+              const tone = latencyTone(hovered.p95ResponseTime)
+              return (
+                <TipRow
+                  label="P95"
+                  value={`${hovered.p95ResponseTime}ms`}
+                  color={tone.swatch}
+                  valueClass={tone.tint}
+                />
+              )
+            })()}
             {hovered.incidentCount > 0 && (
-              <TipRow label="Incidents" value={String(hovered.incidentCount)} />
+              <TipRow
+                label="Incidents"
+                value={String(hovered.incidentCount)}
+                color="bg-wd-danger"
+                valueClass="text-wd-danger"
+              />
             )}
-          </div>
+          </>
         ) : (
-          <div className="italic text-wd-muted/70 text-[11px]">
+          <div
+            className={cn(
+              'inline-flex items-center gap-1.5',
+              statusTextColor[hovered.status],
+            )}
+          >
+            <span aria-hidden className={cn('w-2 h-2 rounded-sm', statusSwatch[hovered.status])} />
             {hovered.status === 'paused'
               ? 'Endpoint was paused during this window'
               : 'No check data for this day'}
@@ -287,11 +338,29 @@ function UptimeTooltip({ hovered, rect }: { hovered: DailyBucket; rect: DOMRect 
   )
 }
 
-function TipRow({ label, value }: { label: string; value: string }) {
+function TipRow({
+  label,
+  value,
+  color,
+  valueClass,
+}: {
+  label: string
+  value: string
+  color: string
+  valueClass?: string
+}) {
   return (
-    <div className="flex items-baseline gap-3">
-      <span className="text-wd-muted min-w-[56px]">{label}</span>
-      <span className="font-mono font-medium text-right flex-1 text-foreground">
+    <div className="flex items-center justify-between gap-3">
+      <span className="inline-flex items-center gap-1.5 text-wd-muted min-w-0">
+        <span aria-hidden className={cn('w-2 h-2 rounded-sm shrink-0', color)} />
+        <span className="truncate">{label}</span>
+      </span>
+      <span
+        className={cn(
+          'font-mono font-medium text-right shrink-0 tabular-nums',
+          valueClass ?? 'text-foreground',
+        )}
+      >
         {value}
       </span>
     </div>
