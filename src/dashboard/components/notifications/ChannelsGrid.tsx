@@ -72,9 +72,9 @@ const STATUS_STYLE: Record<ChannelUiStatus, { label: string; chip: string; card:
   },
   paused: {
     label: 'Paused',
-    chip: 'bg-wd-muted/20 text-wd-muted',
+    chip: 'bg-wd-paused/15 text-wd-paused',
     card: 'border-wd-border/40 bg-wd-surface/70',
-    spark: 'var(--wd-muted)',
+    spark: 'var(--wd-paused)',
   },
 }
 

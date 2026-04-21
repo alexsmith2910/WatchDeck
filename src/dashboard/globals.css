@@ -13,6 +13,7 @@
   --color-wd-success: var(--wd-success);
   --color-wd-warning: var(--wd-warning);
   --color-wd-danger: var(--wd-danger);
+  --color-wd-paused: var(--wd-paused);
   --color-wd-muted: var(--wd-muted);
   --color-wd-surface: var(--wd-surface);
   --color-wd-surface-hover: var(--wd-surface-hover);
@@ -91,6 +92,8 @@ svg {
   --wd-warning-soft:       #fbefde;
   --wd-danger:             #e57b7b;   /* dusty coral red */
   --wd-danger-soft:        #fbe8e8;
+  --wd-paused:             #8096b1;   /* cool slate-blue — intentionally inactive */
+  --wd-paused-soft:        #eef2f7;
   --wd-info:               #6ea8d8;
   --wd-info-soft:          #e7f0f8;
 
@@ -143,6 +146,8 @@ svg {
   --wd-warning-soft:       #3d2f1d;
   --wd-danger:             #f29a9a;
   --wd-danger-soft:        #3d2626;
+  --wd-paused:             #a6b8cf;
+  --wd-paused-soft:        #2a3240;
   --wd-info:               #9dc2e2;
   --wd-info-soft:          #1f2c38;
 
@@ -274,7 +279,7 @@ svg {
 .wd-up-cell[data-status='healthy']  { --cell-bg: var(--wd-success); }
 .wd-up-cell[data-status='degraded'] { --cell-bg: var(--wd-warning); }
 .wd-up-cell[data-status='down']     { --cell-bg: var(--wd-danger); }
-.wd-up-cell[data-status='paused']   { --cell-bg: color-mix(in srgb, var(--wd-muted) 28%, transparent); }
+.wd-up-cell[data-status='paused']   { --cell-bg: color-mix(in srgb, var(--wd-paused) 55%, transparent); }
 .wd-up-cell[data-status='nodata']   { --cell-bg: color-mix(in srgb, var(--wd-border) 55%, transparent); }
 
 /* Loading + settling: sequential wave. Cycle = (N-1)*stagger + rest_pad, so

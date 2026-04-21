@@ -30,7 +30,7 @@ const statusTextColor: Record<DailyStatus, string> = {
   healthy: 'text-wd-success',
   degraded: 'text-wd-warning',
   down: 'text-wd-danger',
-  paused: 'text-wd-muted',
+  paused: 'text-wd-paused',
   nodata: 'text-wd-muted',
 }
 
