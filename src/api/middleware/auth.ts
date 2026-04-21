@@ -27,7 +27,7 @@ function isLoopback(ip: string): boolean {
 /**
  * Bypass auth for `GET /health` and `GET /health/<subsystem>` when the caller
  * is on the loopback interface. `/health/ping` is already a public route so it
- * never reaches this middleware. POSTs (outage simulation, incident ack) and
+ * never reaches this middleware. POSTs (outage simulation) and
  * `/health/history` still require auth.
  */
 function isLocalHealthRead(request: FastifyRequest, basePath: string): boolean {

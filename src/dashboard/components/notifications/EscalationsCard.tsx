@@ -47,8 +47,8 @@ export function EscalationsCard({ escalations, channels, endpointNameById }: Pro
   const next = sorted[0]
 
   const sub = sorted.length === 0
-    ? 'No escalations scheduled. Unacknowledged incidents will appear here.'
-    : `Next fires in ${formatCountdown(next.firesAt)}. Acknowledge the incident to cancel.`
+    ? 'No escalations scheduled. Unresolved incidents will appear here.'
+    : `Next fires in ${formatCountdown(next.firesAt)}. Resolve the incident to cancel.`
 
   return (
     <div className="rounded-xl border border-wd-border/50 bg-wd-surface p-4 flex flex-col gap-3">
