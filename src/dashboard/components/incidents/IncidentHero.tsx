@@ -137,7 +137,7 @@ function AllClearBanner({ lastUpdatedAt }: { lastUpdatedAt: number }) {
 
 function severityTintClasses(sev: Severity): string {
   switch (sev) {
-    case 'Critical': return 'bg-wd-danger/[0.05] hover:bg-wd-danger/[0.09]'
+    case 'Critical': return 'hover:bg-wd-surface-hover/40'
     case 'Major':    return 'bg-wd-warning/[0.05] hover:bg-wd-warning/[0.09]'
     case 'Minor':    return 'bg-wd-primary/[0.04] hover:bg-wd-primary/[0.08]'
   }
@@ -247,16 +247,25 @@ const HeroCard = memo(function HeroCard({
     >
       {/* Row 1 — status dot + name + type | duration */}
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          <span className={cn('h-2 w-2 rounded-full shrink-0', severityDotClass(sev))} />
-          <span className="text-sm font-semibold text-foreground truncate tracking-tight">
-            {ep.name}
-          </span>
-          {ep.kind && (
-            <span className="shrink-0 px-1.5 py-0.5 rounded text-[9.5px] font-medium font-mono uppercase tracking-[0.08em] text-wd-muted/80 bg-wd-surface-hover/60 border border-wd-border/50">
-              {ep.kind}
-            </span>
-          )}
+        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+          <span className={cn('mt-[7px] h-2 w-2 rounded-full shrink-0', severityDotClass(sev))} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-sm font-semibold text-foreground truncate tracking-tight">
+                {ep.name}
+              </span>
+              {ep.kind && (
+                <span className="shrink-0 px-1.5 py-0.5 rounded text-[9.5px] font-medium font-mono uppercase tracking-[0.08em] text-wd-muted/80 bg-wd-surface-hover/60 border border-wd-border/50">
+                  {ep.kind}
+                </span>
+              )}
+            </div>
+            {ep.url && (
+              <div className="text-[10.5px] text-wd-muted font-mono truncate mt-0.5">
+                {ep.url}
+              </div>
+            )}
+          </div>
         </div>
         <div className="text-right shrink-0">
           <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-wd-muted/80 leading-none">
@@ -314,7 +323,7 @@ const HeroCard = memo(function HeroCard({
 
       {/* Row 6 — response-time sparkline */}
       {sparkValues.length > 1 && (
-        <div className="pt-2 border-t border-dashed border-wd-border/60">
+        <div className="mt-auto pt-2 border-t border-dashed border-wd-border/60">
           <div className="flex items-center justify-between text-[10px] text-wd-muted/80 font-mono mb-1">
             <span>Response time · {sparkValues.length} checks during incident</span>
             <span>
