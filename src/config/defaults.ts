@@ -26,6 +26,13 @@ export const defaults = {
   dashboardMode: "standalone" as "standalone" | "mounted",
 
   /**
+   * Identifier for this probe. V1 is single-process so "local" is the only
+   * expected value — surfaced in the dashboard's check detail so multi-probe
+   * support can later return a per-check value without a schema migration.
+   */
+  probeName: "local",
+
+  /**
    * When true, HTTP checks record the size of the response body in bytes on
    * each CheckDoc so the dashboard can display it. Adds a body read when
    * Content-Length is not present on the response.

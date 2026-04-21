@@ -92,6 +92,20 @@ function validateServer(cfg: WatchDeckConfig, errors: ValidationError[]): void {
     )
   }
 
+  if (
+    typeof cfg.probeName !== 'string' ||
+    cfg.probeName.trim() === '' ||
+    /\s/.test(cfg.probeName)
+  ) {
+    push(
+      errors,
+      'probeName',
+      cfg.probeName,
+      'non-empty string with no whitespace',
+      'Set probeName to a short identifier like "local" or "eu-west"',
+    )
+  }
+
   if (typeof cfg.captureBodySize !== 'boolean') {
     push(
       errors,

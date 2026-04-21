@@ -46,6 +46,13 @@ export function settingsRoutes(ctx: AppContext) {
       return reply.send({ data: ctx.config.modules })
     })
 
+    // ── Runtime info (read-only view of static server-side runtime values) ──
+    // Used by the dashboard for fields that are constant for the process
+    // lifetime — currently the probe name shown on every check row.
+    fastify.get('/runtime', async (_request, reply) => {
+      return reply.send({ data: { probeName: ctx.config.probeName } })
+    })
+
     fastify.put('/settings', async (request, reply) => {
       const body = request.body as Record<string, unknown>
       const { _id: _d, ...changes } = body

@@ -11,6 +11,8 @@ export interface WatchDeckConfig {
   dashboardRoute: string;
   dashboardMode: 'standalone' | 'mounted';
 
+  probeName: string;
+
   captureBodySize: boolean;
   maxBodyBytesToRead: number;
 
