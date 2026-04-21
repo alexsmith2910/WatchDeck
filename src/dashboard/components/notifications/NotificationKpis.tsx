@@ -121,6 +121,8 @@ export function NotificationKpis({ stats, recentLog, escalations }: Props) {
         spark={sparks.success}
         sparkLabels={sparks.labels}
         sparkFormat={(n) => `${n.toFixed(1)}%`}
+        sparkYMin={0}
+        sparkYMax={100}
       />
       <KpiCard
         icon="solar:stopwatch-outline"
@@ -178,6 +180,8 @@ function KpiCard({
   spark,
   sparkLabels,
   sparkFormat,
+  sparkYMin,
+  sparkYMax,
 }: {
   icon: string
   tone: Tone
@@ -190,6 +194,8 @@ function KpiCard({
   spark?: number[] | null
   sparkLabels?: string[]
   sparkFormat?: (n: number) => string
+  sparkYMin?: number
+  sparkYMax?: number
 }) {
   return (
     <div className="relative flex flex-col gap-2.5 rounded-xl border border-wd-border/50 bg-wd-surface px-4 py-3.5 min-h-[118px] overflow-hidden">
@@ -223,6 +229,8 @@ function KpiCard({
             height={46}
             labels={sparkLabels}
             formatValue={sparkFormat}
+            yMin={sparkYMin}
+            yMax={sparkYMax}
           />
         </div>
       )}

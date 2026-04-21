@@ -14,17 +14,25 @@ export const Sparkline = memo(function Sparkline({
   width = 100,
   height = 32,
   strokeW = 1.5,
+  yMin,
+  yMax,
 }: {
   data: number[]
   color?: string
   width?: number
   height?: number
   strokeW?: number
+  /** Override the baseline (y-axis min). Useful for bounded metrics like
+   *  percentages where a flat 100% line should draw at the top, not collapse
+   *  to the bottom when min === max. */
+  yMin?: number
+  /** Override the y-axis max. Pair with `yMin` for bounded ranges (0-100). */
+  yMax?: number
 }) {
   const reactId = useId()
   if (!data || data.length < 2) return null
-  const max = Math.max(...data)
-  const min = Math.min(...data)
+  const min = yMin ?? Math.min(...data)
+  const max = yMax ?? Math.max(...data)
   const range = max - min || 1
   const stepX = width / (data.length - 1)
   const pts = data.map<[number, number]>((v, i) => [i * stepX, height - ((v - min) / range) * (height - 4) - 2])
@@ -57,6 +65,8 @@ export const WideSpark = memo(function WideSpark({
   height = 48,
   labels,
   formatValue,
+  yMin,
+  yMax,
 }: {
   data: number[]
   color?: string
@@ -66,6 +76,12 @@ export const WideSpark = memo(function WideSpark({
   labels?: string[]
   /** Optional value formatter for the hover tooltip (e.g. `n => `${n} m``). */
   formatValue?: (n: number) => string
+  /** Override the baseline (y-axis min). Useful for bounded metrics like
+   *  percentages where a flat 100% line should draw at the top, not collapse
+   *  to the bottom when min === max. */
+  yMin?: number
+  /** Override the y-axis max. Pair with `yMin` for bounded ranges (0-100). */
+  yMax?: number
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(240)
@@ -102,8 +118,8 @@ export const WideSpark = memo(function WideSpark({
     const stepX = w / Math.max(1, data.length - 1)
     const idx = Math.max(0, Math.min(data.length - 1, Math.round(px / stepX)))
     const x = idx * stepX
-    const max = Math.max(...data)
-    const min = Math.min(...data)
+    const min = yMin ?? Math.min(...data)
+    const max = yMax ?? Math.max(...data)
     const range = max - min || 1
     const y = height - ((data[idx] - min) / range) * (height - 4) - 2
     setHover({ idx, x, y, rect })
@@ -117,7 +133,7 @@ export const WideSpark = memo(function WideSpark({
       onMouseMove={interactive ? handleMove : undefined}
       onMouseLeave={interactive ? () => setHover(null) : undefined}
     >
-      <Sparkline data={data} color={color} width={w} height={height} strokeW={1.6} />
+      <Sparkline data={data} color={color} width={w} height={height} strokeW={1.6} yMin={yMin} yMax={yMax} />
       {interactive && hover && (
         <>
           <div
