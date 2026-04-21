@@ -101,7 +101,7 @@ export class EscalationScheduler {
 
   cancel(
     incidentId: string,
-    reason: 'resolved' | 'acknowledged' | 'muted' | 'channel_gone',
+    reason: 'resolved' | 'muted' | 'channel_gone',
   ): void {
     const p = this.pending.get(incidentId)
     if (!p) return

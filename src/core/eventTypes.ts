@@ -190,7 +190,7 @@ export interface EventMap {
   'notification:escalationCancelled': {
     timestamp: Date
     incidentId: string
-    reason: 'resolved' | 'acknowledged' | 'muted' | 'channel_gone'
+    reason: 'resolved' | 'muted' | 'channel_gone'
   }
   'notification:escalationFired': {
     timestamp: Date
