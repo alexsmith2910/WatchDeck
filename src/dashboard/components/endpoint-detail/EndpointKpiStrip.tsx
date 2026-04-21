@@ -387,9 +387,9 @@ function EndpointKpiStripBase({
         tone={sslTone}
         title="SSL Certificate"
         value={sslValue}
+        unit={sslDays != null ? "until renewal" : undefined}
         delta={sslIssuerLabel}
         deltaTone="muted"
-        deltaLabel="until renewal"
         spark={null}
       />
     </div>
