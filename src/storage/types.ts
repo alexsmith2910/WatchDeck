@@ -217,8 +217,6 @@ export interface IncidentDoc {
   durationSeconds?: number
   timeline: IncidentTimelineEvent[]
   notificationsSent: number
-  acknowledgedAt?: Date
-  acknowledgedBy?: string
 
   createdAt: Date
   updatedAt: Date
@@ -509,7 +507,6 @@ export interface InternalIncidentDoc {
   startedAt: Date
   resolvedAt?: Date
   durationSeconds?: number
-  ack: string | null
   commits: number
   timeline: InternalIncidentTimelineEntryDoc[]
   /** Set on resolve; TTL index drops the doc when reached. */

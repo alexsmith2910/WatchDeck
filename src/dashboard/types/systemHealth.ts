@@ -39,7 +39,6 @@ export interface InternalIncident {
   startedAt: number
   resolvedAt?: number
   durationSeconds?: number
-  ack: string | null
   commits: number
   timeline: Array<{ at: number; event: string; detail?: string }>
 }

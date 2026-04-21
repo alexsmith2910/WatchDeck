@@ -69,8 +69,6 @@ export interface ApiIncident {
   durationSeconds?: number
   timeline?: IncidentTimelineEvent[]
   notificationsSent: number
-  acknowledgedAt?: string
-  acknowledgedBy?: string
 }
 
 export interface ApiPagination {
