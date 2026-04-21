@@ -124,16 +124,65 @@ const typeFilterLabels: Record<TypeFilter, string> = {
 
 const statusOrder: Record<EndpointStatus, number> = { down: 0, degraded: 1, healthy: 2 }
 
-function TipRow({ label, value, className, mono = true }: { label: string; value: string; className?: string; mono?: boolean }) {
+// Shared tooltip primitives — mirror the style used by the Incidents and
+// Notifications charts (IncidentExtras / NotificationCharts): uppercase-mono
+// header separated by a hairline border, each row is a `swatch · label · value`
+// triplet, and semantic rows tint the swatch + value to make the important
+// signal pop out at a glance.
+
+function TipHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex gap-4">
-      <span className="text-wd-muted shrink-0 whitespace-nowrap">{label}</span>
-      <span className={cn('font-medium ml-auto text-right', mono && 'font-mono', className)}>{value}</span>
+    <div className="text-[10px] font-semibold uppercase tracking-wider text-wd-muted/80 font-mono border-b border-wd-border/50 pb-1.5 mb-0.5">
+      {children}
     </div>
   )
 }
 
-const TIP_CLS = 'px-3 py-2 text-[11px] leading-relaxed min-w-[220px] max-w-[320px]'
+function TipRow({
+  label,
+  value,
+  color,
+  mono = true,
+  className,
+}: {
+  label: string
+  value: React.ReactNode
+  /** Swatch color — accepts either a Tailwind `bg-*` class or a raw CSS color. */
+  color?: string
+  mono?: boolean
+  /** Extra classes on the value (typically a `text-wd-*` for semantic coloring). */
+  className?: string
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="inline-flex items-center gap-1.5 text-wd-muted min-w-0">
+        {color ? (
+          <span
+            aria-hidden
+            className={cn('w-2 h-2 rounded-sm shrink-0', color.startsWith('bg-') && color)}
+            style={color.startsWith('bg-') ? undefined : { background: color }}
+          />
+        ) : null}
+        <span className="truncate">{label}</span>
+      </span>
+      <span
+        className={cn(
+          'font-medium ml-auto text-right shrink-0 tabular-nums',
+          mono && 'font-mono',
+          className,
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  )
+}
+
+// Match the UptimeBar portal tooltip: surface bg, bordered, large rounded
+// corners, heavier shadow. The `!` overrides HeroUI's default popover chrome
+// so the row-level tooltips don't drift from the uptime cell tooltip.
+const TIP_CLS =
+  '!bg-wd-surface !border !border-wd-border !rounded-lg !shadow-lg px-3 py-2.5 text-[11px] leading-relaxed min-w-[220px] max-w-[320px] flex flex-col gap-1.5'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -635,7 +684,12 @@ export default function EndpointsPage() {
           </SearchField.Group>
         </SearchField>
 
+        {/* Mirror the shared Segmented primitive used on Incidents /
+            Notifications / Endpoint-detail pages so the status filter chrome
+            matches the rest of the dashboard. The count badge is kept inside
+            the label, which is why we can't use <Segmented /> directly. */}
         <ToggleButtonGroup
+          aria-label="Status filter"
           selectionMode="single"
           selectedKeys={new Set([statusFilter])}
           onSelectionChange={(keys) => {
@@ -643,30 +697,41 @@ export default function EndpointsPage() {
             if (sel) setStatusFilter(sel)
           }}
           size="sm"
+          className="!h-8 !rounded-lg !border !border-wd-border/50 !bg-wd-surface !overflow-hidden"
         >
           {statusFilters.map((f) => (
             <ToggleButton
               key={f.key}
               id={f.key}
               className={cn(
-                '!text-xs !px-3',
-                'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
+                '!text-xs !px-3 !h-full !rounded-none !border-0 !bg-transparent',
+                'hover:!bg-wd-surface-hover',
+                '[&:not(:first-child)]:!border-l [&:not(:first-child)]:!border-wd-border/50',
+                'data-[selected=true]:!bg-wd-primary/15 data-[selected=true]:!text-wd-primary',
               )}
             >
               {f.label}
-              <span className="ml-1 text-[10px] font-mono opacity-60">{statusCounts[f.key]}</span>
+              <span className="ml-1 text-[10px] font-mono opacity-60">
+                {statusCounts[f.key]}
+              </span>
             </ToggleButton>
           ))}
         </ToggleButtonGroup>
 
         <Dropdown>
           <Dropdown.Trigger>
-            <div className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs cursor-pointer hover:bg-wd-surface-hover transition-colors">
-              <Icon icon="solar:filter-outline" width={16} className="text-wd-muted" />
-              <span className="text-foreground">{typeFilterLabels[typeFilter]}</span>
+            <div
+              role="button"
+              tabIndex={0}
+              aria-label="Filter by type"
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs cursor-pointer border border-wd-border/50 bg-wd-surface hover:bg-wd-surface-hover transition-colors"
+            >
+              <span className="text-wd-muted">Type:</span>
+              <span className="text-foreground truncate max-w-[140px]">{typeFilterLabels[typeFilter]}</span>
+              <Icon icon="solar:alt-arrow-down-linear" width={16} className="text-wd-muted" />
             </div>
           </Dropdown.Trigger>
-          <Dropdown.Popover placement="bottom start" className="!min-w-[140px]">
+          <Dropdown.Popover placement="bottom start" className="!min-w-[180px]">
             <Dropdown.Menu
               selectionMode="single"
               selectedKeys={new Set([typeFilter])}
@@ -707,7 +772,7 @@ export default function EndpointsPage() {
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent className="px-2 py-1 text-[11px]">Recheck all endpoints</TooltipContent>
+          <TooltipContent className="!bg-wd-surface !border !border-wd-border !rounded-lg !shadow-lg px-2 py-1 text-[11px]">Recheck all endpoints</TooltipContent>
         </Tooltip>
         <Button
           size="sm"
@@ -826,7 +891,7 @@ export default function EndpointsPage() {
                       'grid items-center gap-x-3 px-3 py-2 cursor-pointer transition-colors relative',
                       'border-b border-wd-border/10 hover:bg-black/[0.04] dark:hover:bg-black/25',
                       ep.endpointStatus === 'paused' &&
-                        "bg-wd-warning/[0.03] before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-0.5 before:bg-wd-warning/30 before:pointer-events-none",
+                        "bg-wd-paused/[0.04] before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-0.5 before:bg-wd-paused/40 before:pointer-events-none",
                       GRID_COLS,
                     )}
                     onClick={() => navigate(`/endpoints/${ep.id}`)}
@@ -850,8 +915,8 @@ export default function EndpointsPage() {
                       <TooltipTrigger className="!block !w-full !text-left !justify-start">
                         {ep.endpointStatus === 'paused' ? (
                           <div className="flex items-center gap-1.5">
-                            <Icon icon="solar:pause-circle-outline" width={16} className="text-wd-warning/70" />
-                            <span className="text-xs font-medium text-wd-warning/70">Paused</span>
+                            <Icon icon="solar:pause-circle-outline" width={16} className="text-wd-paused" />
+                            <span className="text-xs font-medium text-wd-paused">Paused</span>
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">
@@ -861,13 +926,32 @@ export default function EndpointsPage() {
                         )}
                       </TooltipTrigger>
                       <TooltipContent className={TIP_CLS}>
+                        <TipHeader>
+                          <span className={ep.endpointStatus === 'paused' ? 'text-wd-paused' : sc.text}>
+                            {ep.endpointStatus === 'paused' ? 'Paused' : sc.label}
+                          </span>
+                        </TipHeader>
                         {ep.endpointStatus === 'paused' ? (
                           <>
-                            <div className="text-wd-warning">Monitoring paused</div>
-                            <div className="text-wd-muted/60 text-[10px] mt-0.5">Checks are skipped while paused</div>
+                            <TipRow
+                              label="Monitoring"
+                              value="Paused"
+                              color="bg-wd-paused"
+                              className="text-wd-paused"
+                              mono={false}
+                            />
                             {ep.status && (
-                              <TipRow label="Last status" value={sc.label} className={sc.text} mono={false} />
+                              <TipRow
+                                label="Last status"
+                                value={sc.label}
+                                color={sc.dot}
+                                className={sc.text}
+                                mono={false}
+                              />
                             )}
+                            <div className="text-wd-muted/60 text-[10px]">
+                              Checks are skipped while paused
+                            </div>
                           </>
                         ) : (
                           <>
@@ -875,26 +959,39 @@ export default function EndpointsPage() {
                               <TipRow
                                 label="Reason"
                                 value={ep.errorMessage}
+                                color="bg-wd-danger"
                                 className="text-wd-danger"
                                 mono={false}
                               />
                             )}
                             {ep.statusCode != null && (
-                              <TipRow label="Last code" value={String(ep.statusCode)} />
+                              <TipRow
+                                label="Last code"
+                                value={String(ep.statusCode)}
+                                color={ep.status === 'down' ? 'bg-wd-danger' : ep.status === 'degraded' ? 'bg-wd-warning' : 'bg-wd-success'}
+                                className={ep.status === 'down' ? 'text-wd-danger' : ep.status === 'degraded' ? 'text-wd-warning' : 'text-wd-success'}
+                              />
                             )}
                             {ep.consecutiveFailures > 0 && (
                               <TipRow
                                 label="Failures"
                                 value={`${ep.consecutiveFailures} consecutive`}
+                                color="bg-wd-danger"
                                 className="text-wd-danger"
                                 mono={false}
                               />
                             )}
                             {ep.status === 'healthy' && !ep.errorMessage && ep.endpointStatus !== 'paused' && (
-                              <div className="text-wd-success">All checks passing</div>
+                              <div className="inline-flex items-center gap-1.5 text-wd-success">
+                                <span aria-hidden className="w-2 h-2 rounded-sm bg-wd-success" />
+                                All checks passing
+                              </div>
                             )}
                             {ep.status === null && (
-                              <div className="text-wd-muted">Waiting for first check</div>
+                              <div className="inline-flex items-center gap-1.5 text-wd-muted">
+                                <span aria-hidden className="w-2 h-2 rounded-sm bg-wd-muted/60" />
+                                Waiting for first check
+                              </div>
                             )}
                           </>
                         )}
@@ -910,7 +1007,7 @@ export default function EndpointsPage() {
                               {ep.name}
                             </span>
                             {ep.endpointStatus === 'paused' && (
-                              <span className="text-[9px] font-semibold uppercase tracking-wider text-wd-warning bg-wd-warning/10 px-1.5 py-0.5 rounded">
+                              <span className="inline-flex items-center text-[9px] font-semibold uppercase tracking-wider text-wd-paused bg-wd-paused/10 px-1.5 pt-[3px] pb-[2px] rounded leading-none">
                                 Paused
                               </span>
                             )}
@@ -923,15 +1020,33 @@ export default function EndpointsPage() {
                         </div>
                       </TooltipTrigger>
                       <TooltipContent className={TIP_CLS}>
-                        <TipRow label="Type" value={ep.type.toUpperCase()} />
-                        <TipRow label="Interval" value={`Every ${ep.checkInterval}s`} mono={false} />
+                        <TipHeader>{ep.name}</TipHeader>
+                        <TipRow
+                          label="Type"
+                          value={ep.type.toUpperCase()}
+                          color="bg-wd-primary"
+                          className="text-wd-primary"
+                        />
+                        <TipRow
+                          label="Interval"
+                          value={`Every ${ep.checkInterval}s`}
+                          color="bg-wd-muted/60"
+                          mono={false}
+                        />
                         {ep.method && (
                           <TipRow
                             label="Method"
                             value={`${ep.method} · expect ${ep.expectedStatusCodes?.join(', ') ?? '2xx'}`}
+                            color="bg-wd-success"
                           />
                         )}
-                        {ep.type === 'port' && <TipRow label="Protocol" value="TCP" />}
+                        {ep.type === 'port' && (
+                          <TipRow
+                            label="Protocol"
+                            value="TCP"
+                            color="bg-wd-primary"
+                          />
+                        )}
                       </TooltipContent>
                     </Tooltip>
 
@@ -975,18 +1090,57 @@ export default function EndpointsPage() {
                             </span>
                           </TooltipTrigger>
                           <TooltipContent className={TIP_CLS}>
+                            <TipHeader>Uptime</TipHeader>
                             {hasAny ? (
                               <>
-                                {([['24h', '24h'], ['7d', '7d'], ['30d', '30d'], ['90d', '90d']] as const).map(([key, label]) => {
+                                {(
+                                  [
+                                    ['24h', '24h'],
+                                    ['7d', '7d'],
+                                    ['30d', '30d'],
+                                    ['90d', '90d'],
+                                  ] as const
+                                ).map(([key, label]) => {
                                   const v = stats[key]
-                                  return v != null
-                                    ? <TipRow key={key} label={label} value={`${v}%`} className={uptimeColor(v)} />
-                                    : <TipRow key={key} label={label} value="—" className="text-wd-muted" />
+                                  if (v == null) {
+                                    return (
+                                      <TipRow
+                                        key={key}
+                                        label={label}
+                                        value="—"
+                                        color="bg-wd-muted/40"
+                                        className="text-wd-muted"
+                                      />
+                                    )
+                                  }
+                                  const tone = uptimeColor(v)
+                                  const swatch =
+                                    tone === 'text-wd-success'
+                                      ? 'bg-wd-success'
+                                      : tone === 'text-wd-warning'
+                                        ? 'bg-wd-warning'
+                                        : tone === 'text-wd-danger'
+                                          ? 'bg-wd-danger'
+                                          : 'bg-wd-muted/40'
+                                  return (
+                                    <TipRow
+                                      key={key}
+                                      label={label}
+                                      value={`${v}%`}
+                                      color={swatch}
+                                      className={tone}
+                                    />
+                                  )
                                 })}
-                                <div className="text-wd-muted/60 mt-1 text-[10px]">Cell shows rolling 30d</div>
+                                <div className="text-wd-muted/60 text-[10px] pt-1 border-t border-wd-border/50">
+                                  Cell shows rolling 30d
+                                </div>
                               </>
                             ) : (
-                              <div className="text-wd-muted">Waiting for check data</div>
+                              <div className="inline-flex items-center gap-1.5 text-wd-muted">
+                                <span aria-hidden className="w-2 h-2 rounded-sm bg-wd-muted/60" />
+                                Waiting for check data
+                              </div>
                             )}
                           </TooltipContent>
                         </Tooltip>
@@ -1013,26 +1167,85 @@ export default function EndpointsPage() {
                             </span>
                           </TooltipTrigger>
                           <TooltipContent className={TIP_CLS}>
-                            {hasDaily ? (
+                            <TipHeader>Response Time</TipHeader>
+                            {hasDaily ? (() => {
+                              const p95Max = Math.max(...dailies.map((d) => d.p95ResponseTime))
+                              const minVal = Math.min(...dailies.map((d) => d.minResponseTime))
+                              const maxVal = Math.max(...dailies.map((d) => d.maxResponseTime))
+                              const swatchFor = (tone: string) =>
+                                tone === 'text-wd-success'
+                                  ? 'bg-wd-success'
+                                  : tone === 'text-wd-warning'
+                                    ? 'bg-wd-warning'
+                                    : tone === 'text-wd-danger'
+                                      ? 'bg-wd-danger'
+                                      : 'bg-wd-muted/40'
+                              return (
+                                <>
+                                  {ep.responseTime != null && (
+                                    <TipRow
+                                      label="Latest"
+                                      value={`${ep.responseTime}ms`}
+                                      color={swatchFor(latencyColor(ep.responseTime))}
+                                      className={latencyColor(ep.responseTime)}
+                                    />
+                                  )}
+                                  {avg30d != null && (
+                                    <TipRow
+                                      label="Avg (30d)"
+                                      value={`${avg30d}ms`}
+                                      color={swatchFor(latencyColor(avg30d))}
+                                      className={latencyColor(avg30d)}
+                                    />
+                                  )}
+                                  <TipRow
+                                    label="P95"
+                                    value={`${p95Max}ms`}
+                                    color={swatchFor(latencyColor(p95Max))}
+                                    className={latencyColor(p95Max)}
+                                  />
+                                  <TipRow
+                                    label="Min"
+                                    value={`${minVal}ms`}
+                                    color="bg-wd-success"
+                                    className="text-wd-success"
+                                  />
+                                  <TipRow
+                                    label="Max"
+                                    value={`${maxVal}ms`}
+                                    color={swatchFor(latencyColor(maxVal))}
+                                    className={latencyColor(maxVal)}
+                                  />
+                                  <div className="text-wd-muted/60 text-[10px] pt-1 border-t border-wd-border/50">
+                                    Rolling 30-day window
+                                  </div>
+                                </>
+                              )
+                            })() : ep.responseTime != null ? (
                               <>
-                                {ep.responseTime != null && (
-                                  <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime)} />
-                                )}
-                                {avg30d != null && (
-                                  <TipRow label="Avg (30d)" value={`${avg30d}ms`} className={latencyColor(avg30d)} />
-                                )}
-                                <TipRow label="P95" value={`${Math.max(...dailies.map((d) => d.p95ResponseTime))}ms`} />
-                                <TipRow label="Min" value={`${Math.min(...dailies.map((d) => d.minResponseTime))}ms`} />
-                                <TipRow label="Max" value={`${Math.max(...dailies.map((d) => d.maxResponseTime))}ms`} className={latencyColor(Math.max(...dailies.map((d) => d.maxResponseTime)))} />
-                                <div className="text-wd-muted/60 mt-1 text-[10px]">Rolling 30-day window</div>
-                              </>
-                            ) : ep.responseTime != null ? (
-                              <>
-                                <TipRow label="Latest" value={`${ep.responseTime}ms`} className={latencyColor(ep.responseTime)} />
-                                <div className="text-wd-muted/60 mt-1 text-[10px]">More stats after aggregation runs</div>
+                                <TipRow
+                                  label="Latest"
+                                  value={`${ep.responseTime}ms`}
+                                  color={
+                                    latencyColor(ep.responseTime) === 'text-wd-success'
+                                      ? 'bg-wd-success'
+                                      : latencyColor(ep.responseTime) === 'text-wd-warning'
+                                        ? 'bg-wd-warning'
+                                        : latencyColor(ep.responseTime) === 'text-wd-danger'
+                                          ? 'bg-wd-danger'
+                                          : 'bg-wd-muted/40'
+                                  }
+                                  className={latencyColor(ep.responseTime)}
+                                />
+                                <div className="text-wd-muted/60 text-[10px] pt-1 border-t border-wd-border/50">
+                                  More stats after aggregation runs
+                                </div>
                               </>
                             ) : (
-                              <div className="text-wd-muted">No response data yet</div>
+                              <div className="inline-flex items-center gap-1.5 text-wd-muted">
+                                <span aria-hidden className="w-2 h-2 rounded-sm bg-wd-muted/60" />
+                                No response data yet
+                              </div>
                             )}
                           </TooltipContent>
                         </Tooltip>
@@ -1047,8 +1260,27 @@ export default function EndpointsPage() {
                         </span>
                       </TooltipTrigger>
                       <TooltipContent className={TIP_CLS}>
-                        <TipRow label="Checked at" value={formatTime(ep.lastCheckAt)} />
-                        <TipRow label="Interval" value={`${ep.checkInterval}s`} />
+                        <TipHeader>Last Check</TipHeader>
+                        <TipRow
+                          label="Checked at"
+                          value={formatTime(ep.lastCheckAt)}
+                          color="bg-wd-primary"
+                          className="text-foreground"
+                        />
+                        <TipRow
+                          label="Interval"
+                          value={`${ep.checkInterval}s`}
+                          color="bg-wd-muted/60"
+                        />
+                        {ep.status && (
+                          <TipRow
+                            label="Result"
+                            value={sc.label}
+                            color={sc.dot}
+                            className={sc.text}
+                            mono={false}
+                          />
+                        )}
                       </TooltipContent>
                     </Tooltip>
 
@@ -1081,7 +1313,7 @@ export default function EndpointsPage() {
                               <Icon icon="solar:refresh-linear" width={16} className="mr-1.5" />
                               Check Now
                             </Dropdown.Item>
-                            <Dropdown.Item id="toggle" className="!text-xs !text-wd-warning">
+                            <Dropdown.Item id="toggle" className="!text-xs !text-wd-paused">
                               <Icon
                                 icon={
                                   ep.endpointStatus !== 'paused'
@@ -1145,7 +1377,7 @@ export default function EndpointsPage() {
                       <Icon icon="solar:pause-outline" width={16} className="text-wd-muted" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent className="px-2 py-1 text-[11px]">
+                  <TooltipContent className="!bg-wd-surface !border !border-wd-border !rounded-lg !shadow-lg px-2 py-1 text-[11px]">
                     Toggle selected
                   </TooltipContent>
                 </Tooltip>
@@ -1161,7 +1393,7 @@ export default function EndpointsPage() {
                       <Icon icon="solar:refresh-outline" width={16} className="text-wd-muted" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent className="px-2 py-1 text-[11px]">
+                  <TooltipContent className="!bg-wd-surface !border !border-wd-border !rounded-lg !shadow-lg px-2 py-1 text-[11px]">
                     Recheck selected
                   </TooltipContent>
                 </Tooltip>
@@ -1181,7 +1413,7 @@ export default function EndpointsPage() {
                       />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent className="px-2 py-1 text-[11px]">
+                  <TooltipContent className="!bg-wd-surface !border !border-wd-border !rounded-lg !shadow-lg px-2 py-1 text-[11px]">
                     Delete selected
                   </TooltipContent>
                 </Tooltip>
