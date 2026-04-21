@@ -85,6 +85,11 @@ export interface WatchDeckConfig {
 
   eventHistorySize: number;
 
+  slo: {
+    target: number;
+    windowDays: number;
+  };
+
   aggregation: {
     time: string;
   };

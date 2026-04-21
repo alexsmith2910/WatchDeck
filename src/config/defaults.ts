@@ -328,6 +328,26 @@ export const defaults = {
   eventHistorySize: 100,
 
   // ---------------------------------------------------------------------------
+  // SLO — global service-level objective applied to every endpoint.
+  // Drives the "SLO burn rate" KPI card on the endpoint detail page.
+  // Per-endpoint overrides can be layered on later.
+  // ---------------------------------------------------------------------------
+  slo: {
+    /**
+     * Target uptime percentage. Error budget = (100 - target)%.
+     * At 99.9, the monthly error budget is ~43 minutes.
+     * Range: 90–99.999.
+     */
+    target: 99.9,
+
+    /**
+     * Rolling window in days used to compute error-budget consumption.
+     * Allowed values: 7, 14, 30, 60, 90.
+     */
+    windowDays: 30,
+  },
+
+  // ---------------------------------------------------------------------------
   // Aggregation — scheduled roll-up of raw checks into hourly/daily summaries.
   // ---------------------------------------------------------------------------
   aggregation: {

@@ -571,6 +571,35 @@ function validateEventHistory(
   }
 }
 
+function validateSlo(cfg: WatchDeckConfig, errors: ValidationError[]): void {
+  const s = cfg.slo
+  if (!s || typeof s !== 'object') {
+    push(errors, 'slo', s, 'object', 'Restore the slo block (see src/config/defaults.ts)')
+    return
+  }
+
+  if (!isNumber(s.target) || s.target < 90 || s.target >= 100) {
+    push(
+      errors,
+      'slo.target',
+      s.target,
+      'number in [90, 100) — e.g. 99.9',
+      'Set slo.target to an uptime percentage between 90 and 99.999',
+    )
+  }
+
+  const ALLOWED_WINDOW_DAYS = [7, 14, 30, 60, 90]
+  if (!ALLOWED_WINDOW_DAYS.includes(s.windowDays)) {
+    push(
+      errors,
+      'slo.windowDays',
+      s.windowDays,
+      `one of [${ALLOWED_WINDOW_DAYS.join(', ')}] days`,
+      'Set slo.windowDays to 7, 14, 30, 60, or 90',
+    )
+  }
+}
+
 function validateAggregation(
   cfg: WatchDeckConfig,
   errors: ValidationError[],
@@ -690,6 +719,7 @@ export function validateAndFreeze(
   validateBuffer(cfg, errors)
   validateSse(cfg, errors)
   validateEventHistory(cfg, errors)
+  validateSlo(cfg, errors)
   validateAggregation(cfg, errors)
   validateCors(cfg, errors)
   validateAuth(cfg, errors)

@@ -46,6 +46,12 @@ export function settingsRoutes(ctx: AppContext) {
       return reply.send({ data: ctx.config.modules })
     })
 
+    // ── SLO config (read-only view of ctx.config.slo) ────────────────────────
+    // Drives the "SLO burn rate" KPI card on the endpoint detail page.
+    fastify.get('/slo', async (_request, reply) => {
+      return reply.send({ data: ctx.config.slo })
+    })
+
     // ── Runtime info (read-only view of static server-side runtime values) ──
     // Used by the dashboard for fields that are constant for the process
     // lifetime — currently the probe name shown on every check row.
