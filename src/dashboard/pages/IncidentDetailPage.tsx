@@ -126,12 +126,6 @@ function timelineMeta(event: string, detail?: string): TimelineMeta {
         iconColor: 'text-wd-warning',
         tileBg: 'bg-wd-warning/10 border-wd-warning/20',
       }
-    case 'acknowledged':
-      return {
-        icon: 'solar:user-check-bold',
-        iconColor: 'text-wd-primary',
-        tileBg: 'bg-wd-primary/10 border-wd-primary/20',
-      }
     case 'check': {
       if (detail?.includes('down')) {
         return {
@@ -170,7 +164,6 @@ function humanEvent(event: string): string {
     check: 'Health Check',
     notification_sent: 'Notification Sent',
     escalated: 'Escalated',
-    acknowledged: 'Acknowledged',
   }
   return map[event] ?? event.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
@@ -1842,7 +1835,7 @@ function ChartEventMarkers({
 
   const markers: { label: string; event: string; at: string }[] = []
   for (const evt of timeline) {
-    if (evt.event !== 'notification_sent' && evt.event !== 'escalated' && evt.event !== 'acknowledged') {
+    if (evt.event !== 'notification_sent' && evt.event !== 'escalated') {
       continue
     }
     const target = new Date(evt.at).getTime()
@@ -1855,9 +1848,8 @@ function ChartEventMarkers({
   if (markers.length === 0) return null
 
   const iconForEvent = (ev: string) => {
-    if (ev === 'notification_sent') return 'solar:bell-bold'
     if (ev === 'escalated') return 'solar:double-alt-arrow-up-bold'
-    return 'solar:user-check-bold'
+    return 'solar:bell-bold'
   }
   const colorForEvent = (ev: string) =>
     ev === 'escalated' ? 'var(--wd-danger)' : 'var(--wd-warning)'

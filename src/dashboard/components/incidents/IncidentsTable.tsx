@@ -41,7 +41,7 @@ import { WideSpark } from '../health/HealthCharts'
 import { timeAgo } from '../../utils/format'
 import { LiveDuration } from './LiveTime'
 
-export type StatusFilter = 'all' | 'active' | 'acked' | 'resolved'
+export type StatusFilter = 'all' | 'active' | 'resolved'
 export type TimeRange = '24h' | '7d' | '30d' | 'all'
 
 export interface IncidentFilters {
@@ -67,7 +67,7 @@ interface Props {
   activeIncidents: ApiIncident[]
   endpointById: Map<string, EndpointLite>
   channelById: Map<string, ApiChannel>
-  sparklineByEndpointId: Map<string, EndpointSparkline>
+  sparklineByIncidentId: Map<string, EndpointSparkline>
   filters: IncidentFilters
   onFiltersChange: (patch: Partial<IncidentFilters>) => void
   loading: boolean
@@ -97,7 +97,7 @@ export function IncidentsTable({
   activeIncidents,
   endpointById,
   channelById,
-  sparklineByEndpointId,
+  sparklineByIncidentId,
   filters,
   onFiltersChange,
   loading,
@@ -109,10 +109,7 @@ export function IncidentsTable({
     const q = filters.q.trim().toLowerCase()
     return incidents.filter((inc) => {
       if (filters.status !== 'all') {
-        const isActive = inc.status === 'active'
-        const isAcked = isActive && !!inc.acknowledgedAt
-        if (filters.status === 'active' && !(isActive && !isAcked)) return false
-        if (filters.status === 'acked' && !isAcked) return false
+        if (filters.status === 'active' && inc.status !== 'active') return false
         if (filters.status === 'resolved' && inc.status !== 'resolved') return false
       }
       if (filters.severity !== 'all' && severityOf(inc) !== filters.severity) return false
@@ -210,7 +207,7 @@ export function IncidentsTable({
                 incident={inc}
                 endpoint={endpointById.get(inc.endpointId)}
                 channelById={channelById}
-                sparkline={sparklineByEndpointId.get(inc.endpointId)}
+                sparkline={sparklineByIncidentId.get(inc._id)}
               />
             ))}
             {hasMore && (
@@ -265,7 +262,6 @@ function FilterBar({
       >
         <ToggleButton key="all" id="all" className={toggleClass}>All</ToggleButton>
         <ToggleButton key="active" id="active" className={toggleClass}>Active</ToggleButton>
-        <ToggleButton key="acked" id="acked" className={toggleClass}>Acked</ToggleButton>
         <ToggleButton key="resolved" id="resolved" className={toggleClass}>Resolved</ToggleButton>
       </ToggleButtonGroup>
 
@@ -452,7 +448,6 @@ const TableRow = memo(function TableRow({
   const sev = severityOf(incident)
   const meta = metaFor(incident.cause)
   const isActive = incident.status === 'active'
-  const isAcked = isActive && !!incident.acknowledgedAt
   const resolvedDuration = incident.durationSeconds ?? 0
   const sparkValues = sparkline?.values ?? []
   // Memoize labels so WideSpark's memo short-circuits when the row re-renders
@@ -461,11 +456,7 @@ const TableRow = memo(function TableRow({
     () => sparkline?.timestamps.map(formatCheckTime) ?? [],
     [sparkline],
   )
-  const sparkColor = isActive
-    ? 'var(--wd-danger)'
-    : isAcked
-      ? 'var(--wd-warning)'
-      : 'var(--wd-muted)'
+  const sparkColor = isActive ? 'var(--wd-danger)' : 'var(--wd-muted)'
   const channels =
     endpoint?.notificationChannelIds
       ?.map((id) => channelById.get(id))
@@ -474,9 +465,7 @@ const TableRow = memo(function TableRow({
   const overflowChannels = Math.max(0, channels.length - visibleChannels.length)
 
   const statusPill = isActive
-    ? isAcked
-      ? { cls: 'bg-wd-warning/15 text-wd-warning', label: 'Acked' }
-      : { cls: 'bg-wd-danger/15 text-wd-danger', label: 'Active' }
+    ? { cls: 'bg-wd-danger/15 text-wd-danger', label: 'Active' }
     : { cls: 'bg-wd-success/15 text-wd-success', label: 'Resolved' }
 
   const go = () => navigate(`/incidents/${incident._id}`)
@@ -493,7 +482,6 @@ const TableRow = memo(function TableRow({
         'grid items-center gap-x-3 px-4 py-2.5 cursor-pointer transition-colors border-b border-wd-border/10',
         'hover:bg-wd-surface-hover/50',
         isActive && 'bg-wd-danger/[0.02]',
-        isAcked && 'bg-wd-warning/[0.03]',
         GRID_COLS,
       )}
     >
@@ -508,7 +496,7 @@ const TableRow = memo(function TableRow({
             statusPill.cls,
           )}
         >
-          {isActive && !isAcked && (
+          {isActive && (
             <span className="relative flex h-1.5 w-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-wd-danger opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-wd-danger" />

@@ -183,12 +183,6 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
                   <Icon icon="solar:bell-linear" width={16} className="inline mr-1" />
                   <span className="font-mono">{activeIncident.notificationsSent}</span> notification{activeIncident.notificationsSent !== 1 ? 's' : ''} sent
                 </span>
-                {activeIncident.acknowledgedAt && (
-                  <span>
-                    <Icon icon="solar:check-read-linear" width={16} className="inline mr-1" />
-                    Acknowledged by {activeIncident.acknowledgedBy ?? 'someone'} <span className="font-mono">{timeAgo(activeIncident.acknowledgedAt)}</span>
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -332,14 +326,6 @@ export default function IncidentsTab({ endpointId, initialExpandedId }: Incident
                           <span className="text-[10px] text-wd-muted uppercase tracking-wider block">Notifications</span>
                           <span className="text-xs font-medium text-foreground font-mono">{inc.notificationsSent}</span>
                         </div>
-                        {inc.acknowledgedAt && (
-                          <div>
-                            <span className="text-[10px] text-wd-muted uppercase tracking-wider block">Acknowledged</span>
-                            <span className="text-xs font-medium text-foreground">
-                              {inc.acknowledgedBy ?? 'Someone'} — <span className="font-mono">{formatDateTime(inc.acknowledgedAt)}</span>
-                            </span>
-                          </div>
-                        )}
                       </div>
 
                       {/* Timeline */}
@@ -440,7 +426,6 @@ function getTimelineEventColor(event: string): string {
   if (event.includes('resolved')) return 'bg-wd-success'
   if (event.includes('notification')) return 'bg-wd-warning'
   if (event.includes('escalat')) return 'bg-wd-warning'
-  if (event.includes('acknowledged')) return 'bg-wd-primary'
   return 'bg-wd-muted'
 }
 

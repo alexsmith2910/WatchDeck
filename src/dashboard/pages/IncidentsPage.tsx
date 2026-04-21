@@ -14,7 +14,7 @@
  * moves an incident from active → history with the resolved timestamp and
  * duration applied.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spinner, cn } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { useApi } from '../hooks/useApi'
@@ -73,7 +73,11 @@ export default function IncidentsPage() {
   const [historyIncidents, setHistoryIncidents] = useState<ApiIncident[]>([])
   const [endpoints, setEndpoints] = useState<ApiEndpoint[]>([])
   const [channels, setChannels] = useState<ApiChannel[]>([])
-  const [sparklineByEndpointId, setSparklineByEndpointId] = useState<Map<string, EndpointSparkline>>(
+  // Keyed by incident _id so each row/hero card shows response times from the
+  // window of its own incident (startedAt → resolvedAt, plus a small buffer on
+  // either side for context) rather than the most recent N checks for the
+  // endpoint — which made every incident on the same endpoint look identical.
+  const [sparklineByIncidentId, setSparklineByIncidentId] = useState<Map<string, EndpointSparkline>>(
     () => new Map(),
   )
   const [loading, setLoading] = useState(true)
@@ -139,33 +143,51 @@ export default function IncidentsPage() {
     return () => { cancelled = true }
   }, [request])
 
-  // ---- Fetch sparkline data for every endpoint visible on the page ----
-  // Keyed by endpointId (not incidentId) so two incidents on the same endpoint
-  // share one fetch. Covers active incidents (hero strip) AND history rows
-  // (table column). We only fetch for endpoints we don't already have a
-  // sparkline for, so paginating through history doesn't refetch the world.
-  const visibleEndpointKey = useMemo(
-    () =>
-      [
-        ...new Set([
-          ...activeIncidents.map((i) => i.endpointId),
-          ...historyIncidents.map((i) => i.endpointId),
-        ]),
-      ]
-        .sort()
-        .join(','),
-    [activeIncidents, historyIncidents],
-  )
+  // ---- Fetch per-incident sparkline data ----
+  // Fetches one sparkline per incident, scoped to the incident's own window
+  // (startedAt → resolvedAt, plus a buffer on either side) so the graph
+  // reflects response times *during that incident* rather than the most
+  // recent N checks on the endpoint — which made every incident on the same
+  // endpoint show an identical graph.
+  //
+  // The cache is keyed by incidentId alone; a `Set` of already-fetched
+  // "versions" (incident id + status + resolvedAt) drives re-fetching when an
+  // active incident transitions to resolved, without ever creating a
+  // render-loop even though the effect depends on the incident arrays.
+  const SPARK_BUFFER_MS = 15 * 60 * 1000 // 15 min before/after for context
+  const SPARK_LIMIT = 60
+
+  const fetchedVersionsRef = useRef<Set<string>>(new Set())
+
   useEffect(() => {
-    if (!visibleEndpointKey) return
-    const epIds = visibleEndpointKey.split(',').filter(Boolean)
-    const missing = epIds.filter((id) => !sparklineByEndpointId.has(id))
+    const seen = new Map<string, ApiIncident>()
+    for (const i of activeIncidents) seen.set(i._id, i)
+    for (const i of historyIncidents) if (!seen.has(i._id)) seen.set(i._id, i)
+    if (seen.size === 0) return
+
+    const missing: ApiIncident[] = []
+    for (const inc of seen.values()) {
+      const version = `${inc._id}:${inc.status}:${inc.resolvedAt ?? ''}`
+      if (!fetchedVersionsRef.current.has(version)) {
+        fetchedVersionsRef.current.add(version)
+        missing.push(inc)
+      }
+    }
     if (missing.length === 0) return
+
     let cancelled = false
     Promise.all(
-      missing.map(async (id) => {
+      missing.map(async (inc) => {
+        const startMs = new Date(inc.startedAt).getTime() - SPARK_BUFFER_MS
+        const endMs = inc.resolvedAt
+          ? new Date(inc.resolvedAt).getTime() + SPARK_BUFFER_MS
+          : Date.now()
+        const params = new URLSearchParams()
+        params.set('limit', String(SPARK_LIMIT))
+        params.set('from', new Date(startMs).toISOString())
+        params.set('to', new Date(endMs).toISOString())
         const res = await request<{ data: ApiCheck[]; pagination: ApiPagination }>(
-          `/endpoints/${id}/checks?limit=30`,
+          `/endpoints/${inc.endpointId}/checks?${params.toString()}`,
         )
         // API returns newest first; reverse so the sparkline reads left→right
         // and timestamps line up with values index-for-index.
@@ -176,18 +198,18 @@ export default function IncidentsPage() {
           values: checks.map((c) => c.responseTime),
           timestamps: checks.map((c) => c.timestamp),
         }
-        return [id, sparkline] as const
+        return [inc._id, sparkline] as const
       }),
     ).then((entries) => {
       if (cancelled) return
-      setSparklineByEndpointId((prev) => {
+      setSparklineByIncidentId((prev) => {
         const next = new Map(prev)
         for (const [id, sl] of entries) next.set(id, sl)
         return next
       })
     })
     return () => { cancelled = true }
-  }, [visibleEndpointKey, sparklineByEndpointId, request])
+  }, [activeIncidents, historyIncidents, request])
 
   // ---- Fetch active incidents ----
   const fetchActive = useCallback(async () => {
@@ -200,7 +222,7 @@ export default function IncidentsPage() {
     (cursor?: string | null) => {
       const params = new URLSearchParams()
       params.set('limit', String(PAGE_SIZE))
-      if (filters.status === 'active' || filters.status === 'acked') {
+      if (filters.status === 'active') {
         params.set('status', 'active')
       } else if (filters.status === 'resolved') {
         params.set('status', 'resolved')
@@ -262,6 +284,12 @@ export default function IncidentsPage() {
   const refresh = useCallback(async () => {
     setRefreshing(true)
     try {
+      // Drop cached "active" sparkline versions so the per-incident effect
+      // refetches them with a fresh window. Resolved incidents are stable and
+      // can stay cached.
+      for (const v of fetchedVersionsRef.current) {
+        if (v.includes(':active:')) fetchedVersionsRef.current.delete(v)
+      }
       const [, page] = await Promise.all([fetchActive(), fetchHistory()])
       setHistoryIncidents(page.items)
       setHasMore(page.pagination?.hasMore ?? false)
@@ -351,7 +379,7 @@ export default function IncidentsPage() {
             endpointById={endpointById}
             endpointStateById={endpointStateById}
             channelById={channelById}
-            sparklineByEndpointId={sparklineByEndpointId}
+            sparklineByIncidentId={sparklineByIncidentId}
             lastUpdatedAt={lastUpdatedAt}
           />
 
@@ -375,7 +403,7 @@ export default function IncidentsPage() {
             activeIncidents={activeIncidents}
             endpointById={endpointById}
             channelById={channelById}
-            sparklineByEndpointId={sparklineByEndpointId}
+            sparklineByIncidentId={sparklineByIncidentId}
             filters={filters}
             onFiltersChange={onFiltersChange}
             loading={false}

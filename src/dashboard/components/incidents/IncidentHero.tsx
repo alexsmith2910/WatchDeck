@@ -8,12 +8,11 @@
  *   • Critical → red
  *   • Major    → amber
  *   • Minor    → primary
- *   • Acked    → amber override (ack state supersedes severity)
  *
  * Layout per card:
- *   1. status dot + endpoint name + kind           |   "Down for" / "Acked" + live clock
+ *   1. status dot + endpoint name + kind           |   "Down for" + live clock
  *   2. severity chip + cause label + cause detail
- *   3. meta items: Started · Last Check · Alerts · Ack'd by
+ *   3. meta items: Started · Last Check · Alerts
  *   4. notification channel icons (from endpoint config)
  *   5. response-time sparkline over the last 30 checks
  */
@@ -50,7 +49,7 @@ interface Props {
   endpointById: Map<string, EndpointLite>
   endpointStateById: Map<string, HeroEndpointState>
   channelById: Map<string, ApiChannel>
-  sparklineByEndpointId: Map<string, EndpointSparkline>
+  sparklineByIncidentId: Map<string, EndpointSparkline>
   lastUpdatedAt: number
 }
 
@@ -59,7 +58,7 @@ export function IncidentHero({
   endpointById,
   endpointStateById,
   channelById,
-  sparklineByEndpointId,
+  sparklineByIncidentId,
   lastUpdatedAt,
 }: Props) {
   if (activeIncidents.length === 0) {
@@ -101,7 +100,7 @@ export function IncidentHero({
             endpoint={endpointById.get(inc.endpointId)}
             endpointState={endpointStateById.get(inc.endpointId)}
             channelById={channelById}
-            sparkline={sparklineByEndpointId.get(inc.endpointId)}
+            sparkline={sparklineByIncidentId.get(inc._id)}
           />
         ))}
       </div>
@@ -136,8 +135,7 @@ function AllClearBanner({ lastUpdatedAt }: { lastUpdatedAt: number }) {
 // Severity → card tint helpers
 // ---------------------------------------------------------------------------
 
-function severityTintClasses(sev: Severity, isAcked: boolean): string {
-  if (isAcked) return 'bg-wd-warning/[0.06] hover:bg-wd-warning/[0.10]'
+function severityTintClasses(sev: Severity): string {
   switch (sev) {
     case 'Critical': return 'bg-wd-danger/[0.05] hover:bg-wd-danger/[0.09]'
     case 'Major':    return 'bg-wd-warning/[0.05] hover:bg-wd-warning/[0.09]'
@@ -145,15 +143,13 @@ function severityTintClasses(sev: Severity, isAcked: boolean): string {
   }
 }
 
-function durationTone(sev: Severity, isAcked: boolean): string {
-  if (isAcked) return 'text-wd-warning'
+function durationTone(sev: Severity): string {
   if (sev === 'Critical') return 'text-wd-danger'
   if (sev === 'Major') return 'text-wd-warning'
   return 'text-wd-primary'
 }
 
-function sparkStroke(sev: Severity, isAcked: boolean): string {
-  if (isAcked) return 'var(--wd-warning)'
+function sparkStroke(sev: Severity): string {
   if (sev === 'Critical') return 'var(--wd-danger)'
   if (sev === 'Major') return 'var(--wd-warning)'
   return 'var(--wd-primary)'
@@ -209,7 +205,6 @@ const HeroCard = memo(function HeroCard({
   const ep = endpointDisplay(endpoint)
   const sev = severityOf(incident)
   const meta = metaFor(incident.cause)
-  const isAcked = !!incident.acknowledgedAt
 
   const lastCheckLabel = formatLastCheck(endpointState)
   const lastCheckTone =
@@ -247,7 +242,7 @@ const HeroCard = memo(function HeroCard({
         'lg:[&:nth-child(3n)]:border-r-0',
         'sm:max-lg:[&:nth-child(2n)]:border-r-0',
         'max-sm:border-r-0',
-        severityTintClasses(sev, isAcked),
+        severityTintClasses(sev),
       )}
     >
       {/* Row 1 — status dot + name + type | duration */}
@@ -265,11 +260,11 @@ const HeroCard = memo(function HeroCard({
         </div>
         <div className="text-right shrink-0">
           <div className="text-[9.5px] font-semibold uppercase tracking-[0.08em] text-wd-muted/80 leading-none">
-            {isAcked ? 'Acknowledged' : 'Down for'}
+            Down for
           </div>
           <LiveDuration
             startedAt={incident.startedAt}
-            className={cn('mt-0.5 text-[13px] font-semibold font-mono tracking-tight block', durationTone(sev, isAcked))}
+            className={cn('mt-0.5 text-[13px] font-semibold font-mono tracking-tight block', durationTone(sev))}
           />
         </div>
       </div>
@@ -290,7 +285,7 @@ const HeroCard = memo(function HeroCard({
         {incident.causeDetail}
       </div>
 
-      {/* Row 3/4 — meta grid: Started · Last check · Alerts · Ack'd by */}
+      {/* Row 3/4 — meta grid: Started · Last check · Alerts */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 pt-2 border-t border-dashed border-wd-border/60 text-[11px] text-wd-muted font-mono">
         <span className="inline-flex items-center gap-1.5">
           <Icon icon="solar:clock-circle-linear" width={16} />
@@ -306,12 +301,6 @@ const HeroCard = memo(function HeroCard({
           <Icon icon="solar:bell-outline" width={16} />
           Alerts: <span className="text-foreground font-medium">{incident.notificationsSent}</span>
         </span>
-        {incident.acknowledgedBy && (
-          <span className="inline-flex items-center gap-1.5">
-            <Icon icon="solar:user-check-linear" width={16} />
-            Ack&rsquo;d by <span className="text-foreground font-medium">{incident.acknowledgedBy}</span>
-          </span>
-        )}
       </div>
 
       {/* Row 5 — channel icons */}
@@ -327,7 +316,7 @@ const HeroCard = memo(function HeroCard({
       {sparkValues.length > 1 && (
         <div className="pt-2 border-t border-dashed border-wd-border/60">
           <div className="flex items-center justify-between text-[10px] text-wd-muted/80 font-mono mb-1">
-            <span>Response time · last {sparkValues.length} checks</span>
+            <span>Response time · {sparkValues.length} checks during incident</span>
             <span>
               peak <span className="text-foreground font-medium">{peak.toLocaleString()}ms</span>
             </span>
@@ -336,7 +325,7 @@ const HeroCard = memo(function HeroCard({
             data={sparkValues}
             labels={sparkLabels}
             formatValue={(n) => `${Math.round(n).toLocaleString()} ms`}
-            color={sparkStroke(sev, isAcked)}
+            color={sparkStroke(sev)}
             height={48}
           />
         </div>
