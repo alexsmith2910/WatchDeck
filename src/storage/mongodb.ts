@@ -34,6 +34,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function buildCheckDoc(payload: CheckWritePayload): CheckDoc {
+  const doc: CheckDoc = {
+    _id: new ObjectId(),
+    endpointId: new ObjectId(payload.endpointId),
+    timestamp: payload.timestamp instanceof Date ? payload.timestamp : new Date(payload.timestamp),
+    responseTime: payload.responseTime,
+    status: payload.status,
+    duringMaintenance: false,
+    createdAt: new Date(),
+  }
+  if (payload.statusCode !== null) doc.statusCode = payload.statusCode
+  if (payload.errorMessage !== null) doc.errorMessage = payload.errorMessage
+  if (payload.sslDaysRemaining !== null) doc.sslDaysRemaining = payload.sslDaysRemaining
+  if (payload.bodyBytes != null) doc.bodyBytes = payload.bodyBytes
+  if (payload.bodyBytesTruncated) doc.bodyBytesTruncated = true
+  return doc
+}
+
 /**
  * MongoDB implementation of StorageAdapter.
  *
@@ -289,37 +307,14 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async saveCheck(payload: CheckWritePayload): Promise<void> {
     const db = this.getDb()
-    const doc: CheckDoc = {
-      _id: new ObjectId(),
-      endpointId: new ObjectId(payload.endpointId),
-      timestamp: payload.timestamp instanceof Date ? payload.timestamp : new Date(payload.timestamp),
-      responseTime: payload.responseTime,
-      status: payload.status,
-      duringMaintenance: false,
-      createdAt: new Date(),
-    }
-    if (payload.statusCode !== null) doc.statusCode = payload.statusCode
-    if (payload.errorMessage !== null) doc.errorMessage = payload.errorMessage
+    const doc = buildCheckDoc(payload)
     await db.collection<CheckDoc>(`${this.dbPrefix}checks`).insertOne(doc)
   }
 
   async saveManyChecks(payloads: CheckWritePayload[]): Promise<void> {
     if (payloads.length === 0) return
     const db = this.getDb()
-    const docs: CheckDoc[] = payloads.map((p) => {
-      const doc: CheckDoc = {
-        _id: new ObjectId(),
-        endpointId: new ObjectId(p.endpointId),
-        timestamp: p.timestamp instanceof Date ? p.timestamp : new Date(p.timestamp),
-        responseTime: p.responseTime,
-        status: p.status,
-        duringMaintenance: false,
-        createdAt: new Date(),
-      }
-      if (p.statusCode !== null) doc.statusCode = p.statusCode
-      if (p.errorMessage !== null) doc.errorMessage = p.errorMessage
-      return doc
-    })
+    const docs = payloads.map(buildCheckDoc)
     await db.collection<CheckDoc>(`${this.dbPrefix}checks`).insertMany(docs)
   }
 
@@ -364,21 +359,24 @@ export class MongoDBAdapter extends StorageAdapter {
     responseTime: number,
     statusCode: number | null,
     errorMessage: string | null,
+    sslIssuer?: { o?: string; cn?: string } | null,
   ): Promise<void> {
     const db = this.getDb()
+    const $set: Record<string, unknown> = {
+      lastCheckAt: timestamp,
+      lastStatus: status,
+      lastResponseTime: responseTime,
+      lastStatusCode: statusCode,
+      lastErrorMessage: errorMessage,
+      consecutiveFailures,
+      updatedAt: new Date(),
+    }
+    if (sslIssuer && (sslIssuer.o || sslIssuer.cn)) {
+      $set.lastSslIssuer = { ...sslIssuer, capturedAt: timestamp }
+    }
     await db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`).updateOne(
       { _id: new ObjectId(endpointId) },
-      {
-        $set: {
-          lastCheckAt: timestamp,
-          lastStatus: status,
-          lastResponseTime: responseTime,
-          lastStatusCode: statusCode,
-          lastErrorMessage: errorMessage,
-          consecutiveFailures,
-          updatedAt: new Date(),
-        },
-      },
+      { $set },
     )
   }
 

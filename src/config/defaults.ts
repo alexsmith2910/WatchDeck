@@ -25,6 +25,21 @@ export const defaults = {
    */
   dashboardMode: "standalone" as "standalone" | "mounted",
 
+  /**
+   * When true, HTTP checks record the size of the response body in bytes on
+   * each CheckDoc so the dashboard can display it. Adds a body read when
+   * Content-Length is not present on the response.
+   */
+  captureBodySize: true,
+
+  /**
+   * Cap on bytes read from the response when `captureBodySize` is enabled and
+   * no trusted Content-Length header is available. Protects against memory
+   * pressure on large responses. Default is 1 MiB (1_048_576).
+   * The UI renders values at this cap with a "+" suffix to indicate truncation.
+   */
+  maxBodyBytesToRead: 1_048_576,
+
   // ---------------------------------------------------------------------------
   // Modules — set false to disable and skip loading the module entirely.
   // Disabled modules are never imported into memory (dynamic import pattern).

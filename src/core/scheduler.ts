@@ -279,7 +279,7 @@ export class CheckScheduler {
   private subscribeToCheckComplete(): void {
     eventBus.subscribe(
       'check:complete',
-      ({ endpointId, status, timestamp, responseTime, statusCode, errorMessage }) => {
+      ({ endpointId, status, timestamp, responseTime, statusCode, errorMessage, sslIssuer, bodyBytes, bodyBytesTruncated }) => {
         // Update in-memory consecutive failures.
         const prev = this.consecutiveFailures.get(endpointId) ?? 0
         const failures = status === 'healthy' ? 0 : prev + 1
@@ -301,7 +301,7 @@ export class CheckScheduler {
 
         // Persist state to DB (fire-and-forget — failures here are non-critical).
         this.adapter.updateEndpointAfterCheck(
-          endpointId, status, timestamp, failures, responseTime, statusCode, errorMessage,
+          endpointId, status, timestamp, failures, responseTime, statusCode, errorMessage, sslIssuer,
         ).catch(
           (err: unknown) => {
             eventBus.emit('system:warning', {
@@ -400,7 +400,11 @@ export class CheckScheduler {
       if (this.activeChecks > this.runningPeakCurrent) this.runningPeakCurrent = this.activeChecks
       this.lastHostCheckTime.set(host, now)
 
-      void runCheck(endpoint, { captureSsl: this.config.modules.sslChecks }).finally(() => {
+      void runCheck(endpoint, {
+        captureSsl: this.config.modules.sslChecks,
+        captureBodySize: this.config.captureBodySize,
+        maxBodyBytesToRead: this.config.maxBodyBytesToRead,
+      }).finally(() => {
         this.activeChecks--
       })
 

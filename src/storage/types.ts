@@ -38,6 +38,9 @@ export interface CheckWritePayload {
   responseTime: number
   statusCode: number | null
   errorMessage: string | null
+  sslDaysRemaining: number | null
+  bodyBytes?: number | null
+  bodyBytesTruncated?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +120,8 @@ export interface EndpointDoc {
   lastResponseTime?: number
   lastStatusCode?: number | null
   lastErrorMessage?: string | null
+  /** Last-seen TLS issuer for this endpoint. Refreshed per-endpoint (not per-check). */
+  lastSslIssuer?: { o?: string; cn?: string; capturedAt: Date }
   currentIncidentId?: ObjectId
   consecutiveFailures: number
 
@@ -139,6 +144,10 @@ export interface CheckDoc {
   // HTTP-specific
   statusCode?: number
   sslDaysRemaining?: number
+  /** Size of the response body in bytes, when body-size capture is enabled. */
+  bodyBytes?: number
+  /** True when the body read was capped at `config.maxBodyBytesToRead`. */
+  bodyBytesTruncated?: boolean
   bodyValidation?: BodyValidationResult
 
   // Port-specific

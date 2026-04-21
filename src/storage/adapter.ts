@@ -170,6 +170,7 @@ export abstract class StorageAdapter {
     responseTime: number,
     statusCode: number | null,
     errorMessage: string | null,
+    sslIssuer?: { o?: string; cn?: string } | null,
   ): Promise<void>
 
   // ---------------------------------------------------------------------------

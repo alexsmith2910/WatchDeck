@@ -97,6 +97,7 @@ export class BufferPipeline {
       responseTime: 0,
       statusCode: null,
       errorMessage: '__watchdeck_synthetic_probe__',
+      sslDaysRemaining: null,
     }
     if (this.memBuffer.push(sentinel)) {
       // Remove it immediately — we only wanted the push/pop timing.
@@ -117,6 +118,9 @@ export class BufferPipeline {
       responseTime: payload.responseTime,
       statusCode: payload.statusCode,
       errorMessage: payload.errorMessage,
+      sslDaysRemaining: payload.sslDaysRemaining,
+      bodyBytes: payload.bodyBytes,
+      bodyBytesTruncated: payload.bodyBytesTruncated,
     }
 
     // Happy path: DB connected and we are not actively draining.

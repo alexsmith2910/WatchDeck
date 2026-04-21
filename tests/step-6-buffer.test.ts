@@ -68,6 +68,7 @@ function makePayload(overrides?: Partial<CheckWritePayload>): CheckWritePayload 
     responseTime: 42,
     statusCode: 200,
     errorMessage: null,
+    sslDaysRemaining: null,
     ...overrides,
   }
 }

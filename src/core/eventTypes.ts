@@ -41,6 +41,10 @@ export interface EventMap {
     responseTime: number
     statusCode: number | null
     errorMessage: string | null
+    sslDaysRemaining: number | null
+    sslIssuer: { o?: string; cn?: string } | null
+    bodyBytes: number | null
+    bodyBytesTruncated: boolean
   }
 
   // -------------------------------------------------------------------------

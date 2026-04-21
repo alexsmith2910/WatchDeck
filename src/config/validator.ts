@@ -91,6 +91,30 @@ function validateServer(cfg: WatchDeckConfig, errors: ValidationError[]): void {
       'Set dashboardMode to "standalone" or "mounted"',
     )
   }
+
+  if (typeof cfg.captureBodySize !== 'boolean') {
+    push(
+      errors,
+      'captureBodySize',
+      cfg.captureBodySize,
+      'boolean',
+      'Set captureBodySize to true or false',
+    )
+  }
+
+  if (
+    !isInteger(cfg.maxBodyBytesToRead) ||
+    cfg.maxBodyBytesToRead < 1024 ||
+    cfg.maxBodyBytesToRead > 50 * 1024 * 1024
+  ) {
+    push(
+      errors,
+      'maxBodyBytesToRead',
+      cfg.maxBodyBytesToRead,
+      'integer between 1024 (1 KiB) and 52428800 (50 MiB)',
+      'Set maxBodyBytesToRead within the allowed range',
+    )
+  }
 }
 
 function validateDefaults(

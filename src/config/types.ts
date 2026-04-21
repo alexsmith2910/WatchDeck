@@ -11,6 +11,9 @@ export interface WatchDeckConfig {
   dashboardRoute: string;
   dashboardMode: 'standalone' | 'mounted';
 
+  captureBodySize: boolean;
+  maxBodyBytesToRead: number;
+
   modules: {
     discord: boolean;
     slack: boolean;

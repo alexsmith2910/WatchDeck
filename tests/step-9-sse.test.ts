@@ -152,6 +152,8 @@ eventBus.emit('check:complete', {
   responseTime: 42,
   statusCode: 200,
   errorMessage: null,
+  sslDaysRemaining: null,
+  sslIssuer: null,
 })
 
 eventBus.emit('endpoint:created', {

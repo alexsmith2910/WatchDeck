@@ -15,12 +15,20 @@ import { evaluateStatus } from './evaluators/statusEval.js'
 
 export async function runCheck(
   endpoint: EndpointDoc,
-  opts: { captureSsl?: boolean } = {},
+  opts: {
+    captureSsl?: boolean
+    captureBodySize?: boolean
+    maxBodyBytesToRead?: number
+  } = {},
 ): Promise<void> {
   const timestamp = new Date()
 
   if (endpoint.type === 'http') {
-    await runHttpEndpointCheck(endpoint, timestamp, opts.captureSsl ?? false)
+    await runHttpEndpointCheck(endpoint, timestamp, {
+      captureSsl: opts.captureSsl ?? false,
+      captureBodySize: opts.captureBodySize ?? false,
+      maxBodyBytesToRead: opts.maxBodyBytesToRead ?? 1_048_576,
+    })
   } else {
     await runPortEndpointCheck(endpoint, timestamp)
   }
@@ -33,14 +41,16 @@ export async function runCheck(
 async function runHttpEndpointCheck(
   endpoint: EndpointDoc,
   timestamp: Date,
-  captureSsl: boolean,
+  opts: { captureSsl: boolean; captureBodySize: boolean; maxBodyBytesToRead: number },
 ): Promise<void> {
   const result = await runHttpCheck({
     url: endpoint.url!,
     method: endpoint.method ?? 'GET',
     headers: endpoint.headers ?? {},
     timeout: endpoint.timeout,
-    captureSsl,
+    captureSsl: opts.captureSsl,
+    captureBodySize: opts.captureBodySize,
+    maxBodyBytesToRead: opts.maxBodyBytesToRead,
   })
 
   const eval_ = evaluateStatus({
@@ -62,6 +72,10 @@ async function runHttpEndpointCheck(
     responseTime,
     statusCode: result.statusCode,
     errorMessage: eval_.statusReason ?? result.errorMessage,
+    sslDaysRemaining: result.sslDaysRemaining,
+    sslIssuer: result.sslIssuer,
+    bodyBytes: result.bodyBytes,
+    bodyBytesTruncated: result.bodyBytesTruncated,
   })
 }
 
@@ -92,5 +106,9 @@ async function runPortEndpointCheck(endpoint: EndpointDoc, timestamp: Date): Pro
     responseTime,
     statusCode: null,
     errorMessage: eval_.statusReason ?? result.errorMessage,
+    sslDaysRemaining: null,
+    sslIssuer: null,
+    bodyBytes: null,
+    bodyBytesTruncated: false,
   })
 }
