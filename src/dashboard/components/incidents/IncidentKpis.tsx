@@ -245,7 +245,7 @@ function KpiCard({
         )}
       </div>
       {spark && spark.length > 1 && (
-        <div className="mt-auto">
+        <div className="mt-auto -mx-4">
           <WideSpark
             data={spark}
             color={sparkStroke ?? 'var(--wd-primary)'}
