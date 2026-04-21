@@ -113,6 +113,29 @@ function bucketLabelWithSeconds(ts: number): string {
   })
 }
 
+// Passive probes refresh at PASSIVE_REFRESH_MS on the backend; use the same
+// step here when `cadenceMs` is 0 so spark hover labels stay roughly aligned.
+const PASSIVE_REFRESH_MS = 30_000
+
+function buildSparkLabels(
+  length: number,
+  lastProbedAt: number | null,
+  cadenceMs: number,
+): string[] {
+  if (lastProbedAt === null || length === 0) return []
+  const step = cadenceMs > 0 ? cadenceMs : PASSIVE_REFRESH_MS
+  const labels: string[] = []
+  for (let i = 0; i < length; i++) {
+    const ts = lastProbedAt - (length - 1 - i) * step
+    labels.push(bucketLabelWithSeconds(ts))
+  }
+  return labels
+}
+
+function formatLatency(n: number): string {
+  return `${Math.round(n)}ms`
+}
+
 // ---------------------------------------------------------------------------
 // Overall banner
 // ---------------------------------------------------------------------------
@@ -230,6 +253,8 @@ function KpiCard({
   deltaLabel,
   spark,
   sparkStroke,
+  sparkLabels,
+  sparkFormat,
 }: {
   icon: string
   tile?: 'primary' | 'success' | 'warning' | 'danger'
@@ -241,6 +266,8 @@ function KpiCard({
   deltaLabel?: string
   spark?: number[] | null
   sparkStroke?: string
+  sparkLabels?: string[]
+  sparkFormat?: (n: number) => string
 }) {
   const deltaColor =
     deltaTone === 'success'
@@ -276,7 +303,13 @@ function KpiCard({
       </div>
       {spark && spark.length > 1 && (
         <div className="mt-auto -mx-4">
-          <WideSpark data={spark} color={sparkStroke ?? 'var(--wd-primary)'} height={46} />
+          <WideSpark
+            data={spark}
+            color={sparkStroke ?? 'var(--wd-primary)'}
+            height={46}
+            labels={sparkLabels}
+            formatValue={sparkFormat}
+          />
         </div>
       )}
     </div>
@@ -351,7 +384,14 @@ function SubsystemCard({
           ))}
         </div>
         <div className="shrink-0">
-          <Sparkline data={sub.sparkline} color={sparkColor(sub.status)} width={88} height={34} />
+          <Sparkline
+            data={sub.sparkline}
+            color={sparkColor(sub.status)}
+            width={88}
+            height={34}
+            labels={buildSparkLabels(sub.sparkline.length, sub.lastProbedAt, sub.cadenceMs)}
+            formatValue={formatLatency}
+          />
         </div>
       </div>
 
@@ -733,6 +773,28 @@ export default function HealthPage() {
     snapshot.subsystems.map((s) => [s.id, s.cadenceMs]),
   )
 
+  const subById: Record<string, SubsystemSnapshot> = Object.fromEntries(
+    snapshot.subsystems.map((s) => [s.id, s]),
+  )
+  const dbSub = subById.db
+  const schedSub = subById.scheduler
+  const bufSub = subById.buffer
+  const dbSparkLabels = buildSparkLabels(
+    snapshot.kpis.dbPingSpark.length,
+    dbSub?.lastProbedAt ?? null,
+    dbSub?.cadenceMs ?? 0,
+  )
+  const schedSparkLabels = buildSparkLabels(
+    snapshot.kpis.schedulerDriftSpark.length,
+    schedSub?.lastProbedAt ?? null,
+    schedSub?.cadenceMs ?? 0,
+  )
+  const bufSparkLabels = buildSparkLabels(
+    snapshot.kpis.bufferLatencySpark.length,
+    bufSub?.lastProbedAt ?? null,
+    bufSub?.cadenceMs ?? 0,
+  )
+
   return (
     <div className="p-6 flex flex-col gap-4 max-w-[1440px] mx-auto">
       {/* Header */}
@@ -795,6 +857,8 @@ export default function HealthPage() {
           deltaLabel="vs ≤ 100ms target"
           spark={snapshot.kpis.dbPingSpark}
           sparkStroke="var(--wd-primary)"
+          sparkLabels={dbSparkLabels}
+          sparkFormat={formatLatency}
         />
         <KpiCard
           icon="solar:clock-circle-outline"
@@ -817,6 +881,8 @@ export default function HealthPage() {
           deltaLabel="max over last 5 ticks"
           spark={snapshot.kpis.schedulerDriftSpark}
           sparkStroke="var(--wd-warning)"
+          sparkLabels={schedSparkLabels}
+          sparkFormat={formatLatency}
         />
         <KpiCard
           icon="solar:layers-outline"
@@ -839,6 +905,8 @@ export default function HealthPage() {
           deltaLabel="synthetic write 10s"
           spark={snapshot.kpis.bufferLatencySpark}
           sparkStroke="#a78bfa"
+          sparkLabels={bufSparkLabels}
+          sparkFormat={formatLatency}
         />
         <KpiCard
           icon="solar:danger-triangle-outline"

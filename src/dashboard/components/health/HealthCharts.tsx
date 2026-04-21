@@ -16,6 +16,8 @@ export const Sparkline = memo(function Sparkline({
   strokeW = 1.5,
   yMin,
   yMax,
+  labels,
+  formatValue,
 }: {
   data: number[]
   color?: string
@@ -28,8 +30,25 @@ export const Sparkline = memo(function Sparkline({
   yMin?: number
   /** Override the y-axis max. Pair with `yMin` for bounded ranges (0-100). */
   yMax?: number
+  /** Per-point labels (typically dates/times). Enables a hover tooltip when
+   *  provided; same length as `data`. */
+  labels?: string[]
+  /** Optional value formatter for the hover tooltip. */
+  formatValue?: (n: number) => string
 }) {
   const reactId = useId()
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const [hover, setHover] = useState<{ idx: number; x: number; y: number; rect: DOMRect } | null>(null)
+
+  const interactive = !!labels && labels.length === data.length && data.length >= 2
+
+  useEffect(() => {
+    if (!hover) return
+    const onScroll = () => setHover(null)
+    window.addEventListener('scroll', onScroll, true)
+    return () => window.removeEventListener('scroll', onScroll, true)
+  }, [hover])
+
   if (!data || data.length < 2) return null
   const min = yMin ?? Math.min(...data)
   const max = yMax ?? Math.max(...data)
@@ -39,7 +58,8 @@ export const Sparkline = memo(function Sparkline({
   const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
   const area = `${d} L${width},${height} L0,${height} Z`
   const id = `sg-${reactId.replace(/:/g, '')}`
-  return (
+
+  const svg = (
     <svg
       viewBox={`0 0 ${width} ${height}`}
       width={width}
@@ -56,6 +76,56 @@ export const Sparkline = memo(function Sparkline({
       <path d={area} fill={`url(#${id})`} />
       <path d={d} fill="none" stroke={color} strokeWidth={strokeW} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  )
+
+  if (!interactive) return svg
+
+  function handleMove(e: React.MouseEvent<HTMLDivElement>): void {
+    if (!wrapperRef.current) return
+    const rect = wrapperRef.current.getBoundingClientRect()
+    const relX = ((e.clientX - rect.left) / rect.width) * width
+    const idx = Math.max(0, Math.min(data.length - 1, Math.round(relX / stepX)))
+    setHover({ idx, x: pts[idx][0], y: pts[idx][1], rect })
+  }
+
+  return (
+    <div
+      ref={wrapperRef}
+      className="relative cursor-crosshair"
+      style={{ width, height }}
+      onMouseMove={handleMove}
+      onMouseLeave={() => setHover(null)}
+    >
+      {svg}
+      {hover && (
+        <>
+          <div
+            className="pointer-events-none absolute top-0 bottom-0 w-px bg-wd-border/70"
+            style={{ left: `${(hover.x / width) * 100}%` }}
+          />
+          <div
+            className="pointer-events-none absolute w-2 h-2 rounded-full -translate-x-1/2 -translate-y-1/2"
+            style={{
+              left: `${(hover.x / width) * 100}%`,
+              top: `${(hover.y / height) * 100}%`,
+              background: color,
+              boxShadow: '0 0 0 2px var(--background, var(--wd-surface))',
+            }}
+          />
+          {typeof document !== 'undefined' &&
+            createPortal(
+              <SparkTooltip
+                rectLeft={hover.rect.left + (hover.x / width) * hover.rect.width}
+                rectTop={hover.rect.top + (hover.y / height) * hover.rect.height}
+                color={color}
+                label={labels![hover.idx]}
+                value={formatValue ? formatValue(data[hover.idx]) : String(data[hover.idx])}
+              />,
+              document.body,
+            )}
+        </>
+      )}
+    </div>
   )
 })
 
