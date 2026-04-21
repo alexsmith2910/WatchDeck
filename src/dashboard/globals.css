@@ -359,6 +359,19 @@ svg {
   }
 }
 
+/* Rainbow placeholder used on the endpoint detail page for sections whose
+   data is not yet wired to the backend. The gradient scrolls horizontally so
+   the block is visually unmistakable as a stand-in — it is intended to be
+   replaced as each data source lands. */
+@keyframes wd-rainbow {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [style*='wd-rainbow'] { animation: none !important; }
+}
+
 /* ── HeroUI Dropdown — match incidents filter Select aesthetic ──────────
    HeroUI's Dropdown defaults (rounded-3xl popover, rounded-2xl min-h-9 items,
    bg-overlay, big paddings) look oversized beside the rest of the dashboard.

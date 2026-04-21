@@ -27,6 +27,7 @@ export interface ApiEndpoint {
   lastResponseTime?: number
   lastStatusCode?: number | null
   lastErrorMessage?: string | null
+  lastSslIssuer?: { o?: string; cn?: string; capturedAt: string }
   consecutiveFailures: number
   createdAt: string
   updatedAt: string
@@ -47,6 +48,8 @@ export interface ApiCheck {
   statusReason?: string
   errorMessage?: string
   sslDaysRemaining?: number
+  bodyBytes?: number
+  bodyBytesTruncated?: boolean
   bodyValidation?: BodyValidationResult
   portOpen?: boolean
   duringMaintenance: boolean
