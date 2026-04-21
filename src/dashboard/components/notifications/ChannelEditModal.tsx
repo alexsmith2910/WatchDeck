@@ -25,6 +25,7 @@ import {
 import type { Selection } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { useApi } from '../../hooks/useApi'
+import { useModules } from '../../hooks/useModules'
 import { toast } from '../../ui/toast'
 import type { ApiChannel, ChannelType, DeliveryPriority, SeverityFilter } from '../../types/notifications'
 import { CHANNEL_TYPE_ICON, CHANNEL_TYPE_LABEL } from '../../types/notifications'
@@ -315,6 +316,7 @@ const TYPE_OPTIONS: { value: ChannelType; label: string; icon: string }[] = [
 
 export function ChannelEditModal({ open, channel, onClose, onSaved, onDeleted }: Props) {
   const { request } = useApi()
+  const { modules } = useModules()
   const [form, setForm] = useState<FormState>(defaultForm)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -323,10 +325,33 @@ export function ChannelEditModal({ open, channel, onClose, onSaved, onDeleted }:
 
   const isCreate = channel === null
 
+  // Which channel types are currently selectable on create. Discord stays
+  // enabled regardless of modules.discord because the webhook transport does
+  // not require the Discord module — it's a plain HTTPS POST. Only the bot
+  // transport is gated (see the Discord transport block below).
+  const typeDisabled: Record<ChannelType, string | null> = {
+    discord: null,
+    slack: modules.slack ? null : 'Enable modules.slack in watchdeck.config.js to use Slack channels.',
+    email: null,
+    webhook: null,
+  }
+  const discordBotDisabled = !modules.discord
+
   useEffect(() => {
     if (!open) return
     setError(null)
-    setForm(channel ? fromChannel(channel) : defaultForm())
+    const next = channel ? fromChannel(channel) : defaultForm()
+    // If the default/preselected type isn't available on create, fall back
+    // to the first type that is (discord/webhook/email are always on).
+    if (!channel && typeDisabled[next.type]) {
+      const firstEnabled = (['discord', 'webhook', 'email', 'slack'] as ChannelType[])
+        .find((t) => !typeDisabled[t])
+      if (firstEnabled) next.type = firstEnabled
+    }
+    setForm(next)
+    // Intentionally exclude typeDisabled — it's a stable derivation of
+    // `modules`, which this effect doesn't need to react to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, channel])
 
   const update = <K extends keyof FormState>(k: K, v: FormState[K]) =>
@@ -444,30 +469,56 @@ export function ChannelEditModal({ open, channel, onClose, onSaved, onDeleted }:
                   selectedKeys={new Set([form.type])}
                   onSelectionChange={(keys) => {
                     const sel = [...keys][0] as ChannelType | undefined
-                    if (sel) update('type', sel)
+                    if (sel && !typeDisabled[sel]) update('type', sel)
                   }}
                   size="sm"
                   className="!w-full"
                 >
-                  {TYPE_OPTIONS.map((t) => (
-                    <ToggleButton
-                      key={t.value}
-                      id={t.value}
-                      className={cn(
-                        '!flex-1 !text-xs !gap-1.5',
-                        'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
-                      )}
-                    >
-                      <Icon icon={t.icon} width={16} />
-                      {t.label}
-                    </ToggleButton>
-                  ))}
+                  {TYPE_OPTIONS.map((t) => {
+                    const disabledReason = typeDisabled[t.value]
+                    return (
+                      <ToggleButton
+                        key={t.value}
+                        id={t.value}
+                        isDisabled={!!disabledReason}
+                        title={disabledReason ?? undefined}
+                        className={cn(
+                          '!flex-1 !text-xs !gap-1.5',
+                          'data-[selected=true]:!bg-wd-primary data-[selected=true]:!text-wd-primary-foreground',
+                          'data-[disabled=true]:!opacity-50 data-[disabled=true]:!cursor-not-allowed',
+                        )}
+                      >
+                        <Icon icon={t.icon} width={16} />
+                        {t.label}
+                      </ToggleButton>
+                    )
+                  })}
                 </ToggleButtonGroup>
+                {Object.values(typeDisabled).some(Boolean) && (
+                  <HelpText>
+                    {Object.entries(typeDisabled)
+                      .filter(([, reason]) => !!reason)
+                      .map(([, reason]) => reason)
+                      .join(' · ')}
+                  </HelpText>
+                )}
               </div>
             ) : (
               <div className="flex items-center gap-2 text-xs bg-wd-surface-hover/30 border border-wd-border/40 rounded-lg px-3 py-2">
                 <Icon icon={CHANNEL_TYPE_ICON[form.type]} width={16} />
                 <span className="text-wd-muted">{CHANNEL_TYPE_LABEL[form.type]} · type cannot be changed</span>
+              </div>
+            )}
+
+            {/* Module-off banner for existing channels whose backing module is disabled */}
+            {!isCreate && form.type === 'slack' && !modules.slack && (
+              <div className="bg-wd-warning/10 border border-wd-warning/40 rounded-lg px-3 py-2 text-xs text-wd-warning">
+                The Slack module is disabled — dispatches to this channel will be suppressed. Set <code>modules.slack</code> to <code>true</code> in <code>watchdeck.config.js</code> and restart to resume delivery.
+              </div>
+            )}
+            {!isCreate && form.type === 'discord' && form.discordTransport === 'bot' && !modules.discord && (
+              <div className="bg-wd-warning/10 border border-wd-warning/40 rounded-lg px-3 py-2 text-xs text-wd-warning">
+                The Discord module is disabled — dispatches via the bot transport will be suppressed. Switch to the Webhook transport or enable <code>modules.discord</code> in <code>watchdeck.config.js</code>.
               </div>
             )}
 
@@ -601,14 +652,22 @@ export function ChannelEditModal({ open, channel, onClose, onSaved, onDeleted }:
                   <FieldLabel>Transport</FieldLabel>
                   <Select<'webhook' | 'bot'>
                     value={form.discordTransport}
-                    onChange={(v) => update('discordTransport', v)}
+                    onChange={(v) => {
+                      if (v === 'bot' && discordBotDisabled) return
+                      update('discordTransport', v)
+                    }}
                     options={[
                       { value: 'webhook', label: 'Discord Webhook' },
-                      { value: 'bot',     label: 'Discord Bot (coming soon)' },
+                      {
+                        value: 'bot',
+                        label: discordBotDisabled
+                          ? 'Discord Bot — enable modules.discord'
+                          : 'Discord Bot (coming soon)',
+                      },
                     ]}
                   />
                   <HelpText>
-                    How WatchDeck talks to Discord. Webhook is simplest — paste a URL from Discord's Integrations settings.
+                    How WatchDeck talks to Discord. Webhook is simplest — paste a URL from Discord's Integrations settings. {discordBotDisabled ? 'Bot transport is unavailable because modules.discord is off.' : ''}
                   </HelpText>
                 </div>
 
