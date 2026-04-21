@@ -255,7 +255,7 @@ const HeroCard = memo(function HeroCard({
                 {ep.name}
               </span>
               {ep.kind && (
-                <span className="shrink-0 px-1.5 py-0.5 rounded text-[9.5px] font-medium font-mono uppercase tracking-[0.08em] text-wd-muted/80 bg-wd-surface-hover/60 border border-wd-border/50">
+                <span className="shrink-0 inline-flex items-center px-1.5 pt-[3px] pb-[2px] rounded text-[9.5px] leading-none font-medium font-mono uppercase tracking-[0.08em] text-wd-muted/80 bg-wd-surface-hover/60 border border-wd-border/50">
                   {ep.kind}
                 </span>
               )}
@@ -283,7 +283,7 @@ const HeroCard = memo(function HeroCard({
         <span className="inline-flex items-center gap-1.5 mr-1.5 font-semibold text-foreground">
           <span
             className={cn(
-              'px-1.5 py-[1px] rounded text-[9.5px] font-semibold font-mono uppercase tracking-[0.08em]',
+              'inline-flex items-center px-1.5 pt-[3px] pb-[2px] rounded text-[9.5px] leading-none font-semibold font-mono uppercase tracking-[0.08em]',
               severityChipClass(sev),
             )}
           >

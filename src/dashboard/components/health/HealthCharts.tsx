@@ -775,7 +775,7 @@ function HeatmapTooltip({ hover }: { hover: HeatmapHover }) {
           <span className="font-semibold text-foreground">{title}</span>
           <span
             className={cn(
-              'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+              'inline-flex items-center rounded-full px-1.5 pt-[3px] pb-[2px] text-[10px] leading-none font-semibold uppercase tracking-wider',
               statusPill.cls,
             )}
           >
@@ -1143,7 +1143,7 @@ export const StatusPill = memo(function StatusPill({ status }: { status: ProbeSt
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+        'inline-flex items-center gap-1.5 rounded-full border px-2 pt-[3px] pb-[2px] text-[10px] leading-none font-semibold uppercase tracking-wider',
         pill,
       )}
     >

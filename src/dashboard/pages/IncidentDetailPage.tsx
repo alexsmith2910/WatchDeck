@@ -1574,7 +1574,7 @@ function TimelineRowView({
             {badgeLabel && (
               <span
                 className={cn(
-                  'inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider',
+                  'inline-flex items-center rounded-full px-1.5 pt-[3px] pb-[2px] text-[9px] leading-none font-semibold uppercase tracking-wider',
                   row.badge === 'trigger'
                     ? 'bg-wd-danger/10 text-wd-danger'
                     : 'bg-wd-success/10 text-wd-success',
@@ -1947,7 +1947,7 @@ function RelatedIncidentRow({ incident }: { incident: ApiIncident }) {
       className="flex items-center gap-3 rounded-lg border border-wd-border/30 bg-wd-surface-hover/20 hover:bg-wd-surface-hover/50 px-3 py-2.5 transition-colors"
     >
       {active ? (
-        <span className="inline-flex items-center gap-1 rounded-full bg-wd-danger/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-wd-danger shrink-0">
+        <span className="inline-flex items-center gap-1 rounded-full bg-wd-danger/15 px-1.5 pt-[3px] pb-[2px] text-[9px] leading-none font-semibold uppercase tracking-wider text-wd-danger shrink-0">
           <span className="relative flex h-1.5 w-1.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-wd-danger opacity-75" />
             <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-wd-danger" />
@@ -1955,7 +1955,7 @@ function RelatedIncidentRow({ incident }: { incident: ApiIncident }) {
           Active
         </span>
       ) : (
-        <span className="inline-flex items-center gap-1 rounded-full bg-wd-success/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-wd-success shrink-0">
+        <span className="inline-flex items-center gap-1 rounded-full bg-wd-success/15 px-1.5 pt-[3px] pb-[2px] text-[9px] leading-none font-semibold uppercase tracking-wider text-wd-success shrink-0">
           <Icon icon="solar:check-circle-bold" width={16} />
           Resolved
         </span>
@@ -1965,7 +1965,7 @@ function RelatedIncidentRow({ incident }: { incident: ApiIncident }) {
       </span>
       <span
         className={cn(
-          'inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider',
+          'inline-flex items-center rounded-full px-1.5 pt-[3px] pb-[2px] text-[9px] leading-none font-semibold uppercase tracking-wider',
           severity.tone === 'danger'
             ? 'bg-wd-danger/10 text-wd-danger'
             : severity.tone === 'warning'

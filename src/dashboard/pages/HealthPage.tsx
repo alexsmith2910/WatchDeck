@@ -491,7 +491,7 @@ function IncidentRow({ inc }: { inc: InternalIncident }) {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-foreground truncate">{inc.title}</span>
           {inc.status === 'active' && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-wd-danger/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-wd-danger">
+            <span className="inline-flex items-center gap-1 rounded-full bg-wd-danger/15 px-1.5 pt-[3px] pb-[2px] text-[10px] font-semibold uppercase tracking-wider text-wd-danger leading-none">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-wd-danger opacity-75" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-wd-danger" />
@@ -500,7 +500,7 @@ function IncidentRow({ inc }: { inc: InternalIncident }) {
             </span>
           )}
           {inc.status === 'resolved' && (
-            <span className="inline-flex rounded-full bg-wd-success/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-wd-success">
+            <span className="inline-flex items-center rounded-full bg-wd-success/15 px-1.5 pt-[3px] pb-[2px] text-[10px] font-semibold uppercase tracking-wider text-wd-success leading-none">
               Resolved
             </span>
           )}
