@@ -12,7 +12,7 @@
  * Hour-of-day latency (bottom right) uses 8 buckets of 3 hours each, derived
  * from raw checks over the selected window.
  */
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import {
@@ -29,8 +29,15 @@ import {
   YAxis,
 } from "recharts";
 import { useApi } from "../../hooks/useApi";
-import type { ApiCheck, DailySummary, HourlySummary } from "../../types/api";
+import type {
+  ApiCheck,
+  ApiIncident,
+  DailySummary,
+  HourlySummary,
+} from "../../types/api";
 import { formatHour } from "../../utils/format";
+import type { IncidentRange } from "../../utils/format";
+import ForegroundReferenceArea from "../ForegroundReferenceArea";
 import { Segmented, SectionHead } from "./primitives";
 
 type PercentileKey = "avg" | "p50" | "p95" | "p99" | "min" | "max";
@@ -79,14 +86,24 @@ interface Props {
   hourly24h: HourlySummary[];
   daily30d: DailySummary[];
   latencyThreshold: number;
+  incidents: ApiIncident[];
 }
 
+// `fails` / `degraded` piggyback on each chart point so `getIncidentRanges`
+// (the shared helper in utils/format.ts) can scan for coloured bands. The
+// counts are always per-bucket — 1 if a single raw check was down, or the
+// aggregated failCount when the bucket is an hour / day.
 interface ChartPoint {
   label: string;
+  ts: number;
+  spanMs: number;
   avg: number;
   p95: number;
   p99: number;
+  fails: number;
+  degraded: number;
 }
+
 
 interface PassRatePoint {
   label: string;
@@ -146,9 +163,13 @@ function rawChecksToPoints(checks: ApiCheck[]): ChartPoint[] {
         hour: "2-digit",
         minute: "2-digit",
       }),
+      ts: new Date(c.timestamp).getTime(),
+      spanMs: 60_000,
       avg: c.responseTime,
       p95: c.responseTime,
       p99: c.responseTime,
+      fails: c.status === "down" ? 1 : 0,
+      degraded: c.status === "degraded" ? 1 : 0,
     }));
 }
 
@@ -157,25 +178,53 @@ function hourlyToPoints(hourly: HourlySummary[]): ChartPoint[] {
     .sort((a, b) => new Date(a.hour).getTime() - new Date(b.hour).getTime())
     .map((h) => ({
       label: formatHour(h.hour),
+      ts: new Date(h.hour).getTime(),
+      spanMs: 3_600_000,
       avg: h.avgResponseTime,
       p95: h.p95ResponseTime,
       p99: h.p99ResponseTime,
+      fails: h.failCount,
+      degraded: h.degradedCount,
     }));
 }
 
-function dailyToPoints(daily: DailySummary[]): ChartPoint[] {
+// Daily summaries don't break out fail/degraded counts, so we roll up the
+// matching hourlies. 7d + 30d both fetch enough hourly rows to cover the
+// full range, so this is always populated.
+function dailyToPoints(
+  daily: DailySummary[],
+  hourlies: HourlySummary[],
+): ChartPoint[] {
   return [...daily]
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    .map((d) => ({
-      label: new Date(d.date).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      }),
-      avg: d.avgResponseTime,
-      p95: d.p95ResponseTime,
-      p99: d.p99ResponseTime,
-    }));
+    .map((d) => {
+      const dayStart = new Date(d.date).getTime();
+      const dayEnd = dayStart + 86_400_000;
+      let fails = 0;
+      let degraded = 0;
+      for (const h of hourlies) {
+        const hStart = new Date(h.hour).getTime();
+        if (hStart >= dayStart && hStart < dayEnd) {
+          fails += h.failCount;
+          degraded += h.degradedCount;
+        }
+      }
+      return {
+        label: new Date(d.date).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        }),
+        ts: dayStart,
+        spanMs: 86_400_000,
+        avg: d.avgResponseTime,
+        p95: d.p95ResponseTime,
+        p99: d.p99ResponseTime,
+        fails,
+        degraded,
+      };
+    });
 }
+
 
 function rawChecksToRatePoints(checks: ApiCheck[]): PassRatePoint[] {
   return [...checks]
@@ -250,6 +299,7 @@ function MetricsTabBase({
   hourly24h,
   daily30d,
   latencyThreshold,
+  incidents,
 }: Props) {
   const { request } = useApi();
   const [rangeChecks, setRangeChecks] = useState<ApiCheck[]>([]);
@@ -269,77 +319,212 @@ function MetricsTabBase({
     });
   }, []);
 
+  // Generation token — incremented each time fetchRange starts. In-flight
+  // pagination loops and pending responses check this before committing
+  // state, so switching 30d → 24h mid-fetch drops the stale 30d data
+  // (which can easily be 10k+ raw checks) instead of letting it overwrite
+  // the newer 24h window.
+  const fetchGenRef = useRef(0);
+
+  // Pulls every check whose timestamp falls inside the requested window by
+  // walking the cursor pagination to exhaustion. The caller just names a
+  // time range — the helper handles however many pages the server hands
+  // back. Aborts early if the generation token has advanced.
+  const fetchAllChecksSince = useCallback(
+    async (fromMs: number, gen: number): Promise<ApiCheck[] | null> => {
+      const fromIso = new Date(fromMs).toISOString();
+      const all: ApiCheck[] = [];
+      let cursor: string | null = null;
+      for (let pages = 0; pages < 50; pages++) {
+        if (fetchGenRef.current !== gen) return null;
+        const params = new URLSearchParams({
+          limit: "1000",
+          from: fromIso,
+        });
+        if (cursor) params.set("cursor", cursor);
+        const res = await request<{
+          data: ApiCheck[];
+          pagination?: { hasMore: boolean; nextCursor: string | null };
+        }>(`/endpoints/${endpointId}/checks?${params.toString()}`);
+        if (fetchGenRef.current !== gen) return null;
+        if (res.status >= 400) break;
+        all.push(...(res.data.data ?? []));
+        const next = res.data.pagination?.nextCursor;
+        if (!res.data.pagination?.hasMore || !next) break;
+        cursor = next;
+      }
+      return all;
+    },
+    [endpointId, request],
+  );
+
   const fetchRange = useCallback(async () => {
+    fetchGenRef.current += 1;
+    const gen = fetchGenRef.current;
     setLoadingRange(true);
+    // Clear previous window's data so the chart doesn't flash the old
+    // range's points while the new fetch is in flight.
+    setRangeChecks([]);
     if (range === "1h") {
-      const from = new Date(Date.now() - 3_600_000).toISOString();
-      const res = await request<{ data: ApiCheck[] }>(
-        `/endpoints/${endpointId}/checks?limit=500&from=${encodeURIComponent(from)}`,
-      );
-      setRangeChecks(res.status < 400 ? (res.data.data ?? []) : []);
+      const checks = await fetchAllChecksSince(Date.now() - 3_600_000, gen);
+      if (fetchGenRef.current !== gen || checks === null) return;
+      setRangeChecks(checks);
       setRangeHourly([]);
       setRangeDaily([]);
     } else if (range === "24h") {
-      // Use cached hourly24h; also pull raw checks for the hour-of-day histogram.
+      // Keep hourly24h cached for the pass-rate + hour-of-day charts; the RT
+      // chart itself is driven off raw checks so per-check failures show up
+      // as reference areas.
       setRangeHourly(hourly24h);
       setRangeDaily([]);
-      const from = new Date(Date.now() - 86_400_000).toISOString();
-      const rawRes = await request<{ data: ApiCheck[] }>(
-        `/endpoints/${endpointId}/checks?limit=1500&from=${encodeURIComponent(from)}`,
-      );
-      setRangeChecks(rawRes.status < 400 ? (rawRes.data.data ?? []) : []);
+      const checks = await fetchAllChecksSince(Date.now() - 86_400_000, gen);
+      if (fetchGenRef.current !== gen || checks === null) return;
+      setRangeChecks(checks);
     } else if (range === "7d") {
-      const [dRes, hRes, rawRes] = await Promise.all([
+      const [dRes, hRes, checks] = await Promise.all([
         request<{ data: DailySummary[] }>(
           `/endpoints/${endpointId}/daily?limit=7`,
         ),
         request<{ data: HourlySummary[] }>(
           `/endpoints/${endpointId}/hourly?limit=168`,
         ),
-        request<{ data: ApiCheck[] }>(
-          `/endpoints/${endpointId}/checks?limit=3000&from=${encodeURIComponent(new Date(Date.now() - 7 * 86_400_000).toISOString())}`,
-        ),
+        fetchAllChecksSince(Date.now() - 7 * 86_400_000, gen),
       ]);
+      if (fetchGenRef.current !== gen || checks === null) return;
       setRangeDaily(dRes.status < 400 ? (dRes.data.data ?? []) : []);
       setRangeHourly(hRes.status < 400 ? (hRes.data.data ?? []) : []);
-      setRangeChecks(rawRes.status < 400 ? (rawRes.data.data ?? []) : []);
+      setRangeChecks(checks);
     } else {
       setRangeDaily(daily30d.slice(-30));
       // 30d hour-of-day uses hourly summaries (720 = 30d × 24h) so every
       // time-of-day bucket is averaged across every day in the range.
-      const [hRes, rawRes] = await Promise.all([
+      const [hRes, checks] = await Promise.all([
         request<{ data: HourlySummary[] }>(
           `/endpoints/${endpointId}/hourly?limit=720`,
         ),
-        request<{ data: ApiCheck[] }>(
-          `/endpoints/${endpointId}/checks?limit=3000&from=${encodeURIComponent(new Date(Date.now() - 7 * 86_400_000).toISOString())}`,
-        ),
+        fetchAllChecksSince(Date.now() - 7 * 86_400_000, gen),
       ]);
+      if (fetchGenRef.current !== gen || checks === null) return;
       setRangeHourly(hRes.status < 400 ? (hRes.data.data ?? []) : []);
-      setRangeChecks(rawRes.status < 400 ? (rawRes.data.data ?? []) : []);
+      setRangeChecks(checks);
     }
-    setLoadingRange(false);
-  }, [range, endpointId, request, hourly24h, daily30d]);
+    if (fetchGenRef.current === gen) setLoadingRange(false);
+  }, [range, endpointId, request, hourly24h, daily30d, fetchAllChecksSince]);
 
   useEffect(() => {
     void fetchRange();
   }, [fetchRange]);
 
   // ── RT chart data + percentiles ────────────────────────────────────────
+  // 1h + 24h render every raw check so per-check failures (single flaky
+  // checks that never become incidents) still show up as shaded reference
+  // areas. 24h at one-check-per-minute is ~1440 points, comfortably within
+  // recharts' render budget.
   const rtData = useMemo<ChartPoint[]>(() => {
-    if (range === "1h") return rawChecksToPoints(rangeChecks);
-    if (range === "24h") {
-      const pts = hourlyToPoints(rangeHourly);
-      if (pts.length >= 4) return pts;
-      return rawChecksToPoints(rangeChecks);
-    }
+    if (range === "1h" || range === "24h") return rawChecksToPoints(rangeChecks);
     if (range === "7d") {
-      const pts = dailyToPoints(rangeDaily);
+      const pts = dailyToPoints(rangeDaily, rangeHourly);
       if (pts.length >= 3) return pts;
       return hourlyToPoints(rangeHourly);
     }
-    return dailyToPoints(rangeDaily);
+    return dailyToPoints(rangeDaily, rangeHourly);
   }, [range, rangeChecks, rangeHourly, rangeDaily]);
+
+  // ── Incident overlays on the RT chart ──────────────────────────────────
+  // Severity per bucket is folded from three sources:
+  //   1. the aggregated counts already on the point (failCount/degradedCount
+  //      for hourly/daily rollups)
+  //   2. every raw check whose timestamp falls inside the bucket window
+  //      (catches single flaky checks that never become incidents)
+  //   3. the authoritative incidents list from the server (catches non-check
+  //      incidents like ssl_expiring where all checks are 'healthy')
+  //
+  // Source (3) is especially important for the 24h view: if a user sees an
+  // incident on the Incidents tab but no raw check has status='down', only
+  // the incident window itself anchors the overlay. Contiguous buckets of
+  // the same severity collapse into one range; the end label points to the
+  // *next* bucket so the shade spans the full failing window.
+  const incidentOverlays = useMemo((): IncidentRange[] => {
+    if (rtData.length === 0) return [];
+
+    const spanMs = rtData[0].spanMs;
+    const severity = new Array<0 | 1 | 2>(rtData.length).fill(0);
+    const rank = (n: number) => (n >= 2 ? 2 : n >= 1 ? 1 : 0) as 0 | 1 | 2;
+
+    // 1. Aggregated counts on the chart point (hourly/daily rollups).
+    for (let i = 0; i < rtData.length; i++) {
+      const p = rtData[i];
+      if (p.fails > 0) severity[i] = 2;
+      else if (p.degraded > 0) severity[i] = rank(Math.max(severity[i], 1));
+    }
+
+    // Precompute bucket ranges for index lookup by timestamp.
+    const chartStart = rtData[0].ts;
+    const chartEnd = rtData[rtData.length - 1].ts + spanMs;
+    const findBucket = (tsMs: number): number => {
+      if (tsMs < chartStart || tsMs >= chartEnd) return -1;
+      for (let i = 0; i < rtData.length; i++) {
+        if (tsMs >= rtData[i].ts && tsMs < rtData[i].ts + spanMs) return i;
+      }
+      return -1;
+    };
+
+    // 2. Raw-check statuses.
+    for (const c of rangeChecks) {
+      if (c.status === "healthy") continue;
+      const idx = findBucket(new Date(c.timestamp).getTime());
+      if (idx < 0) continue;
+      const sev: 1 | 2 = c.status === "down" ? 2 : 1;
+      if (sev > severity[idx]) severity[idx] = sev;
+    }
+
+    // 3. Incident windows. An incident is treated as 'down' severity if its
+    // cause is a hard failure (down / port_closed / body_mismatch /
+    // ssl_expired) and 'degraded' otherwise (high_latency / ssl_expiring /
+    // degraded). Open incidents (resolvedAt missing) extend to "now".
+    const CRITICAL_CAUSES = new Set([
+      "endpoint_down",
+      "port_closed",
+      "body_mismatch",
+      "ssl_expired",
+    ]);
+    const nowMs = Date.now();
+    for (const inc of incidents) {
+      const start = new Date(inc.startedAt).getTime();
+      const end = inc.resolvedAt ? new Date(inc.resolvedAt).getTime() : nowMs;
+      if (end < chartStart || start >= chartEnd) continue;
+      const sev: 1 | 2 = CRITICAL_CAUSES.has(inc.cause) ? 2 : 1;
+      const clampedStart = Math.max(start, chartStart);
+      const clampedEnd = Math.min(end, chartEnd - 1);
+      // Mark every bucket the incident overlaps.
+      for (let i = 0; i < rtData.length; i++) {
+        const bucketStart = rtData[i].ts;
+        const bucketEnd = bucketStart + spanMs;
+        if (bucketEnd <= clampedStart || bucketStart > clampedEnd) continue;
+        if (sev > severity[i]) severity[i] = sev;
+      }
+    }
+
+    // Run-length encode severity into labelled ranges.
+    const ranges: IncidentRange[] = [];
+    let i = 0;
+    while (i < rtData.length) {
+      if (severity[i] === 0) {
+        i++;
+        continue;
+      }
+      const cur = severity[i];
+      let j = i;
+      while (j + 1 < rtData.length && severity[j + 1] === cur) j++;
+      const x1 = rtData[i].label;
+      const x2 =
+        j + 1 < rtData.length ? rtData[j + 1].label : rtData[j].label;
+      ranges.push({ x1, x2, type: cur === 2 ? "down" : "degraded" });
+      i = j + 1;
+    }
+
+    return ranges;
+  }, [rtData, rangeChecks, incidents]);
 
   const percentiles = useMemo(() => {
     const raw = rangeChecks
@@ -656,6 +841,9 @@ function MetricsTabBase({
                     fill="url(#rtGradMetrics)"
                     type="monotone"
                   />
+                  {incidentOverlays.length > 0 && (
+                    <ForegroundReferenceArea ranges={incidentOverlays} />
+                  )}
                 </AreaChart>
               </ResponsiveContainer>
             ) : (

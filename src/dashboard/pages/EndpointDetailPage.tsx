@@ -398,6 +398,7 @@ export default function EndpointDetailPage() {
             hourly24h={hourly24h}
             daily30d={daily30d}
             latencyThreshold={endpoint.latencyThreshold}
+            incidents={incidents}
           />
         )}
         {activeTab === "checks" && <ChecksTab endpoint={endpoint} />}
