@@ -370,7 +370,17 @@ function validateNotifications(
   } else {
     for (const channel of ['discord', 'slack', 'email', 'webhook'] as const) {
       const entry = cd[channel]
-      const rl = entry?.rateLimitPerMinute
+      if (!entry || typeof entry !== 'object') {
+        push(
+          errors,
+          `defaults.notifications.channelDefaults.${channel}`,
+          entry,
+          'object with rateLimitPerMinute',
+          `Provide channelDefaults.${channel} — all four channel types are required`,
+        )
+        continue
+      }
+      const rl = entry.rateLimitPerMinute
       if (!isInteger(rl) || rl < 1 || rl > 1000) {
         push(
           errors,

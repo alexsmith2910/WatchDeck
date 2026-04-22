@@ -17,7 +17,21 @@ interface InitOptions {
 }
 
 function generateEncryptionKey(): string {
-  return crypto.randomBytes(32).toString('hex').slice(0, 32)
+  // 32 bytes = 256 bits, encoded as 64 hex chars. Do NOT slice — the earlier
+  // .slice(0, 32) silently halved the entropy to 128 bits.
+  return crypto.randomBytes(32).toString('hex')
+}
+
+/**
+ * Exit cleanly if the prompt was cancelled. Narrows the return type to `T`
+ * so the caller can use the value without a secondary cancel check.
+ */
+function requireValue<T>(value: T | symbol, label = 'Setup cancelled.'): T {
+  if (p.isCancel(value)) {
+    p.cancel(label)
+    process.exit(0)
+  }
+  return value
 }
 
 function renderTemplate(template: string, vars: Record<string, string>): string {
@@ -84,7 +98,7 @@ export async function runInit(options: InitOptions): Promise<void> {
   }
 
   // Step 1 — Port
-  const port = await p.text({
+  const port = requireValue(await p.text({
     message: 'Which port should WatchDeck run on?',
     placeholder: '4000',
     defaultValue: '4000',
@@ -93,11 +107,10 @@ export async function runInit(options: InitOptions): Promise<void> {
       const n = Number(value)
       if (isNaN(n) || n < 1 || n > 65535) return 'Enter a valid port number (1-65535)'
     },
-  })
-  if (p.isCancel(port)) { p.cancel('Setup cancelled.'); process.exit(0) }
+  }))
 
   // Step 2 — MongoDB location
-  const dbUri = await p.text({
+  const dbUri = requireValue(await p.text({
     message: 'MongoDB connection URI',
     placeholder: 'mongodb://localhost:27017/watchdeck',
     defaultValue: 'mongodb://localhost:27017/watchdeck',
@@ -107,11 +120,10 @@ export async function runInit(options: InitOptions): Promise<void> {
         return 'URI must start with mongodb:// or mongodb+srv://'
       }
     },
-  })
-  if (p.isCancel(dbUri)) { p.cancel('Setup cancelled.'); process.exit(0) }
+  }))
 
   // Step 3 — DB name
-  const dbName = await p.text({
+  const dbName = requireValue(await p.text({
     message: 'Database name',
     placeholder: 'watchdeck',
     defaultValue: 'watchdeck',
@@ -119,11 +131,10 @@ export async function runInit(options: InitOptions): Promise<void> {
       if (!value) return // empty = accept default
       if (!value.trim()) return 'Database name cannot be empty'
     },
-  })
-  if (p.isCancel(dbName)) { p.cancel('Setup cancelled.'); process.exit(0) }
+  }))
 
   // Step 4 — Collection prefix
-  const dbPrefix = await p.text({
+  const dbPrefix = requireValue(await p.text({
     message: 'Collection prefix',
     placeholder: 'mx_',
     defaultValue: 'mx_',
@@ -133,38 +144,35 @@ export async function runInit(options: InitOptions): Promise<void> {
         return 'Prefix must be lowercase letters/numbers, ending with underscore (e.g. mx_)'
       }
     },
-  })
-  if (p.isCancel(dbPrefix)) { p.cancel('Setup cancelled.'); process.exit(0) }
+  }))
 
   // Step 5 — Dashboard mode
-  const dashboardMode = await p.select({
+  const dashboardMode = requireValue(await p.select({
     message: 'Dashboard mode',
     options: [
       { value: 'standalone', label: 'Standalone', hint: 'WatchDeck serves the dashboard itself' },
       { value: 'mounted', label: 'Mounted', hint: 'Import the React component into your own app' },
     ],
-  })
-  if (p.isCancel(dashboardMode)) { p.cancel('Setup cancelled.'); process.exit(0) }
+  }))
 
   // Step 6 — Notification channels
-  const channels = await p.multiselect({
+  const channels = requireValue(await p.multiselect({
     message: 'Which notification channels do you want to enable? (Space to select, Enter to confirm)',
     options: [
       { value: 'discord', label: 'Discord' },
       { value: 'slack', label: 'Slack' },
     ],
     required: false,
-  })
-  if (p.isCancel(channels)) { p.cancel('Setup cancelled.'); process.exit(0) }
+  }))
 
   writeFiles({
-    port: port as string,
-    dbUri: dbUri as string,
-    dbName: dbName as string,
-    dbPrefix: dbPrefix as string,
-    dashboardMode: dashboardMode as string,
-    discord: (channels as string[]).includes('discord') ? 'true' : 'false',
-    slack: (channels as string[]).includes('slack') ? 'true' : 'false',
+    port,
+    dbUri,
+    dbName,
+    dbPrefix,
+    dashboardMode,
+    discord: channels.includes('discord') ? 'true' : 'false',
+    slack: channels.includes('slack') ? 'true' : 'false',
     encryptionKey: generateEncryptionKey(),
   })
 
