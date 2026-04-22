@@ -7,7 +7,6 @@
 import { useEffect } from 'react'
 import { useSSE } from '../../hooks/useSSE.js'
 import { toastPresets } from './presets.js'
-import { toast } from './toast.js'
 
 interface NotificationFailedEvent {
   channelId: string
@@ -110,7 +109,6 @@ export function ToastBridge() {
     return () => {
       for (const off of offs) off()
       // Don't clear; user-initiated toasts may be present.
-      void toast
     }
   }, [subscribe])
 
