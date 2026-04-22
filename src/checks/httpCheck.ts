@@ -86,9 +86,16 @@ export async function runHttpCheck(params: {
     const client = new Client(parsed.origin, {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       connect(opts: any, callback: (err: Error | null, socket: any) => void) {
-        // undici passes port as '' when the URL uses the default port — fall back to 443.
+        // undici passes port as '' when the URL uses the default port — fall back to 443
+        // only when the value is unparseable (NaN), not merely falsy (port 0 is valid).
         const rawPort = (opts as { port: number | string }).port
-        const port = typeof rawPort === 'number' ? rawPort : (parseInt(String(rawPort), 10) || 443)
+        let port: number
+        if (typeof rawPort === 'number') {
+          port = rawPort
+        } else {
+          const parsed = parseInt(String(rawPort), 10)
+          port = Number.isNaN(parsed) ? 443 : parsed
+        }
         const tlsSocket = tls.connect({
           host: (opts as { hostname: string }).hostname,
           port,
@@ -97,6 +104,15 @@ export async function runHttpCheck(params: {
           // Capture cert regardless of chain validity — sslEval can decide.
           rejectUnauthorized: false,
         })
+        // Guard the callback against the secureConnect/error race where both
+        // could fire for the same socket (e.g. handshake error after partial
+        // establishment). Without this, undici's consumer sees two results.
+        let called = false
+        const once = (err: Error | null, sock: typeof tlsSocket | null) => {
+          if (called) return
+          called = true
+          callback(err, sock)
+        }
         tlsSocket.once('secureConnect', () => {
           const cert = tlsSocket.getPeerCertificate()
           if (cert?.valid_to) {
@@ -109,9 +125,9 @@ export async function runHttpCheck(params: {
             const cn = typeof cert.issuer.CN === 'string' ? cert.issuer.CN : undefined
             if (o || cn) sslIssuer = { ...(o ? { o } : {}), ...(cn ? { cn } : {}) }
           }
-          callback(null, tlsSocket)
+          once(null, tlsSocket)
         })
-        tlsSocket.once('error', (err: Error) => { callback(err, null) })
+        tlsSocket.once('error', (err: Error) => { once(err, null) })
       },
     })
 

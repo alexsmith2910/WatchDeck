@@ -62,8 +62,10 @@ async function runHttpEndpointCheck(
     latencyThreshold: endpoint.latencyThreshold,
   })
 
-  // If the check is down, there's no meaningful response time — report 0.
-  const responseTime = eval_.status === 'down' ? 0 : result.responseTime
+  // Preserve the measured duration even when the check is down — a long
+  // responseTime on a down result is evidence of a timeout or slow failure,
+  // and zeroing it destroys diagnostic signal.
+  const responseTime = result.responseTime
 
   eventBus.emit('check:complete', {
     timestamp,
@@ -96,8 +98,10 @@ async function runPortEndpointCheck(endpoint: EndpointDoc, timestamp: Date): Pro
     portOpen: result.portOpen,
   })
 
-  // If the check is down, there's no meaningful response time — report 0.
-  const responseTime = eval_.status === 'down' ? 0 : result.responseTime
+  // Preserve the measured duration even when the check is down — a long
+  // responseTime on a down result is evidence of a timeout or slow failure,
+  // and zeroing it destroys diagnostic signal.
+  const responseTime = result.responseTime
 
   eventBus.emit('check:complete', {
     timestamp,

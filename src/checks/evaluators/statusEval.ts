@@ -27,8 +27,10 @@ export interface StatusEvalResult {
 }
 
 export function evaluateStatus(input: StatusEvalInput): StatusEvalResult {
-  // Rule 1: no response at all
-  if (input.errorMessage !== null && input.statusCode === null && input.portOpen === undefined) {
+  // Rule 1: HTTP with no response at all (network error before any status).
+  // Port checks have their own refused/timeout branch below, so gate on type
+  // explicitly rather than inferring it from `portOpen === undefined`.
+  if (input.type === 'http' && input.errorMessage !== null && input.statusCode === null) {
     return { status: 'down', statusReason: input.errorMessage }
   }
 
