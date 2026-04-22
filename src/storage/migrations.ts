@@ -272,7 +272,7 @@ export async function runMigrations(
   prefix: string,
   detailedRetentionDays: number,
   notificationLogRetentionDays: number,
-): Promise<void> {
+): Promise<{ collectionCount: number }> {
   const collections = buildCollections(
     prefix,
     detailedRetentionDays,
@@ -283,4 +283,6 @@ export async function runMigrations(
     await ensureCollection(db, col.name)
     await ensureIndexes(db, col.name, col.indexes)
   }
+
+  return { collectionCount: collections.length }
 }

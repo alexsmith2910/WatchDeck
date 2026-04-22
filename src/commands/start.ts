@@ -272,10 +272,10 @@ export async function runStart(options: StartOptions): Promise<void> {
   const migSpinner = spinner('Running migrations...', silent).start()
 
   try {
-    await adapter.migrate()
+    const migrateResult = await adapter.migrate()
     migSpinner.succeed(chalk.bold('Migrations complete'))
     if (!silent && verbose) {
-      subItem('11 collections ensured')
+      subItem(`${migrateResult.collectionCount} collections ensured`)
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

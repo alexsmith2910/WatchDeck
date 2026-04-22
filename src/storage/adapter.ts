@@ -36,6 +36,8 @@ export interface NotificationLogFilter {
   to?: Date
   /** Substring match on messageSummary. */
   search?: string
+  /** Return rows that are retries of the given log id — oldest first by sentAt. */
+  retryOf?: string
 }
 
 export interface NotificationStatsWindow {
@@ -115,7 +117,7 @@ export abstract class StorageAdapter {
    * Creates missing collections and indexes; never drops or alters existing data.
    * Should be called once after a successful connect().
    */
-  abstract migrate(): Promise<void>
+  abstract migrate(): Promise<{ collectionCount: number }>
 
   // ---------------------------------------------------------------------------
   // Buffer pipeline
@@ -319,6 +321,14 @@ export abstract class StorageAdapter {
   abstract writeNotificationLog(
     row: Omit<NotificationLogDoc, '_id' | 'createdAt'>,
   ): Promise<NotificationLogDoc>
+
+  /**
+   * Clear the sensitive capture fields (payload / request / response) on log
+   * rows older than `before`. Outcome metadata (status, latency, reason) is
+   * preserved so the history remains auditable until the TTL deletes the row.
+   * Returns the number of rows modified.
+   */
+  abstract redactOldNotificationLogs(before: Date): Promise<number>
 
   /** Aggregate stats for the given window — KPI cards and health probe. */
   abstract countNotificationStats(window: NotificationStatsWindow): Promise<NotificationStats>
