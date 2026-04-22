@@ -290,7 +290,7 @@ function MonitoringPanel({
 }) {
   const { request } = useApi();
   const [checkInterval, setCheckInterval] = useState(endpoint.checkInterval);
-  const [timeout, setTimeout] = useState(endpoint.timeout);
+  const [timeoutMs, setTimeoutMs] = useState(endpoint.timeout);
   const [latencyThreshold, setLatencyThreshold] = useState(
     endpoint.latencyThreshold,
   );
@@ -316,7 +316,7 @@ function MonitoringPanel({
   const dirty = useMemo(() => {
     return (
       checkInterval !== endpoint.checkInterval ||
-      timeout !== endpoint.timeout ||
+      timeoutMs !== endpoint.timeout ||
       latencyThreshold !== endpoint.latencyThreshold ||
       sslWarningDays !== endpoint.sslWarningDays ||
       failureThreshold !== endpoint.failureThreshold ||
@@ -329,7 +329,7 @@ function MonitoringPanel({
     );
   }, [
     checkInterval,
-    timeout,
+    timeoutMs,
     latencyThreshold,
     sslWarningDays,
     failureThreshold,
@@ -346,7 +346,7 @@ function MonitoringPanel({
     setError(null);
     const body = {
       checkInterval,
-      timeout,
+      timeout: timeoutMs,
       latencyThreshold,
       sslWarningDays,
       failureThreshold,
@@ -374,7 +374,7 @@ function MonitoringPanel({
     }
   }, [
     checkInterval,
-    timeout,
+    timeoutMs,
     latencyThreshold,
     sslWarningDays,
     failureThreshold,
@@ -416,8 +416,8 @@ function MonitoringPanel({
           <input
             type="number"
             min={1}
-            value={timeout}
-            onChange={(e) => setTimeout(Number(e.target.value))}
+            value={timeoutMs}
+            onChange={(e) => setTimeoutMs(Number(e.target.value))}
             className={inputClass}
           />
         </Field>
