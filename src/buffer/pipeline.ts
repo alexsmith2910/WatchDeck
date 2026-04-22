@@ -100,8 +100,13 @@ export class BufferPipeline {
       sslDaysRemaining: null,
     }
     if (this.memBuffer.push(sentinel)) {
-      // Remove it immediately — we only wanted the push/pop timing.
-      this.memBuffer.flush().filter((x) => x.errorMessage !== '__watchdeck_synthetic_probe__')
+      // flush() empties the buffer atomically, so we must filter the sentinel
+      // out and re-push the real items to preserve accumulated backlog.
+      const drained = this.memBuffer.flush()
+      for (const item of drained) {
+        if (item.errorMessage === '__watchdeck_synthetic_probe__') continue
+        this.memBuffer.push(item)
+      }
     }
     return performance.now() - start
   }

@@ -1,4 +1,4 @@
-import { appendFile, readFile, writeFile, access, mkdir } from 'node:fs/promises'
+import { appendFile, readFile, writeFile, access, mkdir, rename } from 'node:fs/promises'
 import path from 'node:path'
 import { eventBus } from '../core/eventBus.js'
 
@@ -63,16 +63,23 @@ export class DiskBuffer {
   /**
    * Remove the first count lines from the buffer file.
    * Used after a successful replay batch to acknowledge written records.
+   *
+   * Writes to a `.tmp` sibling and atomically renames on success so a crash
+   * mid-write cannot leave the buffer in a half-truncated state, and any
+   * concurrent append that lands between our read and write is overwritten
+   * only via rename — the tmp file is always consistent.
    */
   async truncateBatch(count: number): Promise<void> {
     const lines = await this.readLines()
     const remaining = lines.slice(count)
     await this.ensureDir()
+    const tmpPath = `${this.filePath}.tmp`
     await writeFile(
-      this.filePath,
+      tmpPath,
       remaining.length > 0 ? remaining.join('\n') + '\n' : '',
       'utf8',
     )
+    await rename(tmpPath, this.filePath)
   }
 
   async isEmpty(): Promise<boolean> {
