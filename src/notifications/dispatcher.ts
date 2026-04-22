@@ -37,6 +37,7 @@ import { ChannelRegistry } from './channelRegistry.js'
 import { CoalescingBuffer, type FlushPayload } from './coalescing.js'
 import { CooldownTracker, DedupTracker } from './cooldown.js'
 import { EscalationScheduler } from './escalation.js'
+import { payloadSnapshot } from './formatter.js'
 import { notificationMetrics } from './metrics.js'
 import { MuteTracker } from './mutes.js'
 import { RateLimiter } from './rateLimit.js'
@@ -49,6 +50,8 @@ import {
 import type {
   DispatchSuppression,
   NotificationMessage,
+  ProviderRequestCapture,
+  ProviderResponseCapture,
   ProviderResult,
   ResolvedDispatch,
 } from './types.js'
@@ -194,6 +197,14 @@ export class NotificationDispatcher {
         (payload) => this.handleIncidentResolved(payload.incidentId, payload.durationSeconds),
         'standard',
       ),
+      // Buckets are lazily created on first tryConsume and otherwise never
+      // evicted — drop them when a channel is deleted so the map can't grow
+      // unbounded across a long-lived process.
+      eventBus.subscribe(
+        'notification:channelDeleted',
+        ({ channelId }) => this.rateLimiter.remove(channelId),
+        'standard',
+      ),
     )
     this.started = true
   }
@@ -244,6 +255,8 @@ export class NotificationDispatcher {
       status: result.status === 'sent' ? 'sent' : 'failed',
       latencyMs: result.latencyMs,
       failureReason: result.failureReason,
+      request: result.request,
+      response: result.response,
     })
     const ok = result.status === 'sent'
     await this.recordChannelDeliveryOutcome(channel, ok)
@@ -330,6 +343,8 @@ export class NotificationDispatcher {
       latencyMs: result.latencyMs,
       failureReason: result.failureReason,
       retryOf: retryOfLogId,
+      request: result.request,
+      response: result.response,
     })
     await this.recordChannelDeliveryOutcome(channel, result.status === 'sent')
     if (result.status === 'sent') {
@@ -368,24 +383,36 @@ export class NotificationDispatcher {
   // ---------------------------------------------------------------------------
 
   private async handleIncidentOpened(incident: IncidentDoc): Promise<void> {
-    if (!this.config.defaults.notifications.enabled) return
     const endpoint = await this.adapter
       .getEndpointById(incident.endpointId.toHexString())
       .catch(() => null)
     if (!endpoint) return
     const message = buildIncidentOpenedMessage(endpoint, incident, { baseUrl: this.baseUrl })
+    if (!this.config.defaults.notifications.enabled) {
+      await this.recordGlobalSuppression(endpoint, message, 'module_disabled')
+      return
+    }
     await this.fanOut(endpoint, message, incident)
   }
 
   private async handleIncidentResolved(incidentId: string, durationSeconds: number): Promise<void> {
-    if (!this.config.defaults.notifications.enabled) return
     const incident = await this.adapter.getIncidentById(incidentId).catch(() => null)
     if (!incident) return
     const endpoint = await this.adapter
       .getEndpointById(incident.endpointId.toHexString())
       .catch(() => null)
     if (!endpoint) return
-    if (!endpoint.recoveryAlert) return
+    const message = buildIncidentResolvedMessage(endpoint, incident, durationSeconds, {
+      baseUrl: this.baseUrl,
+    })
+    if (!this.config.defaults.notifications.enabled) {
+      await this.recordGlobalSuppression(endpoint, message, 'module_disabled')
+      return
+    }
+    if (!endpoint.recoveryAlert) {
+      await this.recordGlobalSuppression(endpoint, message, 'recovery_disabled')
+      return
+    }
 
     // Resolved alerts clear the per-incident dedup & cooldown state so the
     // next outage can re-alert immediately.
@@ -400,9 +427,6 @@ export class NotificationDispatcher {
     const channelsWithDeliveredOpen = await this.findChannelsThatGotOpen(incidentId)
     if (channelsWithDeliveredOpen.size === 0) return
 
-    const message = buildIncidentResolvedMessage(endpoint, incident, durationSeconds, {
-      baseUrl: this.baseUrl,
-    })
     await this.fanOutResolved(endpoint, incident, message, channelsWithDeliveredOpen)
   }
 
@@ -471,6 +495,17 @@ export class NotificationDispatcher {
     if (!incident || incident.status !== 'active') return
     const endpoint = await this.adapter.getEndpointById(req.endpointId).catch(() => null)
     if (!endpoint) return
+    // Per-endpoint pause applies to escalation the same way it applies to
+    // the main fan-out — the user's toggle should silence every dispatch to
+    // that channel from this endpoint, regardless of which path triggered it.
+    for (const raw of endpoint.pausedNotificationChannelIds ?? []) {
+      const id = typeof raw === 'string'
+        ? raw
+        : typeof (raw as { toHexString?: unknown }).toHexString === 'function'
+          ? (raw as ObjectId).toHexString()
+          : null
+      if (id === req.channelId) return
+    }
     const channel = this.channels.getChannel(req.channelId)
     if (!channel) return
     const message = buildEscalationMessage(endpoint, incident, { baseUrl: this.baseUrl })
@@ -508,7 +543,20 @@ export class NotificationDispatcher {
         channelIds.push((raw as ObjectId).toHexString())
       }
     }
+    // Per-endpoint pause: skip channels the user has toggled off for this
+    // endpoint specifically. The channel itself is untouched and still fires
+    // for any other endpoint routing to it.
+    const pausedIds = new Set<string>()
+    for (const raw of endpoint.pausedNotificationChannelIds ?? []) {
+      if (raw == null) continue
+      if (typeof raw === 'string') {
+        pausedIds.add(raw)
+      } else if (typeof (raw as { toHexString?: unknown }).toHexString === 'function') {
+        pausedIds.add((raw as ObjectId).toHexString())
+      }
+    }
     for (const channelId of channelIds) {
+      if (pausedIds.has(channelId)) continue
       const channel = this.channels.getChannel(channelId)
       if (!channel) continue
       await this.dispatchToChannel(
@@ -693,6 +741,8 @@ export class NotificationDispatcher {
         status: 'sent',
         latencyMs: result.latencyMs,
         retryOf: dispatch.retryOfLogId,
+        request: result.request,
+        response: result.response,
       })
       await this.recordChannelDeliveryOutcome(channel, true)
       const endpointId = message.endpoint?.id
@@ -729,6 +779,8 @@ export class NotificationDispatcher {
         latencyMs: result.latencyMs,
         failureReason: result.failureReason ?? 'Provider skipped',
         retryOf: dispatch.retryOfLogId,
+        request: result.request,
+        response: result.response,
       })
       notificationMetrics.recordFailed({ kind: message.kind, channelId: dispatch.channelId })
       return
@@ -741,6 +793,8 @@ export class NotificationDispatcher {
       latencyMs: result.latencyMs,
       failureReason: result.failureReason,
       retryOf: dispatch.retryOfLogId,
+      request: result.request,
+      response: result.response,
     })
     await this.recordChannelDeliveryOutcome(channel, false)
     notificationMetrics.recordFailed({ kind: message.kind, channelId: dispatch.channelId })
@@ -845,6 +899,8 @@ export class NotificationDispatcher {
       failureReason: result.failureReason,
       coalescedCount: count,
       coalescedIncidentIds: incidentIds,
+      request: result.request,
+      response: result.response,
     })
     await this.recordChannelDeliveryOutcome(channel, result.status === 'sent')
     if (result.status === 'sent') {
@@ -866,6 +922,41 @@ export class NotificationDispatcher {
   // ---------------------------------------------------------------------------
   // Log writes
   // ---------------------------------------------------------------------------
+
+  /**
+   * Write one suppressed row per channel the endpoint would have notified,
+   * for reasons that apply before channel-level gates run (module disabled,
+   * recovery alerts disabled). Without this, the audit log has no record of
+   * *why* the user didn't get paged.
+   */
+  private async recordGlobalSuppression(
+    endpoint: EndpointDoc,
+    message: NotificationMessage,
+    reason: NotificationSuppressedReason,
+  ): Promise<void> {
+    const channelIds: string[] = []
+    for (const raw of endpoint.notificationChannelIds ?? []) {
+      if (raw == null) continue
+      if (typeof raw === 'string') channelIds.push(raw)
+      else if (typeof (raw as { toHexString?: unknown }).toHexString === 'function') {
+        channelIds.push((raw as ObjectId).toHexString())
+      }
+    }
+    for (const channelId of channelIds) {
+      const channel = this.channels.getChannel(channelId)
+      if (!channel) continue
+      await this.recordSuppressed(
+        {
+          channelId,
+          channel,
+          message,
+          cooldownSeconds: endpoint.alertCooldown,
+          retryAttempt: 0,
+        },
+        { reason },
+      )
+    }
+  }
 
   private async recordSuppressed(
     dispatch: ResolvedDispatch,
@@ -933,8 +1024,14 @@ export class NotificationDispatcher {
     retryOf?: string
     coalescedCount?: number
     coalescedIncidentIds?: string[]
+    request?: ProviderRequestCapture
+    response?: ProviderResponseCapture
   }): Promise<NotificationLogDoc | null> {
     try {
+      // Only capture payload for rows that actually represent a dispatch.
+      // Suppressed rows are `shown` in the UI as "why we didn't send" — the
+      // raw payload would be misleading since nothing went over the wire.
+      const payload = row.status === 'suppressed' ? undefined : payloadSnapshot(row.message)
       return await this.adapter.writeNotificationLog({
         endpointId: row.message.endpoint ? new ObjectId(row.message.endpoint.id) : undefined,
         incidentId: row.message.incident ? new ObjectId(row.message.incident.id) : undefined,
@@ -953,6 +1050,9 @@ export class NotificationDispatcher {
         retryOf: row.retryOf ? new ObjectId(row.retryOf) : undefined,
         coalescedCount: row.coalescedCount,
         coalescedIncidentIds: row.coalescedIncidentIds?.map((id) => new ObjectId(id)),
+        payload,
+        request: row.request,
+        response: row.response,
         sentAt: new Date(),
       })
     } catch (err) {

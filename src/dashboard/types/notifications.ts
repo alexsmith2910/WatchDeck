@@ -25,6 +25,7 @@ export type SuppressedReason =
   | 'event_filter'
   | 'rate_limit'
   | 'module_disabled'
+  | 'recovery_disabled'
   | 'coalesced'
   | 'muted'
   | 'channel_disabled'
@@ -81,6 +82,27 @@ export interface ApiChannel {
   updatedAt: string
 }
 
+export interface ApiNotificationLogPayload {
+  title: string
+  summary: string
+  markdown?: string
+  fields?: Array<{ label: string; value: string }>
+}
+
+export interface ApiNotificationLogRequest {
+  method: string
+  url: string
+  headers: Record<string, string>
+  body?: string
+}
+
+export interface ApiNotificationLogResponse {
+  statusCode?: number
+  bodyExcerpt?: string
+  providerId?: string
+  url?: string
+}
+
 export interface ApiNotificationLogRow {
   _id: string
   endpointId?: string
@@ -100,6 +122,12 @@ export interface ApiNotificationLogRow {
   coalescedIntoLogId?: string
   coalescedCount?: number
   coalescedIncidentIds?: string[]
+  /** Snapshot of the channel-agnostic message the provider rendered. */
+  payload?: ApiNotificationLogPayload
+  /** Outbound HTTP request made by the provider, with secrets redacted. */
+  request?: ApiNotificationLogRequest
+  /** Provider response (status, body excerpt, provider-assigned id). */
+  response?: ApiNotificationLogResponse
   sentAt: string
   createdAt: string
 }

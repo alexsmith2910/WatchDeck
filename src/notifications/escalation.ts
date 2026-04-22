@@ -128,6 +128,26 @@ export class EscalationScheduler {
           /* swallow — dispatcher surfaces its own errors */
         })
       }, 'standard'),
+      // Cancel any pending escalation targeting a channel that has just been
+      // deleted — otherwise the timer fires into nothing and the dispatcher
+      // logs a "channel not found" failure for a channel the user removed.
+      eventBus.subscribe('notification:channelDeleted', ({ channelId }) => {
+        for (const [incidentId, p] of this.pending) {
+          if (p.req.channelId === channelId) this.cancel(incidentId, 'channel_gone')
+        }
+      }, 'standard'),
+      // Mutes should silence escalation alongside the main fan-out — a global
+      // mute with pending escalations in flight would otherwise still page the
+      // user through the escalation timer.
+      eventBus.subscribe('notification:muted', ({ scope, targetId }) => {
+        for (const [incidentId, p] of this.pending) {
+          const matches =
+            scope === 'global' ||
+            (scope === 'channel' && targetId === p.req.channelId) ||
+            (scope === 'endpoint' && targetId === p.req.endpointId)
+          if (matches) this.cancel(incidentId, 'muted')
+        }
+      }, 'standard'),
     )
   }
 

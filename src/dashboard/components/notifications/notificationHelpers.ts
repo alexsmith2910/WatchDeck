@@ -303,6 +303,7 @@ export const SUPPRESSION_COLORS: Record<string, string> = {
   maintenance:      '#22d3ee',
   event_filter:     '#34d399',
   module_disabled:  'var(--wd-muted)',
+  recovery_disabled:'var(--wd-muted)',
 }
 
 export function colorForReason(reason: string): string {

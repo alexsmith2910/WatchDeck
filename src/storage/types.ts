@@ -112,6 +112,13 @@ export interface EndpointDoc {
   escalationDelay: number
   escalationChannelId?: ObjectId
   notificationChannelIds: ObjectId[]
+  /**
+   * Subset of `notificationChannelIds` that this endpoint is temporarily not
+   * dispatching to. The channel doc itself remains enabled and still serves
+   * other endpoints — this is a per-endpoint pause, not a channel-wide mute.
+   * Dispatcher skips these in fan-out; they're still listed in the Routes UI.
+   */
+  pausedNotificationChannelIds?: ObjectId[]
   maintenanceWindows: MaintenanceWindow[]
 
   // Runtime state
@@ -352,6 +359,7 @@ export type NotificationSuppressedReason =
   | 'event_filter'
   | 'rate_limit'
   | 'module_disabled'
+  | 'recovery_disabled'
   | 'coalesced'
   | 'muted'
   | 'channel_disabled'
@@ -393,8 +401,50 @@ export interface NotificationLogDoc {
   /** Incident ids represented by a coalescing-parent summary row. */
   coalescedIncidentIds?: ObjectId[]
 
+  /**
+   * Rendered NotificationMessage slice the provider was asked to format.
+   * Captured at dispatch time so the UI can show what *was* sent even after
+   * later template changes. Nulled out by the 30d retention sweep.
+   */
+  payload?: NotificationLogPayload
+  /**
+   * Outbound HTTP request the provider made. Secrets redacted at write time
+   * via `src/notifications/redact.ts`. Nulled out by the 30d retention sweep.
+   */
+  request?: NotificationLogRequest
+  /** Provider response captured at dispatch time. Nulled out by the 30d retention sweep. */
+  response?: NotificationLogResponse
+
   sentAt: Date
   createdAt: Date
+}
+
+export interface NotificationLogPayload {
+  title: string
+  summary: string
+  /** Optional markdown/plaintext blob (truncated to ~1KB). */
+  markdown?: string
+  fields?: Array<{ label: string; value: string }>
+}
+
+export interface NotificationLogRequest {
+  method: string
+  /** URL with any embedded credentials replaced by `***`. */
+  url: string
+  /** Header map with sensitive values replaced by `***`. */
+  headers: Record<string, string>
+  /** Request body (truncated to ~4KB). */
+  body?: string
+}
+
+export interface NotificationLogResponse {
+  statusCode?: number
+  /** Response body sample (truncated to ~2KB). */
+  bodyExcerpt?: string
+  /** Provider-assigned id (Discord message id, Slack ts, …). */
+  providerId?: string
+  /** URL the response came from — useful when the provider follows redirects. */
+  url?: string
 }
 
 // ---------------------------------------------------------------------------
