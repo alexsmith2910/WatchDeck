@@ -52,6 +52,10 @@ interface ProbeEntry {
   fn: ProbeFn
   cadenceMs: number
   timer: ReturnType<typeof setInterval> | null
+  /** Timeout that schedules the probe's first run; must be tracked separately
+   * from `timer` so stop()/unregister() can cancel a probe that hasn't had
+   * its setInterval armed yet. */
+  initialTimer: ReturnType<typeof setTimeout> | null
   lastResult: ProbeResult | null
   inFlight: boolean
   history: ProbeHistoryEntry[]
@@ -68,12 +72,13 @@ export class ProbeRegistry {
    */
   register(id: string, fn: ProbeFn, cadenceMs: number): void {
     const existing = this.probes.get(id)
-    if (existing?.timer) clearInterval(existing.timer)
+    if (existing) this.clearTimers(existing)
     this.probes.set(id, {
       id,
       fn,
       cadenceMs,
       timer: null,
+      initialTimer: null,
       lastResult: null,
       inFlight: false,
       history: [],
@@ -86,7 +91,7 @@ export class ProbeRegistry {
   unregister(id: string): void {
     const entry = this.probes.get(id)
     if (!entry) return
-    if (entry.timer) clearInterval(entry.timer)
+    this.clearTimers(entry)
     this.probes.delete(id)
   }
 
@@ -106,10 +111,18 @@ export class ProbeRegistry {
   stop(): void {
     this.started = false
     for (const entry of this.probes.values()) {
-      if (entry.timer) {
-        clearInterval(entry.timer)
-        entry.timer = null
-      }
+      this.clearTimers(entry)
+    }
+  }
+
+  private clearTimers(entry: ProbeEntry): void {
+    if (entry.initialTimer) {
+      clearTimeout(entry.initialTimer)
+      entry.initialTimer = null
+    }
+    if (entry.timer) {
+      clearInterval(entry.timer)
+      entry.timer = null
     }
   }
 
@@ -181,7 +194,7 @@ export class ProbeRegistry {
   private scheduleProbe(id: string): void {
     const entry = this.probes.get(id)
     if (!entry) return
-    if (entry.timer) clearInterval(entry.timer)
+    this.clearTimers(entry)
 
     // Passive probes (cadenceMs === 0) still get a first run + slow refresh so
     // the snapshot never serves a placeholder `standby` for an otherwise-fine
@@ -191,7 +204,8 @@ export class ProbeRegistry {
     // Kick off the first run soon but not at exactly t=0 to avoid a stampede
     // across all subsystems immediately at boot.
     const initialDelay = Math.min(refreshMs, 250)
-    setTimeout(() => {
+    entry.initialTimer = setTimeout(() => {
+      entry.initialTimer = null
       if (!this.started) return
       void this.executeProbe(entry)
       entry.timer = setInterval(() => { void this.executeProbe(entry) }, refreshMs)
