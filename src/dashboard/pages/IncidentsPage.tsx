@@ -126,20 +126,22 @@ export default function IncidentsPage() {
   // ---- Fetch endpoints once ----
   useEffect(() => {
     let cancelled = false
-    request<{ data: ApiEndpoint[]; pagination: ApiPagination }>('/endpoints?limit=200').then(
-      (res) => {
+    request<{ data: ApiEndpoint[]; pagination: ApiPagination }>('/endpoints?limit=200')
+      .then((res) => {
         if (!cancelled) setEndpoints(res.data.data ?? [])
-      },
-    )
+      })
+      .catch(() => { /* transient — next mount will retry */ })
     return () => { cancelled = true }
   }, [request])
 
   // ---- Fetch notification channels once ----
   useEffect(() => {
     let cancelled = false
-    request<{ data: ApiChannel[] }>('/notifications/channels').then((res) => {
-      if (!cancelled) setChannels(res.data.data ?? [])
-    })
+    request<{ data: ApiChannel[] }>('/notifications/channels')
+      .then((res) => {
+        if (!cancelled) setChannels(res.data.data ?? [])
+      })
+      .catch(() => { /* transient — next mount will retry */ })
     return () => { cancelled = true }
   }, [request])
 
@@ -200,14 +202,16 @@ export default function IncidentsPage() {
         }
         return [inc._id, sparkline] as const
       }),
-    ).then((entries) => {
-      if (cancelled) return
-      setSparklineByIncidentId((prev) => {
-        const next = new Map(prev)
-        for (const [id, sl] of entries) next.set(id, sl)
-        return next
+    )
+      .then((entries) => {
+        if (cancelled) return
+        setSparklineByIncidentId((prev) => {
+          const next = new Map(prev)
+          for (const [id, sl] of entries) next.set(id, sl)
+          return next
+        })
       })
-    })
+      .catch(() => { /* sparklines are non-critical */ })
     return () => { cancelled = true }
   }, [activeIncidents, historyIncidents, request])
 
@@ -254,14 +258,18 @@ export default function IncidentsPage() {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    Promise.all([fetchActive(), fetchHistory()]).then(([, page]) => {
-      if (cancelled) return
-      setHistoryIncidents(page.items)
-      setHasMore(page.pagination?.hasMore ?? false)
-      setNextCursor(page.pagination?.nextCursor ?? null)
-      setLastUpdatedAt(Date.now())
-      setLoading(false)
-    })
+    Promise.all([fetchActive(), fetchHistory()])
+      .then(([, page]) => {
+        if (cancelled) return
+        setHistoryIncidents(page.items)
+        setHasMore(page.pagination?.hasMore ?? false)
+        setNextCursor(page.pagination?.nextCursor ?? null)
+        setLastUpdatedAt(Date.now())
+        setLoading(false)
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false)
+      })
     return () => { cancelled = true }
   }, [fetchActive, fetchHistory])
 

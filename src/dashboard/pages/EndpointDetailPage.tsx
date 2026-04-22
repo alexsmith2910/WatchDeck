@@ -199,14 +199,16 @@ export default function EndpointDetailPage() {
         };
         return [inc._id, sparkline] as const;
       }),
-    ).then((entries) => {
-      if (cancelled) return;
-      setSparklineByIncidentId((prev) => {
-        const next = new Map(prev);
-        for (const [id, sl] of entries) next.set(id, sl);
-        return next;
-      });
-    });
+    )
+      .then((entries) => {
+        if (cancelled) return;
+        setSparklineByIncidentId((prev) => {
+          const next = new Map(prev);
+          for (const [id, sl] of entries) next.set(id, sl);
+          return next;
+        });
+      })
+      .catch(() => { /* sparklines are non-critical */ });
     return () => {
       cancelled = true;
     };
@@ -248,7 +250,7 @@ export default function EndpointDetailPage() {
       setLastHourChecks((prev) => {
         const cutoff = Date.now() - 60 * 60_000;
         const next: ApiCheck = {
-          _id: `live-${Date.now()}`,
+          _id: `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           endpointId: payload.endpointId,
           timestamp: payload.timestamp,
           responseTime: payload.responseTime,
