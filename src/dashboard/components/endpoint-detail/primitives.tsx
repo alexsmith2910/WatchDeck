@@ -16,8 +16,8 @@ import {
   cn,
 } from "@heroui/react";
 import type { Selection } from "@heroui/react";
-import type { DateValue, RangeValue } from "react-aria-components";
-import { getLocalTimeZone, today } from "@internationalized/date";
+import type { DateValue, RangeValue, TimeValue } from "react-aria-components";
+import { getLocalTimeZone, Time, today } from "@internationalized/date";
 import { Icon } from "@iconify/react";
 
 // ---------------------------------------------------------------------------
@@ -374,8 +374,18 @@ export function DateRangeFilter({
             </RangeCalendar.Grid>
           </RangeCalendar>
           <div className="mt-3 pt-3 border-t border-wd-border/50 grid grid-cols-2 gap-2">
-            <TimeFieldSlot slot="start" label="Start" />
-            <TimeFieldSlot slot="end" label="End" />
+            <TimeFieldSlot
+              endpoint="start"
+              label="Start"
+              value={value}
+              onChange={handleChange}
+            />
+            <TimeFieldSlot
+              endpoint="end"
+              label="End"
+              value={value}
+              onChange={handleChange}
+            />
           </div>
         </DateRangePicker.Popover>
       </DateRangePicker>
@@ -397,25 +407,58 @@ export function DateRangeFilter({
   );
 }
 
-// HeroUI's TimeField picks up its bound time via react-aria's slot system when
-// it's a descendant of DateRangePicker. slot="start"/"end" edit only the time
-// portion of the corresponding endpoint, leaving the date parts alone.
+// React Aria's DateRangePicker only exposes DateField slots, not TimeField
+// slots, so a bare `<TimeField slot="start" />` renders but never writes back
+// to the picker. We wire each TimeField explicitly: pull the time portion out
+// of value.start / value.end, and on change merge it back into the matching
+// endpoint via CalendarDateTime.set().
 function TimeFieldSlot({
-  slot,
+  endpoint,
   label,
+  value,
+  onChange,
 }: {
-  slot: "start" | "end";
+  endpoint: "start" | "end";
   label: string;
+  value: RangeValue<DateValue> | null;
+  onChange: (next: RangeValue<DateValue> | null) => void;
 }) {
+  const node = value ? value[endpoint] : null;
+  const timeValue: TimeValue | null =
+    node && hasTimeSegments(node)
+      ? new Time(node.hour, node.minute, node.second)
+      : null;
+  const isDisabled = !value || !node || !hasTimeSegments(node);
+  const handleTimeChange = (next: TimeValue | null) => {
+    if (!value || !next) return;
+    const target = value[endpoint];
+    if (!hasTimeSegments(target)) return;
+    const updated = (
+      target as unknown as {
+        set: (v: { hour: number; minute: number; second: number }) => DateValue;
+      }
+    ).set({
+      hour: next.hour,
+      minute: next.minute,
+      second: next.second,
+    });
+    onChange(
+      endpoint === "start"
+        ? { start: updated, end: value.end }
+        : { start: value.start, end: updated },
+    );
+  };
   return (
     <div className="flex flex-col gap-1">
       <span className="text-[10px] uppercase tracking-wider text-wd-muted font-semibold">
         {label}
       </span>
       <TimeField
-        slot={slot}
+        value={timeValue}
+        onChange={handleTimeChange}
         granularity="minute"
         hourCycle={12}
+        isDisabled={isDisabled}
         aria-label={`${label} time`}
       >
         <TimeField.Group
@@ -424,6 +467,7 @@ function TimeFieldSlot({
             "!rounded-md !border !border-wd-border/50 !bg-wd-surface-hover/40",
             "!text-[11.5px] !font-mono !text-foreground",
             "focus-within:!border-wd-primary/50",
+            isDisabled && "!opacity-60 !cursor-not-allowed",
           )}
         >
           <TimeField.Input className="!inline-flex !items-center !gap-[1px]">
