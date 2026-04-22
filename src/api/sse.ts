@@ -96,6 +96,7 @@ const SSE_EVENTS: (keyof EventMap)[] = [
   'db:disconnected',
   'db:reconnecting',
   'db:reconnected',
+  'db:error',
   'db:fatal',
   'probe:completed',
   'probe:degraded',
@@ -164,9 +165,10 @@ export function sseRoutes(ctx: AppContext) {
         sendHistory(reply, record)
       }
 
-      // Send initial connected event
+      // Framing-only handshake — not a bus event. The `_meta:` prefix signals
+      // to typed consumers that this does not correspond to an EventMap entry.
       reply.raw.write(
-        sseMessage('sse:connected', {
+        sseMessage('_meta:connected', {
           timestamp: new Date(),
           historyCount: history.length,
         }),
