@@ -446,7 +446,7 @@ function CheckDetail({
           <div className={KV_ROW}>
             <span className={KV_KEY}>Timestamp</span>
             <span className={KV_VAL}>
-              {new Date(check.timestamp).toLocaleString()}
+              {formatDateTime(check.timestamp)}
             </span>
           </div>
           <div className={KV_ROW}>

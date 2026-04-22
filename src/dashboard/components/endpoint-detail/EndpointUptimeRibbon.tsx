@@ -97,7 +97,6 @@ function EndpointUptimeRibbonBase({
                     {worst.date.toLocaleDateString(undefined, {
                       month: "short",
                       day: "numeric",
-                      timeZone: "UTC",
                     })}
                   </b>{" "}
                   at {worst.uptimePercent?.toFixed(2)}%

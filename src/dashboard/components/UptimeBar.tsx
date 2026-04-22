@@ -260,7 +260,6 @@ function UptimeTooltip({ hovered, rect }: { hovered: DailyBucket; rect: DOMRect 
               month: 'short',
               day: 'numeric',
               year: 'numeric',
-              timeZone: 'UTC',
             })}
           </span>
           <span className={statusTextColor[hovered.status]}>
