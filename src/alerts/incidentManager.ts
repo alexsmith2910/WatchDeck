@@ -132,7 +132,8 @@ export class IncidentManager {
   }): Promise<void> {
     const { endpointId, status, timestamp, responseTime, statusCode, errorMessage } = payload
     const hasActiveIncident = this.activeIncidents.has(endpointId)
-    const meta = this.ensureMeta(endpointId)
+    const meta = await this.ensureMeta(endpointId)
+    if (!meta) return
 
     if (status === 'healthy') {
       // Reset the failure streak regardless of incident state.
@@ -167,16 +168,31 @@ export class IncidentManager {
   }
 
   /**
-   * Get or lazily create the meta entry for an endpoint. Missing entries can
-   * happen if a check:complete fires before endpoint:created was observed —
-   * seed conservatively with the DB default threshold of 1 (fail-fast).
+   * Get or hydrate the meta entry for an endpoint. If the in-memory cache is
+   * cold (init race, endpoint re-enabled after an archive, etc.) we re-read
+   * from the DB so the gate always uses the endpoint's REAL failureThreshold —
+   * never a fail-fast default that would open an incident on a single failure.
+   * Returns null only if the endpoint no longer exists.
    */
-  private ensureMeta(endpointId: string): EndpointMeta {
-    let meta = this.endpointMeta.get(endpointId)
-    if (!meta) {
-      meta = { failureThreshold: 1, consecutiveFailures: 0 }
-      this.endpointMeta.set(endpointId, meta)
+  private async ensureMeta(endpointId: string): Promise<EndpointMeta | null> {
+    const cached = this.endpointMeta.get(endpointId)
+    if (cached) return cached
+
+    const ep = await this.adapter.getEndpointById(endpointId).catch(() => null)
+    if (!ep) {
+      eventBus.emit('system:warning', {
+        timestamp: new Date(),
+        module: 'incidentManager',
+        message: `ensureMeta: endpoint ${endpointId} not found — skipping incident gate`,
+      })
+      return null
     }
+
+    const meta: EndpointMeta = {
+      failureThreshold: ep.failureThreshold,
+      consecutiveFailures: ep.consecutiveFailures,
+    }
+    this.endpointMeta.set(endpointId, meta)
     return meta
   }
 
