@@ -22,6 +22,8 @@ export interface ApiEndpoint {
   escalationDelay: number
   escalationChannelId?: string
   notificationChannelIds: string[]
+  /** Subset of `notificationChannelIds` currently paused for this endpoint. */
+  pausedNotificationChannelIds?: string[]
   lastCheckAt?: string
   lastStatus?: 'healthy' | 'degraded' | 'down'
   lastResponseTime?: number
