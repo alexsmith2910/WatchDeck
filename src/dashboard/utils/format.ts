@@ -1,4 +1,10 @@
-// Shared formatting and display helpers used across dashboard pages
+// Shared formatting and display helpers used across dashboard pages.
+//
+// Timezone policy: every stored timestamp is UTC. These helpers render in the
+// browser's local TZ via `toLocaleString` without an explicit `timeZone`
+// option. If you need UTC output instead (e.g. for a chart axis that should
+// match backend log timestamps), build a separate helper — do NOT add
+// `timeZone: 'UTC'` ad-hoc at call sites.
 
 export function timeAgo(date: Date | string | null): string {
   if (!date) return 'Never'
