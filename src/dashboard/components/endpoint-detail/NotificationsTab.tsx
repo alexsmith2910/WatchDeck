@@ -1,13 +1,26 @@
 /**
  * Notifications tab — routes attached to this endpoint, plus the delivery log
- * scoped to it. Rows expand inline; the backend doesn't surface payload /
- * request / response / retries so that area sits inside a rainbow placeholder
- * while the fields we *do* have (channel target, latency, suppression reason)
- * render as plain rows.
+ * scoped to it.
+ *
+ * Rows expand into a two-column accordion modelled on the design mock at
+ * `temp/endpoint details/Endpoint.tabs.jsx`. The API still doesn't persist
+ * payload, raw HTTP response, retry timeline, or the original request, so
+ * those sections render inside a RainbowPlaceholder while the fields we do
+ * have (trigger, target, latency, failure reason, suppression reason) render
+ * as plain kv-lists on the left side.
  */
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { cn, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
+import type { DateValue, RangeValue } from "react-aria-components";
+import { getLocalTimeZone } from "@internationalized/date";
 import { useApi } from "../../hooks/useApi";
 import type { ApiEndpoint, ApiPagination } from "../../types/api";
 import {
@@ -21,6 +34,7 @@ import {
 } from "../../types/notifications";
 import { formatDateTime, timeAgo } from "../../utils/format";
 import {
+  DateRangeFilter,
   FilterDropdown,
   FilterSearch,
   RainbowPlaceholder,
@@ -33,10 +47,16 @@ type StatusFilter = "all" | "sent" | "failed" | "suppressed" | "pending";
 interface Filters {
   status: StatusFilter;
   channelId: string;
+  customRange: RangeValue<DateValue> | null;
   q: string;
 }
 
-const DEFAULTS: Filters = { status: "all", channelId: "all", q: "" };
+const DEFAULTS: Filters = {
+  status: "all",
+  channelId: "all",
+  customRange: null,
+  q: "",
+};
 
 interface Props {
   endpointId: string;
@@ -83,6 +103,14 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
       if (filters.channelId !== "all")
         params.set("channelId", filters.channelId);
       if (filters.q.trim()) params.set("search", filters.q.trim());
+      if (filters.customRange) {
+        const tz = getLocalTimeZone();
+        params.set(
+          "from",
+          filters.customRange.start.toDate(tz).toISOString(),
+        );
+        params.set("to", filters.customRange.end.toDate(tz).toISOString());
+      }
       if (!reset && pagination?.nextCursor)
         params.set("cursor", pagination.nextCursor);
       const res = await request<{
@@ -106,6 +134,7 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
       endpointId,
       filters.status,
       filters.channelId,
+      filters.customRange,
       pagination?.nextCursor,
       request,
     ],
@@ -115,7 +144,13 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
     const t = setTimeout(() => void fetchLog(true), 120);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endpointId, filters.status, filters.channelId, filters.q]);
+  }, [
+    endpointId,
+    filters.status,
+    filters.channelId,
+    filters.customRange,
+    filters.q,
+  ]);
 
   const filtered = useMemo(() => {
     const q = filters.q.trim().toLowerCase();
@@ -158,6 +193,11 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
           onChange={(status) => patch({ status })}
           ariaLabel="Delivery status"
         />
+        <DateRangeFilter
+          value={filters.customRange}
+          onChange={(customRange) => patch({ customRange })}
+          ariaLabel="Delivery date range"
+        />
         <FilterDropdown
           value={filters.channelId}
           options={channelOpts}
@@ -197,7 +237,7 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
           <span>When</span>
           <span>Channel</span>
           <span>Event</span>
-          <span>Kind</span>
+          <span>Type</span>
           <span>Status</span>
           <span className="text-right">Latency</span>
           <span />
@@ -218,7 +258,7 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
               No deliveries match these filters.
             </div>
             <div className="text-[11px] text-wd-muted mt-1">
-              Try a broader status or clear search.
+              Try a broader status, date range, or clear search.
             </div>
           </div>
         ) : (
@@ -329,7 +369,7 @@ function RouteChip({
 }
 
 // ---------------------------------------------------------------------------
-// Log row + expansion
+// Log row
 // ---------------------------------------------------------------------------
 
 function LogRow({
@@ -424,88 +464,158 @@ function LogRow({
   );
 }
 
-function LogExpansion({ row }: { row: ApiNotificationLogRow }) {
-  return (
-    <div className="px-4 pb-4 pt-1">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="rounded-lg bg-wd-surface border border-wd-border/50 p-3 text-[12px]">
-          <div className="text-[10px] uppercase tracking-wider text-wd-muted mb-2">
-            Delivery
-          </div>
-          <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
-            <dt className="text-wd-muted">Target</dt>
-            <dd
-              className="font-mono text-foreground truncate"
-              title={row.channelTarget}
-            >
-              {row.channelTarget}
-            </dd>
-            <dt className="text-wd-muted">Kind</dt>
-            <dd className="text-foreground">{KIND_LABEL[row.kind]}</dd>
-            <dt className="text-wd-muted">Severity</dt>
-            <dd className="text-foreground capitalize">{row.severity}</dd>
-            {row.latencyMs != null && (
-              <>
-                <dt className="text-wd-muted">Latency</dt>
-                <dd className="font-mono text-foreground">{row.latencyMs}ms</dd>
-              </>
-            )}
-            {row.failureReason && (
-              <>
-                <dt className="text-wd-muted">Failure</dt>
-                <dd className="text-wd-danger font-mono break-all">
-                  {row.failureReason}
-                </dd>
-              </>
-            )}
-            {row.suppressedReason && (
-              <>
-                <dt className="text-wd-muted">Suppressed</dt>
-                <dd className="text-wd-warning">
-                  {row.suppressedReason.replace(/_/g, " ")}
-                </dd>
-              </>
-            )}
-            {row.retryOf && (
-              <>
-                <dt className="text-wd-muted">Retry of</dt>
-                <dd className="font-mono text-foreground truncate">
-                  {row.retryOf}
-                </dd>
-              </>
-            )}
-            {row.coalescedCount && (
-              <>
-                <dt className="text-wd-muted">Coalesced</dt>
-                <dd className="font-mono text-foreground">
-                  {row.coalescedCount} events
-                </dd>
-              </>
-            )}
-          </dl>
-        </div>
+// ---------------------------------------------------------------------------
+// Accordion body — Trigger + Delivery (real) / Payload + Response + Retries +
+// Reproduce request (placeholder, wrapped in the shared RainbowPlaceholder
+// shell). Layout mirrors `temp/endpoint details/Endpoint.tabs.jsx`.
+// ---------------------------------------------------------------------------
 
-        <RainbowPlaceholder className="min-h-[160px]">
+function LogExpansion({ row }: { row: ApiNotificationLogRow }) {
+  const firedAt = new Date(row.sentAt).toLocaleString();
+  const triggerId =
+    row.incidentId ??
+    row.retryOf ??
+    (row.kind === "channel_test" ? "channel test" : "—");
+
+  const deliveryItems: Array<[string, ReactNode]> = [
+    ["Target", row.channelTarget],
+    [
+      "Status",
+      <span key="s" className="capitalize">
+        {row.deliveryStatus}
+      </span>,
+    ],
+    ["Latency", row.latencyMs != null ? `${row.latencyMs}ms` : "—"],
+  ];
+  if (row.failureReason)
+    deliveryItems.push([
+      "Failure",
+      <span key="f" className="text-wd-danger break-all">
+        {row.failureReason}
+      </span>,
+    ]);
+  if (row.suppressedReason)
+    deliveryItems.push([
+      "Suppressed",
+      <span key="sup" className="text-wd-warning">
+        {row.suppressedReason.replace(/_/g, " ")}
+      </span>,
+    ]);
+  if (row.retryOf)
+    deliveryItems.push([
+      "Retry of",
+      <span key="r" className="truncate">
+        {row.retryOf}
+      </span>,
+    ]);
+  if (row.coalescedCount)
+    deliveryItems.push(["Coalesced", `${row.coalescedCount} events`]);
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 px-5 pt-4 pb-[18px] bg-[var(--surface-secondary)] border-t border-wd-border/40">
+      {/* Left: Trigger + Delivery (real data) */}
+      <div className="flex flex-col gap-4 min-w-0">
+        <Section title="Trigger">
+          <KvList
+            items={[
+              ["Type", KIND_LABEL[row.kind]],
+              ["ID", triggerId],
+              [
+                "Severity",
+                <span key="sev" className="capitalize">
+                  {row.severity}
+                </span>,
+              ],
+              ["Fired at", firedAt],
+            ]}
+          />
+        </Section>
+        <Section title="Delivery">
+          <KvList items={deliveryItems} />
+        </Section>
+      </div>
+
+      {/* Right: Payload + Response + Retries + Reproduce (not yet captured) */}
+      <div className="min-w-0">
+        <RainbowPlaceholder className="min-h-[260px]" rounded="rounded-lg">
           <div className="flex flex-col gap-3">
-            <div className="rounded-lg bg-wd-surface/90 border border-wd-border/50 p-3 text-[12px]">
-              <div className="text-[10px] uppercase tracking-wider text-wd-muted mb-2">
-                Request
-              </div>
-              <div className="font-mono text-wd-muted">
-                — payload not yet captured —
-              </div>
-            </div>
-            <div className="rounded-lg bg-wd-surface/90 border border-wd-border/50 p-3 text-[12px]">
-              <div className="text-[10px] uppercase tracking-wider text-wd-muted mb-2">
-                Response
-              </div>
-              <div className="font-mono text-wd-muted">
-                — response body not yet captured —
-              </div>
-            </div>
+            <PlaceholderCard
+              title="Payload"
+              body="— payload not yet captured —"
+            />
+            <PlaceholderCard
+              title="Response"
+              body="— response body not yet captured —"
+            />
+            <PlaceholderCard
+              title="Retries"
+              body="— retry timeline not yet captured —"
+            />
+            <PlaceholderCard
+              title="Reproduce request"
+              body="— request not yet captured —"
+              trailing={
+                <span className="inline-flex items-center gap-1 text-[10.5px] text-wd-muted-soft font-mono">
+                  <Icon icon="solar:copy-outline" width={11} />
+                  Copy cURL
+                </span>
+              }
+            />
           </div>
         </RainbowPlaceholder>
       </div>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-wd-muted-soft font-semibold mb-1.5">
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function KvList({ items }: { items: Array<[string, ReactNode]> }) {
+  return (
+    <dl className="flex flex-col gap-1 font-mono text-[12px] min-w-0">
+      {items.map(([k, v]) => (
+        <div key={k} className="flex gap-2.5 min-w-0">
+          <dt className="text-wd-muted min-w-[90px] shrink-0">{k}</dt>
+          <dd className="text-foreground break-all min-w-0">{v}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function PlaceholderCard({
+  title,
+  body,
+  trailing,
+}: {
+  title: string;
+  body: string;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div className="rounded-lg bg-wd-surface/90 border border-wd-border/50 p-3 text-[12px]">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] uppercase tracking-wider text-wd-muted font-semibold">
+          {title}
+        </div>
+        {trailing}
+      </div>
+      <div className="font-mono text-wd-muted">{body}</div>
     </div>
   );
 }
