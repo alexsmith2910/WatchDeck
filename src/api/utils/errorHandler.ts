@@ -64,8 +64,14 @@ export function errorHandler(
     return
   }
 
-  // Generic fallback
+  // 4xx errors may carry a custom uppercase code (e.g. INVALID_ID, INVALID_CURSOR)
+  // set by throwers downstream; 5xx always gets INTERNAL_ERROR to avoid leaking details.
+  const customCode =
+    status >= 400 && status < 500 && typeof error.code === 'string' && /^[A-Z][A-Z_]+$/.test(error.code)
+      ? error.code
+      : undefined
+
   void reply.code(status).send(
-    formatError('INTERNAL_ERROR', error.message || 'An unexpected error occurred'),
+    formatError(customCode ?? 'INTERNAL_ERROR', error.message || 'An unexpected error occurred'),
   )
 }

@@ -34,10 +34,28 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/**
+ * Validate a user-supplied ObjectId hex string.
+ * Throws a 400-shaped error when invalid so the Fastify error handler can
+ * serialise it as { code: 'INVALID_ID', … } instead of leaking BSONTypeError.
+ */
+function toObjectId(id: string, field: string): ObjectId {
+  if (!ObjectId.isValid(id)) {
+    const err = new Error(`Invalid ${field}: must be a 24-character hex ObjectId`) as Error & {
+      statusCode?: number
+      code?: string
+    }
+    err.statusCode = 400
+    err.code = 'INVALID_ID'
+    throw err
+  }
+  return new ObjectId(id)
+}
+
 function buildCheckDoc(payload: CheckWritePayload): CheckDoc {
   const doc: CheckDoc = {
     _id: new ObjectId(),
-    endpointId: new ObjectId(payload.endpointId),
+    endpointId: toObjectId(payload.endpointId, 'endpointId'),
     timestamp: payload.timestamp instanceof Date ? payload.timestamp : new Date(payload.timestamp),
     responseTime: payload.responseTime,
     status: payload.status,
@@ -149,9 +167,9 @@ export class MongoDBAdapter extends StorageAdapter {
     }
   }
 
-  async migrate(): Promise<void> {
+  async migrate(): Promise<{ collectionCount: number }> {
     if (!this.db) throw new Error('Cannot run migrations: not connected to MongoDB')
-    await runMigrations(
+    return runMigrations(
       this.db,
       this.dbPrefix,
       this.config.retention.detailedDays,
@@ -375,7 +393,7 @@ export class MongoDBAdapter extends StorageAdapter {
       $set.lastSslIssuer = { ...sslIssuer, capturedAt: timestamp }
     }
     await db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`).updateOne(
-      { _id: new ObjectId(endpointId) },
+      { _id: toObjectId(endpointId, 'endpointId') },
       { $set },
     )
   }
@@ -396,13 +414,10 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async getEndpointById(id: string): Promise<EndpointDoc | null> {
     if (!this.db) return null
-    try {
-      return await this.db
-        .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
-        .findOne({ _id: new ObjectId(id) })
-    } catch {
-      return null
-    }
+    if (!ObjectId.isValid(id)) return null
+    return this.db
+      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+      .findOne({ _id: new ObjectId(id) })
   }
 
   async listEndpoints(
@@ -427,7 +442,7 @@ export class MongoDBAdapter extends StorageAdapter {
     const result = await db
       .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
       .findOneAndUpdate(
-        { _id: new ObjectId(id) },
+        { _id: toObjectId(id, 'endpointId') },
         { $set: { ...safe, updatedAt: new Date() } },
         { returnDocument: 'after' },
       )
@@ -438,22 +453,19 @@ export class MongoDBAdapter extends StorageAdapter {
     const db = this.getDb()
     const r = await db
       .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
-      .deleteOne({ _id: new ObjectId(id) })
+      .deleteOne({ _id: toObjectId(id, 'endpointId') })
     return r.deletedCount > 0
   }
 
   async getLatestCheck(endpointId: string): Promise<CheckDoc | null> {
     if (!this.db) return null
-    try {
-      return await this.db
-        .collection<CheckDoc>(`${this.dbPrefix}checks`)
-        .findOne(
-          { endpointId: new ObjectId(endpointId) },
-          { sort: { timestamp: -1 } },
-        )
-    } catch {
-      return null
-    }
+    if (!ObjectId.isValid(endpointId)) return null
+    return this.db
+      .collection<CheckDoc>(`${this.dbPrefix}checks`)
+      .findOne(
+        { endpointId: new ObjectId(endpointId) },
+        { sort: { timestamp: -1 } },
+      )
   }
 
   // ---------------------------------------------------------------------------
@@ -464,7 +476,7 @@ export class MongoDBAdapter extends StorageAdapter {
     endpointId: string,
     opts: DbPaginationOpts & { from?: Date; to?: Date; status?: 'healthy' | 'degraded' | 'down' },
   ): Promise<DbPage<CheckDoc>> {
-    const filter: Record<string, unknown> = { endpointId: new ObjectId(endpointId) }
+    const filter: Record<string, unknown> = { endpointId: toObjectId(endpointId, 'endpointId') }
     if (opts.from || opts.to) {
       const ts: Record<string, Date> = {}
       if (opts.from) ts.$gte = opts.from
@@ -483,7 +495,7 @@ export class MongoDBAdapter extends StorageAdapter {
     const limit = Math.min(opts.limit ?? 48, 1000)
     return this.db
       .collection<HourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
-      .find({ endpointId: new ObjectId(endpointId) })
+      .find({ endpointId: toObjectId(endpointId, 'endpointId') })
       .sort({ hour: -1 })
       .limit(limit)
       .toArray()
@@ -497,7 +509,7 @@ export class MongoDBAdapter extends StorageAdapter {
     const limit = Math.min(opts.limit ?? 90, 365)
     return this.db
       .collection<DailySummaryDoc>(`${this.dbPrefix}daily_summaries`)
-      .find({ endpointId: new ObjectId(endpointId) })
+      .find({ endpointId: toObjectId(endpointId, 'endpointId') })
       .sort({ date: -1 })
       .limit(limit)
       .toArray()
@@ -508,7 +520,7 @@ export class MongoDBAdapter extends StorageAdapter {
   ): Promise<{ '24h': number | null; '7d': number | null; '30d': number | null; '90d': number | null }> {
     if (!this.db) return { '24h': null, '7d': null, '30d': null, '90d': null }
 
-    const oid = new ObjectId(endpointId)
+    const oid = toObjectId(endpointId, 'endpointId')
     const now = new Date()
     const coll = this.db.collection<CheckDoc>(`${this.dbPrefix}checks`)
 
@@ -554,7 +566,7 @@ export class MongoDBAdapter extends StorageAdapter {
   ): Promise<DbPage<IncidentDoc>> {
     const filter: Record<string, unknown> = {}
     if (opts.status) filter.status = opts.status
-    if (opts.endpointId) filter.endpointId = new ObjectId(opts.endpointId)
+    if (opts.endpointId) filter.endpointId = toObjectId(opts.endpointId, 'endpointId')
     if (opts.from || opts.to) {
       const ts: Record<string, Date> = {}
       if (opts.from) ts.$gte = opts.from
@@ -566,13 +578,10 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async getIncidentById(id: string): Promise<IncidentDoc | null> {
     if (!this.db) return null
-    try {
-      return await this.db
-        .collection<IncidentDoc>(`${this.dbPrefix}incidents`)
-        .findOne({ _id: new ObjectId(id) })
-    } catch {
-      return null
-    }
+    if (!ObjectId.isValid(id)) return null
+    return this.db
+      .collection<IncidentDoc>(`${this.dbPrefix}incidents`)
+      .findOne({ _id: new ObjectId(id) })
   }
 
   async listActiveIncidents(): Promise<IncidentDoc[]> {
@@ -603,7 +612,7 @@ export class MongoDBAdapter extends StorageAdapter {
     const result = await db
       .collection<IncidentDoc>(`${this.dbPrefix}incidents`)
       .findOneAndUpdate(
-        { _id: new ObjectId(id), status: 'active' },
+        { _id: toObjectId(id, 'incidentId'), status: 'active' },
         {
           $set: {
             status: 'resolved',
@@ -626,7 +635,7 @@ export class MongoDBAdapter extends StorageAdapter {
   ): Promise<void> {
     const db = this.getDb()
     await db.collection<IncidentDoc>(`${this.dbPrefix}incidents`).updateOne(
-      { _id: new ObjectId(incidentId) },
+      { _id: toObjectId(incidentId, 'incidentId') },
       { $push: { timeline: event }, $set: { updatedAt: new Date() } },
     )
   }
@@ -636,15 +645,22 @@ export class MongoDBAdapter extends StorageAdapter {
     incidentId: string | null,
   ): Promise<void> {
     const db = this.getDb()
-    await db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`).updateOne(
-      { _id: new ObjectId(endpointId) },
-      {
-        $set: {
-          currentIncidentId: incidentId ? new ObjectId(incidentId) : undefined,
-          updatedAt: new Date(),
-        },
+    const filter = { _id: toObjectId(endpointId, 'endpointId') }
+    const coll = db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+    if (incidentId === null) {
+      // Mongo silently ignores `undefined` in $set — must use $unset to clear.
+      await coll.updateOne(filter, {
+        $unset: { currentIncidentId: 1 },
+        $set: { updatedAt: new Date() },
+      })
+      return
+    }
+    await coll.updateOne(filter, {
+      $set: {
+        currentIncidentId: toObjectId(incidentId, 'incidentId'),
+        updatedAt: new Date(),
       },
-    )
+    })
   }
 
   // ---------------------------------------------------------------------------
@@ -681,7 +697,7 @@ export class MongoDBAdapter extends StorageAdapter {
     const result = await db
       .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
       .findOneAndUpdate(
-        { _id: new ObjectId(id) },
+        { _id: toObjectId(id, 'channelId') },
         { $set: { ...safe, updatedAt: new Date() } },
         { returnDocument: 'after' },
       )
@@ -692,19 +708,16 @@ export class MongoDBAdapter extends StorageAdapter {
     const db = this.getDb()
     const r = await db
       .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
-      .deleteOne({ _id: new ObjectId(id) })
+      .deleteOne({ _id: toObjectId(id, 'channelId') })
     return r.deletedCount > 0
   }
 
   async getNotificationChannelById(id: string): Promise<NotificationChannelDoc | null> {
     if (!this.db) return null
-    try {
-      return await this.db
-        .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
-        .findOne({ _id: new ObjectId(id) })
-    } catch {
-      return null
-    }
+    if (!ObjectId.isValid(id)) return null
+    return this.db
+      .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+      .findOne({ _id: new ObjectId(id) })
   }
 
   // ---------------------------------------------------------------------------
@@ -736,7 +749,7 @@ export class MongoDBAdapter extends StorageAdapter {
     if (!this.db) return []
     return this.db
       .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
-      .find({ incidentId: new ObjectId(incidentId) })
+      .find({ incidentId: toObjectId(incidentId, 'incidentId') })
       .sort({ sentAt: -1 })
       .limit(500)
       .toArray()
@@ -746,7 +759,7 @@ export class MongoDBAdapter extends StorageAdapter {
     if (!this.db) return []
     return this.db
       .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
-      .find({ coalescedIncidentIds: new ObjectId(incidentId) })
+      .find({ coalescedIncidentIds: toObjectId(incidentId, 'incidentId') })
       .sort({ sentAt: -1 })
       .limit(100)
       .toArray()
@@ -754,13 +767,10 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async getNotificationLogById(id: string): Promise<NotificationLogDoc | null> {
     if (!this.db) return null
-    try {
-      return await this.db
-        .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
-        .findOne({ _id: new ObjectId(id) })
-    } catch {
-      return null
-    }
+    if (!ObjectId.isValid(id)) return null
+    return this.db
+      .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+      .findOne({ _id: new ObjectId(id) })
   }
 
   async writeNotificationLog(
@@ -770,6 +780,24 @@ export class MongoDBAdapter extends StorageAdapter {
     const doc: NotificationLogDoc = { ...row, _id: new ObjectId(), createdAt: new Date() }
     await db.collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`).insertOne(doc)
     return doc
+  }
+
+  async redactOldNotificationLogs(before: Date): Promise<number> {
+    const db = this.getDb()
+    const result = await db
+      .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+      .updateMany(
+        {
+          sentAt: { $lt: before },
+          $or: [
+            { payload: { $exists: true } },
+            { request: { $exists: true } },
+            { response: { $exists: true } },
+          ],
+        },
+        { $unset: { payload: 1, request: 1, response: 1 } },
+      )
+    return result.modifiedCount
   }
 
   async countNotificationStats(window: NotificationStatsWindow): Promise<NotificationStats> {
@@ -863,9 +891,12 @@ export class MongoDBAdapter extends StorageAdapter {
 
   private buildNotificationLogFilter(f: NotificationLogFilter): Record<string, unknown> {
     const filter: Record<string, unknown> = {}
-    if (f.endpointId) filter.endpointId = new ObjectId(f.endpointId)
-    if (f.channelId) filter.channelId = new ObjectId(f.channelId)
-    if (f.incidentId) filter.incidentId = new ObjectId(f.incidentId)
+    if (f.endpointId) filter.endpointId = toObjectId(f.endpointId, 'endpointId')
+    if (f.channelId) filter.channelId = toObjectId(f.channelId, 'channelId')
+    if (f.incidentId) filter.incidentId = toObjectId(f.incidentId, 'incidentId')
+    if (f.retryOf && ObjectId.isValid(f.retryOf)) {
+      filter.retryOf = new ObjectId(f.retryOf)
+    }
     if (f.severity) filter.severity = f.severity
     if (f.kind) filter.kind = f.kind
     if (f.status) filter.deliveryStatus = f.status
@@ -909,25 +940,19 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async getMuteById(id: string): Promise<NotificationMuteDoc | null> {
     if (!this.db) return null
-    try {
-      return await this.db
-        .collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
-        .findOne({ _id: new ObjectId(id) })
-    } catch {
-      return null
-    }
+    if (!ObjectId.isValid(id)) return null
+    return this.db
+      .collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
+      .findOne({ _id: new ObjectId(id) })
   }
 
   async deleteMute(id: string): Promise<boolean> {
+    if (!ObjectId.isValid(id)) return false
     const db = this.getDb()
-    try {
-      const r = await db
-        .collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
-        .deleteOne({ _id: new ObjectId(id) })
-      return r.deletedCount > 0
-    } catch {
-      return false
-    }
+    const r = await db
+      .collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
+      .deleteOne({ _id: new ObjectId(id) })
+    return r.deletedCount > 0
   }
 
   // ---------------------------------------------------------------------------
@@ -994,7 +1019,7 @@ export class MongoDBAdapter extends StorageAdapter {
         db
           .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
           .updateOne(
-            { _id: new ObjectId(id) },
+            { _id: toObjectId(id, 'endpointId') },
             { $push: { maintenanceWindows: windows[i]! }, $set: { updatedAt: new Date() } },
           ),
       ),
@@ -1004,7 +1029,7 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async removeMaintenanceWindow(windowId: string): Promise<boolean> {
     const db = this.getDb()
-    const oid = new ObjectId(windowId)
+    const oid = toObjectId(windowId, 'windowId')
     const r = await db
       .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
       .updateOne(
@@ -1045,7 +1070,7 @@ export class MongoDBAdapter extends StorageAdapter {
     return this.db
       .collection<CheckDoc>(`${this.dbPrefix}checks`)
       .find({
-        endpointId: new ObjectId(endpointId),
+        endpointId: toObjectId(endpointId, 'endpointId'),
         timestamp: { $gte: hourStart, $lt: hourEnd },
       })
       .sort({ timestamp: 1 })
@@ -1207,13 +1232,17 @@ export class MongoDBAdapter extends StorageAdapter {
 
     const q: Record<string, unknown> = { ...filter }
     if (opts.cursor) {
-      try {
-        q._id = sortDir === 1
-          ? { $gt: new ObjectId(opts.cursor) }
-          : { $lt: new ObjectId(opts.cursor) }
-      } catch {
-        // Invalid cursor — ignore and start from beginning
+      if (!ObjectId.isValid(opts.cursor)) {
+        const err = new Error('Invalid pagination cursor') as Error & {
+          statusCode?: number
+          code?: string
+        }
+        err.statusCode = 400
+        err.code = 'INVALID_CURSOR'
+        throw err
       }
+      const cursorOid = new ObjectId(opts.cursor)
+      q._id = sortDir === 1 ? { $gt: cursorOid } : { $lt: cursorOid }
     }
 
     const [rawItems, total] = await Promise.all([
