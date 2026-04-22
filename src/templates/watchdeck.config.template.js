@@ -22,6 +22,35 @@ export default {
     alertCooldown: 900,
     recoveryAlert: true,
     escalationDelay: 1800,
+
+    notifications: {
+      enabled: true,
+      severityFloor: 'warning+',
+      sendOpen: true,
+      sendResolved: true,
+      sendEscalation: true,
+      alertDuringMaintenance: false,
+      retryOnFailure: true,
+      retryBackoffMs: [2000, 8000, 30000],
+      coalescing: {
+        enabled: true,
+        windowSeconds: 60,
+        minBurstCount: 3,
+        bypassSeverity: 'critical',
+      },
+      quietHours: null,
+      channelDefaults: {
+        discord: { rateLimitPerMinute: 30 },
+        slack: { rateLimitPerMinute: 30 },
+        email: { rateLimitPerMinute: 10 },
+        webhook: { rateLimitPerMinute: 60 },
+      },
+    },
+  },
+
+  slo: {
+    target: 99.9,
+    windowDays: 30,
   },
 
   retention: {
