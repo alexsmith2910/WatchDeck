@@ -205,6 +205,7 @@ function parseLogFilters(q: Record<string, string | undefined>): {
   from?: Date
   to?: Date
   search?: string
+  retryOf?: string
 } {
   const out: ReturnType<typeof parseLogFilters> = {}
   if (q.endpointId) out.endpointId = q.endpointId
@@ -218,6 +219,7 @@ function parseLogFilters(q: Record<string, string | undefined>): {
   const to = parseDate(q.to)
   if (to) out.to = to
   if (q.search) out.search = q.search
+  if (q.retryOf && ObjectId.isValid(q.retryOf)) out.retryOf = q.retryOf
   return out
 }
 
@@ -276,9 +278,21 @@ export function notificationsRoutes(ctx: AppContext) {
 
     // ── Channels ────────────────────────────────────────────────────────────
 
-    fastify.get('/notifications/channels', async (_request, reply) => {
+    fastify.get('/notifications/channels', async (request, reply) => {
+      const pagination = parsePagination(request.query as { cursor?: string; limit?: string })
       const channels = await ctx.adapter.listNotificationChannels()
-      return reply.send({ data: channels })
+      const limit = pagination.limit ?? 20
+      const slice = channels.slice(0, limit)
+      return reply.send({
+        data: slice,
+        pagination: {
+          limit,
+          hasMore: channels.length > limit,
+          nextCursor: null,
+          prevCursor: null,
+          total: channels.length,
+        },
+      })
     })
 
     fastify.post(
@@ -549,9 +563,21 @@ export function notificationsRoutes(ctx: AppContext) {
 
     // ── Mutes ───────────────────────────────────────────────────────────────
 
-    fastify.get('/notifications/mutes', async (_request, reply) => {
+    fastify.get('/notifications/mutes', async (request, reply) => {
+      const pagination = parsePagination(request.query as { cursor?: string; limit?: string })
       const mutes = await ctx.adapter.listActiveMutes()
-      return reply.send({ data: mutes })
+      const limit = pagination.limit ?? 20
+      const slice = mutes.slice(0, limit)
+      return reply.send({
+        data: slice,
+        pagination: {
+          limit,
+          hasMore: mutes.length > limit,
+          nextCursor: null,
+          prevCursor: null,
+          total: mutes.length,
+        },
+      })
     })
 
     fastify.post(
