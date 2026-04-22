@@ -114,7 +114,7 @@ function VolumeChart({ historyIncidents }: { historyIncidents: ApiIncident[] }) 
       />
       <div className="flex-1 flex flex-col gap-2 min-h-0">
         <div
-          className="flex items-end gap-1 flex-1 min-h-[140px] px-1"
+          className="flex items-stretch gap-1 flex-1 min-h-[140px] px-1"
           onMouseLeave={() => setHover(null)}
         >
           {days.map((d) => {
@@ -123,26 +123,33 @@ function VolumeChart({ historyIncidents }: { historyIncidents: ApiIncident[] }) 
             const majPct = d.total ? (d.major / d.total) * 100 : 0
             const minPct = Math.max(0, 100 - critPct - majPct)
             return (
+              // Outer column is full-height so the hover zone covers empty
+              // days too; the tooltip anchors to this rect so placement stays
+              // consistent regardless of bar height.
               <div
                 key={d.date}
                 onMouseEnter={(e) =>
                   setHover({ day: d, rect: (e.currentTarget as HTMLElement).getBoundingClientRect() })
                 }
-                className={cn(
-                  'flex-1 flex flex-col-reverse gap-[2px] rounded-[3px] overflow-hidden transition-opacity hover:opacity-85 cursor-default',
-                  d.isToday && 'ring-1 ring-wd-danger/40',
-                )}
-                style={{ height: `${totalPct}%`, minHeight: '4px' }}
+                className="flex-1 flex flex-col justify-end cursor-default"
               >
-                {d.minor > 0 && (
-                  <span className="w-full min-h-[2px] bg-wd-primary/70" style={{ height: `${minPct}%` }} />
-                )}
-                {d.major > 0 && (
-                  <span className="w-full min-h-[2px] bg-wd-warning" style={{ height: `${majPct}%` }} />
-                )}
-                {d.critical > 0 && (
-                  <span className="w-full min-h-[2px] bg-wd-danger" style={{ height: `${critPct}%` }} />
-                )}
+                <div
+                  className={cn(
+                    'flex flex-col-reverse gap-[2px] rounded-[3px] overflow-hidden transition-opacity hover:opacity-85',
+                    d.isToday && 'ring-1 ring-wd-danger/40',
+                  )}
+                  style={{ height: `${totalPct}%`, minHeight: '4px' }}
+                >
+                  {d.minor > 0 && (
+                    <span className="w-full min-h-[2px] bg-wd-primary/70" style={{ height: `${minPct}%` }} />
+                  )}
+                  {d.major > 0 && (
+                    <span className="w-full min-h-[2px] bg-wd-warning" style={{ height: `${majPct}%` }} />
+                  )}
+                  {d.critical > 0 && (
+                    <span className="w-full min-h-[2px] bg-wd-danger" style={{ height: `${critPct}%` }} />
+                  )}
+                </div>
               </div>
             )
           })}
