@@ -15,6 +15,13 @@ export default function ForegroundReferenceArea({ ranges }: { ranges: IncidentRa
 
   if (!xScale || !plotArea || ranges.length === 0) return null
 
+  // Minimum visible width for a shaded range. On dense charts (e.g. 1440
+  // raw checks across 24h), a single failing point spans well under 1px
+  // when drawn between two adjacent label positions — enough to be
+  // mathematically correct but invisible. Clamping ensures every range
+  // reads as a real band.
+  const MIN_WIDTH_PX = 6
+
   return (
     <g className="foreground-reference-areas">
       {ranges.map((r, i) => {
@@ -22,8 +29,14 @@ export default function ForegroundReferenceArea({ ranges }: { ranges: IncidentRa
         const x2 = xScale(r.x2)
         if (x1 == null || x2 == null || isNaN(x1) || isNaN(x2)) return null
 
-        const left = Math.min(x1, x2)
-        const width = Math.abs(x2 - x1) || 4 // min 4px so single-point is visible
+        const rawLeft = Math.min(x1, x2)
+        const rawWidth = Math.abs(x2 - x1)
+        const width = Math.max(rawWidth, MIN_WIDTH_PX)
+        // If we expanded the width, center the band on the original midpoint
+        // so a single-point shade stays visually anchored to its data point.
+        const left = rawWidth < MIN_WIDTH_PX
+          ? rawLeft + rawWidth / 2 - width / 2
+          : rawLeft
         const top = plotArea.y
         const height = plotArea.height
 
