@@ -56,6 +56,17 @@ export function useApi() {
         data = null as T
       }
       return { status: res.status, data }
+    } catch (err) {
+      // The unmount cleanup aborts every in-flight controller; that rejects
+      // fetch with AbortError. The caller is either already gone or asked for
+      // this cancel via `externalSignal`, so there's nothing useful to do with
+      // the result. Return a never-resolving promise so `.then` handlers that
+      // would otherwise setState on a dead tree simply never run, and so the
+      // rejection doesn't surface as an unhandled promise error.
+      if (err instanceof Error && err.name === 'AbortError') {
+        return new Promise(() => {})
+      }
+      throw err
     } finally {
       inflight.current.delete(controller)
     }
