@@ -184,7 +184,7 @@ export function IncidentsTable({
           </div>
         </div>
 
-        <TableHeader />
+        <TableHeader showEndpoint />
 
         {loading ? (
           <div className="flex justify-center py-12">
@@ -395,24 +395,28 @@ function FilterDropdown({
 // Table
 // ---------------------------------------------------------------------------
 
-const GRID_COLS =
+const GRID_COLS_WITH_EP =
   'grid-cols-[18px_96px_minmax(140px,1.2fr)_minmax(140px,1.4fr)_110px_90px_140px_120px_36px]'
+const GRID_COLS_NO_EP =
+  'grid-cols-[18px_96px_minmax(140px,1.4fr)_110px_90px_140px_120px_36px]'
 
-function TableHeader() {
+export function TableHeader({ showEndpoint = true }: { showEndpoint?: boolean }) {
   return (
     <div
       className={cn(
         'grid items-center gap-x-3 px-4 py-2.5 border-b border-wd-border/50 bg-wd-surface-hover/30 shrink-0',
-        GRID_COLS,
+        showEndpoint ? GRID_COLS_WITH_EP : GRID_COLS_NO_EP,
       )}
     >
       <span />
       <span className="text-[10px] font-semibold text-wd-muted uppercase tracking-[0.08em]">
         Status
       </span>
-      <span className="text-[10px] font-semibold text-wd-muted uppercase tracking-[0.08em]">
-        Endpoint
-      </span>
+      {showEndpoint && (
+        <span className="text-[10px] font-semibold text-wd-muted uppercase tracking-[0.08em]">
+          Endpoint
+        </span>
+      )}
       <span className="text-[10px] font-semibold text-wd-muted uppercase tracking-[0.08em]">
         Cause
       </span>
@@ -433,16 +437,18 @@ function TableHeader() {
   )
 }
 
-const TableRow = memo(function TableRow({
+export const TableRow = memo(function TableRow({
   incident,
   endpoint,
   channelById,
   sparkline,
+  showEndpoint = true,
 }: {
   incident: ApiIncident
   endpoint: EndpointLite | undefined
   channelById: Map<string, ApiChannel>
   sparkline: EndpointSparkline | undefined
+  showEndpoint?: boolean
 }) {
   const navigate = useNavigate()
   const ep = endpointDisplay(endpoint)
@@ -483,7 +489,7 @@ const TableRow = memo(function TableRow({
         'grid items-center gap-x-3 px-4 py-2.5 cursor-pointer transition-colors border-b border-wd-border/10',
         'hover:bg-wd-surface-hover/50',
         isActive && 'bg-wd-danger/[0.02]',
-        GRID_COLS,
+        showEndpoint ? GRID_COLS_WITH_EP : GRID_COLS_NO_EP,
       )}
     >
       <div className="flex justify-center">
@@ -508,19 +514,21 @@ const TableRow = memo(function TableRow({
         </span>
       </div>
 
-      <div className="min-w-0">
-        <div className="text-[12.5px] font-medium text-foreground truncate">
-          {ep.name}
-          {ep.kind && (
-            <span className="ml-1.5 inline-block px-1 py-[1px] rounded text-[9px] font-mono font-medium uppercase tracking-[0.08em] text-wd-muted/80 bg-wd-surface-hover/60 border border-wd-border/50 align-middle">
-              {ep.kind}
-            </span>
+      {showEndpoint && (
+        <div className="min-w-0">
+          <div className="text-[12.5px] font-medium text-foreground truncate">
+            {ep.name}
+            {ep.kind && (
+              <span className="ml-1.5 inline-block px-1 py-[1px] rounded text-[9px] font-mono font-medium uppercase tracking-[0.08em] text-wd-muted/80 bg-wd-surface-hover/60 border border-wd-border/50 align-middle">
+                {ep.kind}
+              </span>
+            )}
+          </div>
+          {ep.url && (
+            <div className="text-[10.5px] text-wd-muted font-mono truncate">{ep.url}</div>
           )}
         </div>
-        {ep.url && (
-          <div className="text-[10.5px] text-wd-muted font-mono truncate">{ep.url}</div>
-        )}
-      </div>
+      )}
 
       <div className="min-w-0">
         <div className="flex items-center gap-1.5 min-w-0">

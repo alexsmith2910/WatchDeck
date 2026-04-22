@@ -1,25 +1,25 @@
 /**
  * Incidents tab — summary strip + filterable list scoped to this endpoint.
  *
- * Rows are React-Router links to `/incidents/:id` so the click target matches
- * what the top-level IncidentsPage does. Filter bar visually matches
- * IncidentsTable (SearchField + range pills + cause/severity dropdowns).
+ * Rows reuse the shared TableRow/TableHeader from IncidentsTable so the visual
+ * vocabulary matches the main Incidents page (status pill, cause chip, live
+ * duration, channel chips, response-time sparkline). The endpoint column is
+ * hidden because this view is already scoped to a single endpoint.
  */
 import { memo, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { cn, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import type { ApiIncident } from "../../types/api";
+import type { ApiChannel } from "../../types/notifications";
 import {
-  causeKindChipClass,
   fmtDuration,
   metaFor,
-  severityChipClass,
-  severityDotClass,
   severityOf,
+  type EndpointLite,
+  type EndpointSparkline,
   type Severity,
 } from "../incidents/incidentHelpers";
-import { formatDateTime, timeAgo } from "../../utils/format";
+import { TableHeader, TableRow } from "../incidents/IncidentsTable";
 import { FilterDropdown, FilterSearch, Segmented } from "./primitives";
 
 type StatusFilter = "all" | "active" | "resolved";
@@ -52,9 +52,19 @@ interface Props {
   endpointId: string;
   incidents: ApiIncident[];
   loading: boolean;
+  endpointById: Map<string, EndpointLite>;
+  channelById: Map<string, ApiChannel>;
+  sparklineByIncidentId: Map<string, EndpointSparkline>;
 }
 
-function IncidentsTabBase({ endpointId, incidents, loading }: Props) {
+function IncidentsTabBase({
+  endpointId,
+  incidents,
+  loading,
+  endpointById,
+  channelById,
+  sparklineByIncidentId,
+}: Props) {
   const [filters, setFilters] = useState<Filters>(DEFAULTS);
 
   const mine = useMemo(
@@ -134,6 +144,8 @@ function IncidentsTabBase({ endpointId, incidents, loading }: Props) {
           </div>
         </div>
 
+        <TableHeader showEndpoint={false} />
+
         {loading ? (
           <div className="flex justify-center py-12">
             <Spinner size="lg" />
@@ -153,7 +165,7 @@ function IncidentsTabBase({ endpointId, incidents, loading }: Props) {
             </div>
           </div>
         ) : (
-          <ul className="divide-y divide-wd-border/40">
+          <div>
             {[...filtered]
               .sort((a, b) => {
                 const aActive = a.status === "active" ? 1 : 0;
@@ -165,9 +177,16 @@ function IncidentsTabBase({ endpointId, incidents, loading }: Props) {
                 );
               })
               .map((inc) => (
-                <IncidentRow key={inc._id} incident={inc} />
+                <TableRow
+                  key={inc._id}
+                  incident={inc}
+                  endpoint={endpointById.get(inc.endpointId)}
+                  channelById={channelById}
+                  sparkline={sparklineByIncidentId.get(inc._id)}
+                  showEndpoint={false}
+                />
               ))}
-          </ul>
+          </div>
         )}
       </div>
     </div>
@@ -335,85 +354,6 @@ function FilterBar({
         />
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Row
-// ---------------------------------------------------------------------------
-
-function IncidentRow({ incident }: { incident: ApiIncident }) {
-  const meta = metaFor(incident.cause);
-  const sev = severityOf(incident);
-  const isActive = incident.status === "active";
-  const durationSecs =
-    incident.durationSeconds ??
-    (isActive
-      ? Math.max(
-          0,
-          Math.floor(
-            (Date.now() - new Date(incident.startedAt).getTime()) / 1000,
-          ),
-        )
-      : null);
-
-  return (
-    <li>
-      <Link
-        to={`/incidents/${incident._id}`}
-        className="grid grid-cols-[18px_minmax(120px,1fr)_120px_minmax(160px,1.4fr)_100px_130px_20px] items-center gap-2 px-4 py-2.5 hover:bg-wd-surface-hover transition-colors"
-      >
-        <span
-          className={cn("w-2.5 h-2.5 rounded-full", severityDotClass(sev))}
-        />
-        <span className="min-w-0">
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 text-[11.5px] font-medium truncate",
-              isActive ? "text-wd-danger" : "text-foreground",
-            )}
-          >
-            {isActive && (
-              <span className="w-1.5 h-1.5 rounded-full bg-wd-danger animate-pulse" />
-            )}
-            {formatDateTime(incident.startedAt)}
-          </span>
-          <span className="block text-[10.5px] text-wd-muted font-mono mt-0.5">
-            {timeAgo(incident.startedAt)}
-          </span>
-        </span>
-        <span
-          className={cn(
-            "inline-flex items-center justify-center px-2 h-5 rounded text-[10px] leading-none font-semibold uppercase tracking-wider w-fit pt-[1px]",
-            causeKindChipClass(meta.kind),
-          )}
-        >
-          {meta.short}
-        </span>
-        <span className="text-[12px] text-foreground truncate">
-          {meta.label}
-          {incident.causeDetail && (
-            <span className="text-wd-muted"> · {incident.causeDetail}</span>
-          )}
-        </span>
-        <span className="text-[11.5px] font-mono text-right text-foreground">
-          {durationSecs != null ? fmtDuration(durationSecs) : "—"}
-        </span>
-        <span
-          className={cn(
-            "inline-flex items-center justify-center px-2 h-5 rounded text-[10px] leading-none font-semibold uppercase tracking-wider w-fit pt-[1px]",
-            severityChipClass(sev),
-          )}
-        >
-          {sev}
-        </span>
-        <Icon
-          icon="solar:alt-arrow-right-linear"
-          width={14}
-          className="text-wd-muted"
-        />
-      </Link>
-    </li>
   );
 }
 

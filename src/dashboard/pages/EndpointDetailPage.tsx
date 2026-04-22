@@ -13,7 +13,7 @@
  * for all four graphs on that tab (histogram, success rate, hour-of-day),
  * hoisted here so it persists across tab switches.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Button, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
@@ -23,11 +23,16 @@ import type {
   ApiCheck,
   ApiEndpoint,
   ApiIncident,
+  ApiPagination,
   DailySummary,
   HourlySummary,
   UptimeStats,
 } from "../types/api";
 import type { ApiChannel } from "../types/notifications";
+import type {
+  EndpointLite,
+  EndpointSparkline,
+} from "../components/incidents/incidentHelpers";
 import EndpointHero, {
   type HeroStatus,
 } from "../components/endpoint-detail/EndpointHero";
@@ -97,6 +102,9 @@ export default function EndpointDetailPage() {
   const [lastHourChecks, setLastHourChecks] = useState<ApiCheck[]>([]);
   const [incidents, setIncidents] = useState<ApiIncident[]>([]);
   const [channels, setChannels] = useState<ApiChannel[]>([]);
+  const [sparklineByIncidentId, setSparklineByIncidentId] = useState<
+    Map<string, EndpointSparkline>
+  >(() => new Map());
   const [ribbonWindow, setRibbonWindow] = useState<UptimeWindow>(30);
 
   // ── Fetch ───────────────────────────────────────────────────────────────
@@ -133,7 +141,7 @@ export default function EndpointDetailPage() {
     const [dailyRes, incRes, chanRes] = await Promise.all([
       request<{ data: DailySummary[] }>(`/endpoints/${id}/daily?limit=90`),
       request<{ data: ApiIncident[] }>(`/incidents?endpointId=${id}&limit=500`),
-      request<{ data: ApiChannel[] }>(`/channels`),
+      request<{ data: ApiChannel[] }>(`/notifications/channels`),
     ]);
     if (dailyRes.status < 400) setDaily30d(dailyRes.data.data ?? []);
     if (incRes.status < 400) setIncidents(incRes.data.data ?? []);
@@ -146,6 +154,63 @@ export default function EndpointDetailPage() {
     void fetchPhase1();
     void fetchPhase2();
   }, [fetchPhase1, fetchPhase2]);
+
+  // ── Per-incident sparklines (matches IncidentsPage behaviour) ──────────
+  // Cache keyed by incident id; a Set of already-fetched `id:status:resolvedAt`
+  // keys re-fetches when an active incident transitions to resolved.
+  const SPARK_BUFFER_MS = 15 * 60 * 1000;
+  const SPARK_LIMIT = 60;
+  const fetchedSparkVersionsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (incidents.length === 0) return;
+    const missing: ApiIncident[] = [];
+    for (const inc of incidents) {
+      const version = `${inc._id}:${inc.status}:${inc.resolvedAt ?? ""}`;
+      if (!fetchedSparkVersionsRef.current.has(version)) {
+        fetchedSparkVersionsRef.current.add(version);
+        missing.push(inc);
+      }
+    }
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    Promise.all(
+      missing.map(async (inc) => {
+        const startMs =
+          new Date(inc.startedAt).getTime() - SPARK_BUFFER_MS;
+        const endMs = inc.resolvedAt
+          ? new Date(inc.resolvedAt).getTime() + SPARK_BUFFER_MS
+          : Date.now();
+        const params = new URLSearchParams();
+        params.set("limit", String(SPARK_LIMIT));
+        params.set("from", new Date(startMs).toISOString());
+        params.set("to", new Date(endMs).toISOString());
+        const res = await request<{
+          data: ApiCheck[];
+          pagination: ApiPagination;
+        }>(`/endpoints/${inc.endpointId}/checks?${params.toString()}`);
+        const checks = (res.data.data ?? [])
+          .filter((c) => typeof c.responseTime === "number")
+          .reverse();
+        const sparkline: EndpointSparkline = {
+          values: checks.map((c) => c.responseTime),
+          timestamps: checks.map((c) => c.timestamp),
+        };
+        return [inc._id, sparkline] as const;
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+      setSparklineByIncidentId((prev) => {
+        const next = new Map(prev);
+        for (const [id, sl] of entries) next.set(id, sl);
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [incidents, request]);
 
   // ── SSE live updates ───────────────────────────────────────────────────
   useEffect(() => {
@@ -237,6 +302,28 @@ export default function EndpointDetailPage() {
     if (endpoint.status === "paused") return "paused";
     return (endpoint.lastStatus ?? "healthy") as HeroStatus;
   }, [endpoint]);
+
+  const endpointById = useMemo<Map<string, EndpointLite>>(() => {
+    const m = new Map<string, EndpointLite>();
+    if (endpoint) {
+      m.set(endpoint._id, {
+        _id: endpoint._id,
+        name: endpoint.name,
+        type: endpoint.type,
+        url: endpoint.url,
+        host: endpoint.host,
+        port: endpoint.port,
+        notificationChannelIds: endpoint.notificationChannelIds ?? [],
+      });
+    }
+    return m;
+  }, [endpoint]);
+
+  const channelById = useMemo<Map<string, ApiChannel>>(() => {
+    const m = new Map<string, ApiChannel>();
+    for (const c of channels) m.set(c._id, c);
+    return m;
+  }, [channels]);
 
   const tabCounts = useMemo(
     () => ({
@@ -407,6 +494,9 @@ export default function EndpointDetailPage() {
             endpointId={endpoint._id}
             incidents={incidents}
             loading={aggLoading}
+            endpointById={endpointById}
+            channelById={channelById}
+            sparklineByIncidentId={sparklineByIncidentId}
           />
         )}
         {activeTab === "notifications" && (
