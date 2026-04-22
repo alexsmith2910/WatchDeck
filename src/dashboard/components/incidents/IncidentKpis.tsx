@@ -13,6 +13,7 @@ import type { ApiIncident } from '../../types/api'
 import { WideSpark } from '../health/HealthCharts'
 import {
   flappingEndpoints,
+  localDayKey,
   severityOf,
   volumeByDay,
   type VolumeDay,
@@ -77,43 +78,43 @@ export function IncidentKpis({ activeIncidents, historyIncidents }: Props) {
   )
 
   const flapping = useMemo(() => flappingEndpoints(historyIncidents, DAY_MS), [historyIncidents])
-  // 14-day rolling flap count for sparkline.
+  // Index lookup aligned with volume14d so all four sparklines share the same
+  // calendar-day x-axis as their labels. Without this, a rolling 24-hour
+  // bucketing would slide out of phase with the "Apr 9 → Today" labels.
+  const dayIndex = useMemo(() => {
+    const m = new Map<string, number>()
+    volume14d.forEach((d, i) => m.set(d.date, i))
+    return m
+  }, [volume14d])
+
   const flapSpark = useMemo(() => {
-    const counts = new Array<number>(14).fill(0)
-    const now = Date.now()
-    const start = now - 14 * DAY_MS
+    const counts = new Array<number>(volume14d.length).fill(0)
     const perDayPerEp = new Map<string, number[]>()
     for (const inc of historyIncidents) {
-      const t = new Date(inc.startedAt).getTime()
-      if (t < start) continue
-      const idx = Math.min(13, Math.max(0, Math.floor((t - start) / DAY_MS)))
-      const key = inc.endpointId
-      const arr = perDayPerEp.get(key) ?? new Array<number>(14).fill(0)
+      const idx = dayIndex.get(localDayKey(new Date(inc.startedAt)))
+      if (idx === undefined) continue
+      const arr = perDayPerEp.get(inc.endpointId) ?? new Array<number>(volume14d.length).fill(0)
       arr[idx]++
-      perDayPerEp.set(key, arr)
+      perDayPerEp.set(inc.endpointId, arr)
     }
     for (const arr of perDayPerEp.values()) {
-      for (let i = 0; i < 14; i++) if (arr[i] >= 3) counts[i]++
+      for (let i = 0; i < counts.length; i++) if (arr[i] >= 3) counts[i]++
     }
     return counts
-  }, [historyIncidents])
+  }, [historyIncidents, dayIndex, volume14d.length])
 
-  // MTTR sparkline — avg daily resolved duration in minutes over 14 days.
   const mttrSpark = useMemo(() => {
-    const buckets: number[][] = Array.from({ length: 14 }, () => [])
-    const now = Date.now()
-    const start = now - 14 * DAY_MS
+    const buckets: number[][] = Array.from({ length: volume14d.length }, () => [])
     for (const inc of historyIncidents) {
       if (inc.status !== 'resolved' || inc.durationSeconds == null) continue
-      const t = new Date(inc.startedAt).getTime()
-      if (t < start) continue
-      const idx = Math.min(13, Math.max(0, Math.floor((t - start) / DAY_MS)))
+      const idx = dayIndex.get(localDayKey(new Date(inc.startedAt)))
+      if (idx === undefined) continue
       buckets[idx].push(inc.durationSeconds / 60)
     }
     return buckets.map((arr) =>
       arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length),
     )
-  }, [historyIncidents])
+  }, [historyIncidents, dayIndex, volume14d.length])
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">

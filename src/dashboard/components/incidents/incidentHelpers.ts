@@ -140,6 +140,16 @@ export interface VolumeDay {
   isToday: boolean
 }
 
+// Local-calendar-day key (yyyy-mm-dd). Using toISOString here would silently
+// shift buckets by a day for anyone east of UTC, which drops "today" incidents
+// off the end of a 14-day window and mis-labels every row in the tooltip.
+export function localDayKey(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 export function volumeByDay(incidents: ApiIncident[], days = 14): VolumeDay[] {
   const now = new Date()
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -147,7 +157,7 @@ export function volumeByDay(incidents: ApiIncident[], days = 14): VolumeDay[] {
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(startOfToday.getTime() - i * 86_400_000)
     dayStarts.push({
-      date: d.toISOString().slice(0, 10),
+      date: localDayKey(d),
       label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
       critical: 0,
       major: 0,
@@ -160,7 +170,7 @@ export function volumeByDay(incidents: ApiIncident[], days = 14): VolumeDay[] {
   for (const d of dayStarts) buckets.set(d.date, d)
 
   for (const inc of incidents) {
-    const dayKey = new Date(inc.startedAt).toISOString().slice(0, 10)
+    const dayKey = localDayKey(new Date(inc.startedAt))
     const b = buckets.get(dayKey)
     if (!b) continue
     const sev = severityOf(inc)
