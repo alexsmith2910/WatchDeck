@@ -1199,7 +1199,9 @@ export class MongoDBAdapter extends StorageAdapter {
   ): Promise<DbPage<T>> {
     if (!this.db) return { items: [], total: 0, hasMore: false, nextCursor: null, prevCursor: null }
 
-    const limit = Math.min(opts.limit ?? 20, 100)
+    // Hard safety ceiling; route handlers apply their own (tighter) caps
+    // via parsePagination or inline logic before reaching this helper.
+    const limit = Math.min(opts.limit ?? 20, 5000)
     const coll = this.db.collection<T>(`${this.dbPrefix}${collSuffix}`)
     const sortDir = Object.values(sort)[0] ?? 1
 

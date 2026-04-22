@@ -46,14 +46,22 @@ export function checksRoutes(ctx: AppContext) {
         to?: string
         status?: 'healthy' | 'degraded' | 'down'
       }
+      // Unlike the shared parsePagination (cap 100), /checks allows up to
+      // 5000 per request so the dashboard's 24h raw-check view can load a
+      // full day (~1440 points at 1-min intervals, higher for sub-minute
+      // schedules) in a single round trip.
       const pagination = parsePagination(query)
+      const limit = query.limit
+        ? Math.min(Math.max(1, parseInt(query.limit, 10) || 20), 5000)
+        : (pagination.limit ?? 20)
       const page = await ctx.adapter.listChecks(id, {
         ...pagination,
+        limit,
         from: query.from ? new Date(query.from) : undefined,
         to: query.to ? new Date(query.to) : undefined,
         status: query.status,
       })
-      return reply.send(toEnvelope(page, pagination.limit ?? 20))
+      return reply.send(toEnvelope(page, limit))
     })
 
     // ── GET /endpoints/:id/hourly ────────────────────────────────────────────
