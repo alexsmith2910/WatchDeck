@@ -246,13 +246,7 @@ export class NotificationDispatcher {
       failureReason: result.failureReason,
     })
     const ok = result.status === 'sent'
-    if (ok && !channel.isConnected) {
-      await this.adapter.updateNotificationChannel(channelId, { isConnected: true })
-      eventBus.emit('notification:channelUpdated', {
-        timestamp: new Date(),
-        channelId,
-      })
-    }
+    await this.recordChannelDeliveryOutcome(channel, ok)
     eventBus.emit('notification:test', {
       timestamp: new Date(),
       channelId,
@@ -337,6 +331,7 @@ export class NotificationDispatcher {
       failureReason: result.failureReason,
       retryOf: retryOfLogId,
     })
+    await this.recordChannelDeliveryOutcome(channel, result.status === 'sent')
     if (result.status === 'sent') {
       notificationMetrics.recordSent({ kind, channelId: channel._id.toHexString() })
       if (log) {
@@ -699,6 +694,7 @@ export class NotificationDispatcher {
         latencyMs: result.latencyMs,
         retryOf: dispatch.retryOfLogId,
       })
+      await this.recordChannelDeliveryOutcome(channel, true)
       const endpointId = message.endpoint?.id
       if (endpointId && dispatch.cooldownSeconds) {
         this.cooldowns.stamp(
@@ -746,6 +742,7 @@ export class NotificationDispatcher {
       failureReason: result.failureReason,
       retryOf: dispatch.retryOfLogId,
     })
+    await this.recordChannelDeliveryOutcome(channel, false)
     notificationMetrics.recordFailed({ kind: message.kind, channelId: dispatch.channelId })
     if (log) {
       eventBus.emit('notification:failed', {
@@ -849,6 +846,7 @@ export class NotificationDispatcher {
       coalescedCount: count,
       coalescedIncidentIds: incidentIds,
     })
+    await this.recordChannelDeliveryOutcome(channel, result.status === 'sent')
     if (result.status === 'sent') {
       notificationMetrics.recordSent({ kind: summaryMessage.kind, channelId: payload.channelId })
     } else {
@@ -888,6 +886,41 @@ export class NotificationDispatcher {
       incidentId: message.incident?.id,
       suppressedReason: suppression.reason,
     })
+  }
+
+  /**
+   * Updates channel health after a real send attempt (test, incident alert,
+   * retry, or coalesced summary). Always stamps `lastSuccessAt`/`lastFailureAt`
+   * so the dashboard can tell a freshly-failing channel from one that hasn't
+   * been exercised. Only emits `notification:channelUpdated` when the
+   * `isConnected` flag actually flips, to avoid log spam on every send.
+   *
+   * Intentionally skipped: suppressed rows and "no provider" stubs — neither
+   * represents a transport failure, so neither should mark the channel
+   * offline.
+   */
+  private async recordChannelDeliveryOutcome(
+    channel: NotificationChannelDoc,
+    ok: boolean,
+  ): Promise<void> {
+    const now = new Date()
+    const changes: Partial<NotificationChannelDoc> = ok
+      ? { lastSuccessAt: now }
+      : { lastFailureAt: now }
+    const flip = ok !== channel.isConnected
+    if (flip) changes.isConnected = ok
+    try {
+      await this.adapter.updateNotificationChannel(channel._id.toHexString(), changes)
+    } catch (err) {
+      console.error('[notifications] failed to update channel health:', err)
+      return
+    }
+    if (flip) {
+      eventBus.emit('notification:channelUpdated', {
+        timestamp: now,
+        channelId: channel._id.toHexString(),
+      })
+    }
   }
 
   private async writeLog(row: {

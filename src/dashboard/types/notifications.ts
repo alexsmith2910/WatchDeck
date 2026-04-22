@@ -75,6 +75,8 @@ export interface ApiChannel {
 
   isConnected: boolean
   lastTestedAt?: string
+  lastSuccessAt?: string
+  lastFailureAt?: string
   createdAt: string
   updatedAt: string
 }

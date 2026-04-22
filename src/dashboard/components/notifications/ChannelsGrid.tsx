@@ -44,6 +44,7 @@ import {
   channelTargetLabel,
   deriveChannelStatus,
   formatRelative,
+  latencyP95ByChannel,
   statsByChannel,
   type ChannelUiStatus,
 } from './notificationHelpers'
@@ -70,6 +71,12 @@ const STATUS_STYLE: Record<ChannelUiStatus, { label: string; chip: string; card:
     card: 'border-wd-warning/30',
     spark: 'var(--wd-warning)',
   },
+  failing: {
+    label: 'Failing',
+    chip: 'bg-wd-danger/15 text-wd-danger',
+    card: 'border-wd-danger/30',
+    spark: 'var(--wd-danger)',
+  },
   paused: {
     label: 'Paused',
     chip: 'bg-wd-paused/15 text-wd-paused',
@@ -84,6 +91,7 @@ export function ChannelsGrid({ channels, stats, recentLog, onChanged, onFilterBy
   const [deleteTarget, setDeleteTarget] = useState<ApiChannel | null>(null)
 
   const byChannel = useMemo(() => statsByChannel(stats), [stats])
+  const p95ByChannel = useMemo(() => latencyP95ByChannel(recentLog), [recentLog])
   const lastByChannel = useMemo(() => {
     const m = new Map<string, ApiNotificationLogRow>()
     for (const r of recentLog) {
@@ -133,7 +141,7 @@ export function ChannelsGrid({ channels, stats, recentLog, onChanged, onFilterBy
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {channels.map((ch) => {
           const chStats = byChannel.get(ch._id)
-          const status = deriveChannelStatus(ch, chStats)
+          const status = deriveChannelStatus(ch, chStats, p95ByChannel.get(ch._id))
           const lastLog = lastByChannel.get(ch._id) ?? null
           const spark = channelSparkline(recentLog, ch._id, 24 * 60 * 60 * 1000, 24)
           return (

@@ -311,8 +311,19 @@ export interface NotificationChannelDoc {
   webhookHeaders?: Record<string, string>
   webhookBodyTemplate?: string
 
+  /**
+   * Reflects the outcome of the most recent send attempt (test, real alert,
+   * coalesced summary, or retry). True while deliveries are succeeding, flips
+   * to false on the first failure. Used by the dashboard to distinguish a
+   * "failing" channel (connection broken) from a "degraded" one (connection
+   * works but some attempts are slow or failing).
+   */
   isConnected: boolean
   lastTestedAt?: Date
+  /** Timestamp of the most recent successful send (any kind). */
+  lastSuccessAt?: Date
+  /** Timestamp of the most recent failed send (any kind). */
+  lastFailureAt?: Date
 
   createdAt: Date
   updatedAt: Date

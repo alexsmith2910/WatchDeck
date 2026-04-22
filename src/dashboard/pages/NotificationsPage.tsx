@@ -35,6 +35,7 @@ import {
   bucketLog,
   deriveChannelStatus,
   deriveOverallState,
+  latencyP95ByChannel,
   statsByChannel,
 } from '../components/notifications/notificationHelpers'
 import type {
@@ -194,13 +195,19 @@ export default function NotificationsPage() {
 
   // ── Derived data ───────────────────────────────────────────────────────
   const byChannelStats = useMemo(() => statsByChannel(stats), [stats])
+  const p95ByChannel = useMemo(() => latencyP95ByChannel(recentLog), [recentLog])
   const overallState = useMemo(
-    () => deriveOverallState(channels, stats, byChannelStats),
-    [channels, stats, byChannelStats],
+    () => deriveOverallState(channels, stats, byChannelStats, p95ByChannel),
+    [channels, stats, byChannelStats, p95ByChannel],
   )
   const healthyChannels = useMemo(
-    () => channels.filter((c) => c.enabled && deriveChannelStatus(c, byChannelStats.get(c._id)) === 'healthy').length,
-    [channels, byChannelStats],
+    () =>
+      channels.filter(
+        (c) =>
+          c.enabled &&
+          deriveChannelStatus(c, byChannelStats.get(c._id), p95ByChannel.get(c._id)) === 'healthy',
+      ).length,
+    [channels, byChannelStats, p95ByChannel],
   )
   const chartBuckets = useMemo(
     () => bucketLog(recentLog, RANGE_MS[timeRange], RANGE_BUCKETS[timeRange]),

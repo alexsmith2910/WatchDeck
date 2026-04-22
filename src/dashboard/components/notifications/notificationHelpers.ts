@@ -7,7 +7,14 @@
 import type { ApiChannel, ApiNotificationLogRow, ApiNotificationStats, ChannelType } from '../../types/notifications'
 
 export type OverallDeliveryState = 'operational' | 'degraded' | 'outage'
-export type ChannelUiStatus = 'healthy' | 'degraded' | 'paused'
+export type ChannelUiStatus = 'healthy' | 'degraded' | 'failing' | 'paused'
+
+/** Latency ceiling (ms) at which a channel with a live connection is still
+ *  considered "degraded" rather than "healthy". Picked to flag webhook endpoints
+ *  that are responding but taking unusually long. */
+const DEGRADED_P95_MS = 3000
+/** Failed window — a channel is only "failing" if its disconnect is recent. */
+const FAILING_WINDOW_MS = 24 * 60 * 60 * 1000
 
 export interface ChannelStats {
   sent: number
@@ -59,39 +66,76 @@ export function statsByChannel(stats: ApiNotificationStats | null): Map<string, 
 }
 
 /**
- * Per-channel UI health. We can't see recent DB write failures from the
- * client, so we derive health from what we have: the enabled bit, the
- * connection flag set by the last test, and the 24h failure rate.
+ * Per-channel UI health.
+ *
+ * - `paused`   — channel is disabled.
+ * - `failing`  — last send attempt failed (isConnected === false) and that
+ *                failure happened within the last 24h. Means the transport is
+ *                broken right now, not just slow.
+ * - `degraded` — connection works, but deliveries are slow (p95 > 3s) or a
+ *                non-trivial share of recent attempts failed (>5%).
+ * - `healthy`  — connected and within thresholds, or brand-new with no traffic.
+ *
+ * `p95LatencyMs` is optional — when omitted the latency signal is skipped and
+ * only the isConnected + failure-rate heuristics run.
  */
 export function deriveChannelStatus(
   ch: ApiChannel,
   s: ChannelStats | undefined,
+  p95LatencyMs?: number | null,
 ): ChannelUiStatus {
   if (!ch.enabled) return 'paused'
+
   const total = (s?.sent ?? 0) + (s?.failed ?? 0)
   const failureRate = total > 0 ? (s?.failed ?? 0) / total : 0
-  if (!ch.isConnected && total > 0) return 'degraded'
+
+  // Transport broken: last attempt failed recently. We require evidence of a
+  // recent failed attempt so brand-new, never-exercised channels don't get
+  // flagged as failing.
+  if (!ch.isConnected) {
+    const failedAt = ch.lastFailureAt ? new Date(ch.lastFailureAt).getTime() : null
+    if (failedAt !== null && Date.now() - failedAt < FAILING_WINDOW_MS) return 'failing'
+  }
+
   if (failureRate > 0.05) return 'degraded'
+  if (typeof p95LatencyMs === 'number' && p95LatencyMs > DEGRADED_P95_MS) return 'degraded'
   return 'healthy'
 }
 
 /**
- * Overall banner state — aggregates enabled channels + 24h totals. Outage is
- * reserved for >15% failure or zero connected channels with traffic present.
+ * Overall banner state — aggregates enabled channels + 24h totals.
+ *
+ * - `outage`   — all enabled channels with traffic are failing, or aggregate
+ *                failure rate exceeds 15%.
+ * - `degraded` — any channel is failing/degraded, or aggregate failure rate
+ *                exceeds 5%.
+ * - `operational` — otherwise.
  */
 export function deriveOverallState(
   channels: ApiChannel[],
   stats: ApiNotificationStats | null,
   byChannel: Map<string, ChannelStats>,
+  p95ByChannel?: Map<string, number>,
 ): OverallDeliveryState {
   const active = channels.filter((c) => c.enabled)
   if (active.length === 0) return 'operational'
   const total = (stats?.sent ?? 0) + (stats?.failed ?? 0)
-  if (total === 0) return 'operational'
-  const failureRate = (stats?.failed ?? 0) / total
+  const failureRate = total > 0 ? (stats?.failed ?? 0) / total : 0
+
+  const statuses = active.map((c) =>
+    deriveChannelStatus(c, byChannel.get(c._id), p95ByChannel?.get(c._id)),
+  )
+  const failingCount = statuses.filter((s) => s === 'failing').length
+  const activeWithTraffic = active.filter((c) => {
+    const cs = byChannel.get(c._id)
+    return (cs?.sent ?? 0) + (cs?.failed ?? 0) > 0
+  }).length
+
   if (failureRate > 0.15) return 'outage'
-  const hasDegradedChannel = active.some((c) => deriveChannelStatus(c, byChannel.get(c._id)) === 'degraded')
-  if (failureRate > 0.05 || hasDegradedChannel) return 'degraded'
+  if (failingCount > 0 && activeWithTraffic > 0 && failingCount >= activeWithTraffic) return 'outage'
+  if (failingCount > 0) return 'degraded'
+  if (failureRate > 0.05) return 'degraded'
+  if (statuses.some((s) => s === 'degraded')) return 'degraded'
   return 'operational'
 }
 
@@ -190,6 +234,27 @@ export function bucketLog(
   }
 
   return buckets
+}
+
+/**
+ * Per-channel p95 latency across all successful sends in the log. Used by
+ * `deriveChannelStatus` to flag "connection works but slow" as degraded.
+ */
+export function latencyP95ByChannel(log: ApiNotificationLogRow[]): Map<string, number> {
+  const buckets = new Map<string, number[]>()
+  for (const r of log) {
+    if (r.deliveryStatus !== 'sent') continue
+    if (typeof r.latencyMs !== 'number') continue
+    const arr = buckets.get(r.channelId)
+    if (arr) arr.push(r.latencyMs)
+    else buckets.set(r.channelId, [r.latencyMs])
+  }
+  const out = new Map<string, number>()
+  for (const [id, vals] of buckets) {
+    const p = percentile(vals, 95)
+    if (p !== null) out.set(id, p)
+  }
+  return out
 }
 
 /** Median latency across all `sent` entries in the log (for the KPI tile). */
