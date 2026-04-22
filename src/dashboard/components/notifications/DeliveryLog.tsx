@@ -229,10 +229,10 @@ export function DeliveryLog({ channels, filters, onFilterChange, onOpenRow, refr
         />
 
         <SelectDropdown
-          label="kind"
+          label="type"
           value={filters.kind ?? '__all__'}
           options={[
-            { id: '__all__', label: 'All Kinds' },
+            { id: '__all__', label: 'All Types' },
             { id: 'incident_opened', label: 'Opened' },
             { id: 'incident_resolved', label: 'Resolved' },
             { id: 'incident_escalated', label: 'Escalation' },
