@@ -54,7 +54,9 @@ export default function KeyValueEditor({
       {label && <span className="text-xs font-medium text-wd-muted">{label}</span>}
 
       {pairs.map((pair, i) => (
-        <div key={i} className="flex items-center gap-2">
+        // Prefer pair.key for identity so removing a middle row doesn't
+        // shift other rows' inputs. Falls back to index for blank new rows.
+        <div key={pair.key ? `k:${pair.key}` : `new:${i}`} className="flex items-center gap-2">
           <TextField className="flex-1" isDisabled={isDisabled} aria-label={`Header key ${i + 1}`}>
             <Input
               placeholder={keyPlaceholder}
