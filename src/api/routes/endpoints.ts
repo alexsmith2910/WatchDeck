@@ -51,6 +51,7 @@ const createBodySchema = {
     recoveryAlert: { type: 'boolean' },
     escalationDelay: { type: 'integer' },
     notificationChannelIds: { type: 'array', items: { type: 'string' } },
+    pausedNotificationChannelIds: { type: 'array', items: { type: 'string' } },
   },
   additionalProperties: false,
 } as const
@@ -182,9 +183,9 @@ export function endpointsRoutes(ctx: AppContext) {
         alertCooldown: (body.alertCooldown as number | undefined) ?? cfg.alertCooldown,
         recoveryAlert: (body.recoveryAlert as boolean | undefined) ?? cfg.recoveryAlert,
         escalationDelay: (body.escalationDelay as number | undefined) ?? cfg.escalationDelay,
-        notificationChannelIds: ((body.notificationChannelIds as string[] | undefined) ?? []).map(
-          (id) => new ObjectId(id),
-        ),
+        notificationChannelIds: ((body.notificationChannelIds as unknown[] | undefined) ?? [])
+          .filter((v): v is string => typeof v === 'string' && ObjectId.isValid(v))
+          .map((id) => new ObjectId(id)),
         maintenanceWindows: [],
         consecutiveFailures: 0,
       }
@@ -230,6 +231,11 @@ export function endpointsRoutes(ctx: AppContext) {
       // ObjectId instances — mixing shapes causes runtime crashes.
       if (Array.isArray(changes.notificationChannelIds)) {
         changes.notificationChannelIds = (changes.notificationChannelIds as unknown[])
+          .filter((v): v is string => typeof v === 'string' && ObjectId.isValid(v))
+          .map((v) => new ObjectId(v))
+      }
+      if (Array.isArray(changes.pausedNotificationChannelIds)) {
+        changes.pausedNotificationChannelIds = (changes.pausedNotificationChannelIds as unknown[])
           .filter((v): v is string => typeof v === 'string' && ObjectId.isValid(v))
           .map((v) => new ObjectId(v))
       }
