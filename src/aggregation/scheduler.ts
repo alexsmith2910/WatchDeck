@@ -72,7 +72,6 @@ export class AggregationScheduler {
         this._nextHourlyRunAt = Date.now() + 3_600_000
         void this.runHourly()
       }, 3_600_000)
-      this._nextHourlyRunAt = Date.now() + 3_600_000
     }, msUntilNextHour)
 
     // Schedule daily at the configured UTC time.
@@ -161,17 +160,22 @@ export class AggregationScheduler {
 
       const count = await aggregateDay(this.adapter, yesterday)
 
-      // Run retention cleanup.
-      const cleanup = await runCleanup(this.adapter, this.config)
+      const dailyDurationMs = Date.now() - start
 
-      const durationMs = Date.now() - start
+      // Run retention cleanup separately so its duration is measured honestly
+      // — both events feed the aggregator probe, and reporting 0 for cleanup
+      // hides slow retention sweeps.
+      const cleanupStart = Date.now()
+      const cleanup = await runCleanup(this.adapter, this.config)
+      const cleanupDurationMs = Date.now() - cleanupStart
+
       this._lastDailyRunAt = Date.now()
-      this._lastDailyDurationMs = durationMs
+      this._lastDailyDurationMs = dailyDurationMs + cleanupDurationMs
 
       eventBus.emit('aggregation:run', {
         timestamp: new Date(),
         kind: 'daily',
-        durationMs,
+        durationMs: dailyDurationMs,
         rowsIn: 0,
         rowsOut: count,
         ok: true,
@@ -179,9 +183,12 @@ export class AggregationScheduler {
       eventBus.emit('aggregation:run', {
         timestamp: new Date(),
         kind: 'cleanup',
-        durationMs: 0,
+        durationMs: cleanupDurationMs,
         rowsIn: 0,
-        rowsOut: cleanup.hourlyDeleted + cleanup.dailyDeleted,
+        rowsOut:
+          cleanup.hourlyDeleted +
+          cleanup.dailyDeleted +
+          cleanup.notificationLogsRedacted,
         ok: true,
       })
     } catch (err) {
