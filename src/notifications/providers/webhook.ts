@@ -26,11 +26,14 @@ import type {
   ProviderResult,
   ValidationResult,
 } from '../types.js'
+import { redactHeaders, redactUrl, truncate as redactTruncate } from '../redact.js'
 import { NotificationProvider } from './provider.js'
 
 const ALLOWED_METHODS: ReadonlyArray<'POST' | 'PUT' | 'PATCH'> = ['POST', 'PUT', 'PATCH']
 const DEFAULT_TIMEOUT_MS = 10_000
 const DEFAULT_USER_AGENT = 'WatchDeck-Webhook/1.0'
+const REQUEST_BODY_LIMIT = 4 * 1024
+const RESPONSE_BODY_LIMIT = 2 * 1024
 
 export class WebhookProvider extends NotificationProvider {
   readonly type: NotificationChannelType = 'webhook'
@@ -92,6 +95,12 @@ export class WebhookProvider extends NotificationProvider {
     const method = target.webhookMethod ?? 'POST'
     const rendered = renderBody(msg, target.webhookBodyTemplate)
     const headers = buildHeaders(target.webhookHeaders, rendered.contentType)
+    const requestCapture = {
+      method,
+      url: redactUrl(target.webhookUrl),
+      headers: redactHeaders(headers),
+      body: redactTruncate(rendered.body, REQUEST_BODY_LIMIT),
+    }
     const start = performance.now()
     try {
       const response = await undiciRequest(target.webhookUrl, {
@@ -105,11 +114,17 @@ export class WebhookProvider extends NotificationProvider {
       const latencyMs = Math.round(performance.now() - start)
       // Consume the body to free the connection; we don't surface it.
       const responseText = await response.body.text().catch(() => '')
+      const responseCapture = {
+        statusCode: response.statusCode,
+        bodyExcerpt: redactTruncate(responseText, RESPONSE_BODY_LIMIT) || undefined,
+      }
       if (response.statusCode >= 200 && response.statusCode < 300) {
         return {
           status: 'sent',
           latencyMs,
           providerMeta: { statusCode: response.statusCode, bytes: rendered.body.length },
+          request: requestCapture,
+          response: responseCapture,
         }
       }
       return {
@@ -117,12 +132,15 @@ export class WebhookProvider extends NotificationProvider {
         latencyMs,
         failureReason: `HTTP ${response.statusCode}${responseText ? ` · ${truncate(responseText, 160)}` : ''}`,
         providerMeta: { statusCode: response.statusCode },
+        request: requestCapture,
+        response: responseCapture,
       }
     } catch (err) {
       return {
         status: 'failed',
         latencyMs: Math.round(performance.now() - start),
         failureReason: err instanceof Error ? err.message : String(err),
+        request: requestCapture,
       }
     }
   }

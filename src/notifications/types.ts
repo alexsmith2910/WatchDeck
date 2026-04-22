@@ -55,6 +55,22 @@ export interface NotificationMessage {
   idempotencyKey: string
 }
 
+/** Outbound HTTP request captured at dispatch time (already redacted). */
+export interface ProviderRequestCapture {
+  method: string
+  url: string
+  headers: Record<string, string>
+  body?: string
+}
+
+/** Provider response captured at dispatch time. */
+export interface ProviderResponseCapture {
+  statusCode?: number
+  bodyExcerpt?: string
+  providerId?: string
+  url?: string
+}
+
 /** Result returned by a provider's `send()` / `test()`. */
 export interface ProviderResult {
   status: 'sent' | 'failed' | 'skipped'
@@ -62,6 +78,10 @@ export interface ProviderResult {
   deliveryId?: string
   failureReason?: string
   providerMeta?: Record<string, unknown>
+  /** Set by providers that make HTTP requests — already redacted + truncated. */
+  request?: ProviderRequestCapture
+  /** Set by providers that make HTTP requests — already truncated. */
+  response?: ProviderResponseCapture
 }
 
 /** Minimal validation return for a provider's pre-flight check. */

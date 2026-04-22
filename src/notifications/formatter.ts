@@ -6,7 +6,29 @@
  * webhook provider and channel-test flows reuse the plain-text shape below.
  */
 
+import type { NotificationLogPayload } from '../storage/types.js'
 import type { NotificationMessage } from './types.js'
+import { truncate } from './redact.js'
+
+const PAYLOAD_MARKDOWN_LIMIT = 1024
+
+/**
+ * Channel-agnostic snapshot of what the dispatcher asked the provider to
+ * render. Persisted on the notification-log row so the dashboard can show
+ * what *was* sent even after templates change later. Kept ≤1KB for the
+ * markdown slice; fields are deliberately bounded by input already.
+ */
+export function payloadSnapshot(msg: NotificationMessage): NotificationLogPayload {
+  const snap: NotificationLogPayload = {
+    title: msg.title,
+    summary: msg.summary,
+  }
+  if (msg.detail) snap.markdown = truncate(msg.detail, PAYLOAD_MARKDOWN_LIMIT)
+  if (msg.fields?.length) {
+    snap.fields = msg.fields.map((f) => ({ label: f.label, value: f.value }))
+  }
+  return snap
+}
 
 export function formatAsPlainText(msg: NotificationMessage): string {
   const lines: string[] = []

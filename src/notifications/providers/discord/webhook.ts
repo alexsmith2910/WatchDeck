@@ -22,12 +22,16 @@ import type {
   NotificationMessage,
   ProviderResult,
 } from '../../types.js'
+import { redactHeaders, redactUrl, truncate as redactTruncate } from '../../redact.js'
 import {
   DISCORD_USER_AGENT,
   REQUEST_TIMEOUT_MS,
   isValidWebhookUrl,
 } from './api.js'
 import { buildDiscordPayload } from './message.js'
+
+const REQUEST_BODY_LIMIT = 4 * 1024
+const RESPONSE_BODY_LIMIT = 2 * 1024
 
 export async function sendViaWebhook(
   msg: NotificationMessage,
@@ -51,27 +55,42 @@ export async function sendViaWebhook(
 
   const payload = buildDiscordPayload(msg, channel)
   const body = JSON.stringify(payload)
+  const requestHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'User-Agent': DISCORD_USER_AGENT,
+  }
+  const requestCapture = {
+    method: 'POST',
+    url: redactUrl(url),
+    headers: redactHeaders(requestHeaders),
+    body: redactTruncate(body, REQUEST_BODY_LIMIT),
+  }
   const start = performance.now()
 
   try {
     const response = await undiciRequest(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': DISCORD_USER_AGENT,
-      },
+      headers: requestHeaders,
       body,
       headersTimeout: REQUEST_TIMEOUT_MS,
       bodyTimeout: REQUEST_TIMEOUT_MS,
     })
     const latencyMs = Math.round(performance.now() - start)
     const text = await response.body.text().catch(() => '')
+    const providerId = firstHeader(response.headers, 'x-discord-messageid')
+    const responseCapture = {
+      statusCode: response.statusCode,
+      bodyExcerpt: redactTruncate(text, RESPONSE_BODY_LIMIT) || undefined,
+      providerId,
+    }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return {
         status: 'sent',
         latencyMs,
         providerMeta: { statusCode: response.statusCode, bytes: body.length },
+        request: requestCapture,
+        response: responseCapture,
       }
     }
 
@@ -84,6 +103,8 @@ export async function sendViaWebhook(
         latencyMs,
         failureReason: `Discord rate-limited the webhook (retry after ${retryAfter ?? '?'}s)`,
         providerMeta: { statusCode: 429, retryAfter },
+        request: requestCapture,
+        response: responseCapture,
       }
     }
 
@@ -92,14 +113,26 @@ export async function sendViaWebhook(
       latencyMs,
       failureReason: `Discord responded HTTP ${response.statusCode}${text ? ` · ${truncate(text, 160)}` : ''}`,
       providerMeta: { statusCode: response.statusCode },
+      request: requestCapture,
+      response: responseCapture,
     }
   } catch (err) {
     return {
       status: 'failed',
       latencyMs: Math.round(performance.now() - start),
       failureReason: err instanceof Error ? err.message : String(err),
+      request: requestCapture,
     }
   }
+}
+
+function firstHeader(
+  headers: Record<string, string | string[] | undefined>,
+  name: string,
+): string | undefined {
+  const v = headers[name]
+  if (Array.isArray(v)) return v[0]
+  return v
 }
 
 function parseRetryAfter(
