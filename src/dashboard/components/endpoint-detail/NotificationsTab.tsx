@@ -26,6 +26,8 @@ import type { ApiEndpoint, ApiPagination } from "../../types/api";
 import {
   type ApiChannel,
   type ApiNotificationLogRow,
+  type NotificationKind,
+  type NotificationSeverity,
   CHANNEL_TYPE_ICON,
   CHANNEL_TYPE_LABEL,
   KIND_LABEL,
@@ -46,9 +48,13 @@ import {
 } from "./primitives";
 
 type StatusFilter = "all" | "sent" | "failed" | "suppressed" | "pending";
+type SeverityFilter = "all" | NotificationSeverity;
+type KindFilter = "all" | NotificationKind;
 
 interface Filters {
   status: StatusFilter;
+  severity: SeverityFilter;
+  kind: KindFilter;
   channelId: string;
   customRange: RangeValue<DateValue> | null;
   q: string;
@@ -56,6 +62,8 @@ interface Filters {
 
 const DEFAULTS: Filters = {
   status: "all",
+  severity: "all",
+  kind: "all",
   channelId: "all",
   customRange: null,
   q: "",
@@ -75,6 +83,18 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [filters, setFilters] = useState<Filters>(DEFAULTS);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [todayCount, setTodayCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    void request<{ data: { endpointTotal: number } }>(
+      `/endpoints/${endpointId}/notifications/stats?from=${from}`,
+    ).then((res) => {
+      if (res?.status != null && res.status < 400) {
+        setTodayCount(res.data?.data?.endpointTotal ?? 0);
+      }
+    });
+  }, [endpointId, request]);
 
   // Local optimistic mirror of `endpoint.pausedNotificationChannelIds`.
   // The PATCH is fire-and-forget — on failure we roll back to the server
@@ -133,6 +153,8 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
       const params = new URLSearchParams();
       params.set("limit", "50");
       if (filters.status !== "all") params.set("status", filters.status);
+      if (filters.severity !== "all") params.set("severity", filters.severity);
+      if (filters.kind !== "all") params.set("kind", filters.kind);
       if (filters.channelId !== "all")
         params.set("channelId", filters.channelId);
       if (filters.q.trim()) params.set("search", filters.q.trim());
@@ -166,6 +188,8 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
     [
       endpointId,
       filters.status,
+      filters.severity,
+      filters.kind,
       filters.channelId,
       filters.customRange,
       pagination?.nextCursor,
@@ -180,6 +204,8 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
   }, [
     endpointId,
     filters.status,
+    filters.severity,
+    filters.kind,
     filters.channelId,
     filters.customRange,
     filters.q,
@@ -230,6 +256,31 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
           onChange={(status) => patch({ status })}
           ariaLabel="Delivery status"
         />
+        <FilterDropdown<SeverityFilter>
+          value={filters.severity}
+          options={[
+            { id: "all", label: "All severities" },
+            { id: "critical", label: "Critical", dot: "var(--wd-danger)" },
+            { id: "warning", label: "Warning", dot: "var(--wd-warning)" },
+            { id: "info", label: "Info", dot: "var(--wd-primary)" },
+            { id: "success", label: "Success", dot: "var(--wd-success)" },
+          ]}
+          onChange={(severity) => patch({ severity })}
+          ariaLabel="Notification severity"
+        />
+        <FilterDropdown<KindFilter>
+          value={filters.kind}
+          options={[
+            { id: "all", label: "All event types" },
+            { id: "incident_opened", label: "Opened" },
+            { id: "incident_resolved", label: "Resolved" },
+            { id: "incident_escalated", label: "Escalation" },
+            { id: "channel_test", label: "Test" },
+            { id: "custom", label: "Custom" },
+          ]}
+          onChange={(kind) => patch({ kind })}
+          ariaLabel="Notification event type"
+        />
         <DateRangeFilter
           value={filters.customRange}
           onChange={(customRange) => patch({ customRange })}
@@ -241,10 +292,7 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
           onChange={(channelId) => patch({ channelId })}
           ariaLabel="Notifications channel"
         />
-        <div className="ml-auto flex items-center gap-3">
-          <span className="text-[11px] text-wd-muted font-mono">
-            {filtered.length} shown
-          </span>
+        <div className="ml-auto">
           <FilterSearch
             ariaLabel="Search notifications"
             value={filters.q}
@@ -256,20 +304,18 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
 
       <div className="rounded-xl border border-wd-border/50 bg-wd-surface overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-wd-border/50">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <div className="text-[13px] font-semibold text-foreground">
               Delivery log
             </div>
-            <span className="text-[11px] text-wd-muted font-mono">
-              {filtered.length} {filtered.length === 1 ? "entry" : "entries"}
-            </span>
+            <TodayCountNotifications count={todayCount} />
           </div>
           <span className="text-[11px] text-wd-muted">
             Click a row to inspect
           </span>
         </div>
 
-        <div className="grid grid-cols-[14px_150px_180px_minmax(180px,1fr)_110px_88px_60px_22px] items-center gap-x-3 px-4 py-1.5 text-[10px] uppercase tracking-wider text-wd-muted border-b border-wd-border/40 font-semibold">
+        <div className="grid grid-cols-[14px_200px_180px_minmax(180px,1fr)_110px_88px_60px_22px] items-center gap-x-3 px-4 py-2.5 text-[10px] uppercase tracking-[0.08em] text-wd-muted border-b border-wd-border/50 bg-wd-surface-hover/30 font-semibold">
           <span />
           <span>When</span>
           <span>Channel</span>
@@ -280,60 +326,62 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
           <span />
         </div>
 
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <Spinner size="lg" />
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <Icon
-              icon="solar:bell-off-linear"
-              width={28}
-              className="text-wd-muted mb-3"
-            />
-            <div className="text-[13px] text-foreground font-medium">
-              No deliveries match these filters.
+        <div className="min-h-[520px] flex flex-col">
+          {loading ? (
+            <div className="flex-1 flex items-center justify-center">
+              <Spinner size="lg" />
             </div>
-            <div className="text-[11px] text-wd-muted mt-1">
-              Try a broader status, date range, or clear search.
+          ) : filtered.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center">
+              <Icon
+                icon="solar:bell-off-linear"
+                width={28}
+                className="text-wd-muted mb-3"
+              />
+              <div className="text-[13px] text-foreground font-medium">
+                No deliveries match these filters.
+              </div>
+              <div className="text-[11px] text-wd-muted mt-1">
+                Try a broader status, date range, or clear search.
+              </div>
             </div>
-          </div>
-        ) : (
-          <ul className="divide-y divide-wd-border/40">
-            {filtered.map((r) => {
-              const rowChannel = channelById.get(r.channelId) ?? null;
-              return (
-                <LogRow
-                  key={r._id}
-                  row={r}
-                  channel={rowChannel}
-                  expanded={expandedId === r._id}
-                  onToggle={() =>
-                    setExpandedId((prev) =>
-                      prev === r._id ? null : r._id,
-                    )
-                  }
-                />
-              );
-            })}
-            {pagination?.hasMore && (
-              <li className="flex justify-center py-3">
-                <button
-                  onClick={() => void fetchLog(false)}
-                  disabled={loadingMore}
-                  className="inline-flex items-center gap-1.5 text-[12px] text-wd-primary hover:underline disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
-                >
-                  {loadingMore ? (
-                    <Spinner size="sm" />
-                  ) : (
-                    <Icon icon="solar:arrow-down-linear" width={14} />
-                  )}
-                  Load older
-                </button>
-              </li>
-            )}
-          </ul>
-        )}
+          ) : (
+            <ul className="divide-y divide-wd-border/40">
+              {filtered.map((r) => {
+                const rowChannel = channelById.get(r.channelId) ?? null;
+                return (
+                  <LogRow
+                    key={r._id}
+                    row={r}
+                    channel={rowChannel}
+                    expanded={expandedId === r._id}
+                    onToggle={() =>
+                      setExpandedId((prev) =>
+                        prev === r._id ? null : r._id,
+                      )
+                    }
+                  />
+                );
+              })}
+              {pagination?.hasMore && (
+                <li className="flex justify-center py-3">
+                  <button
+                    onClick={() => void fetchLog(false)}
+                    disabled={loadingMore}
+                    className="inline-flex items-center gap-1.5 text-[12px] text-wd-primary hover:underline disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    {loadingMore ? (
+                      <Spinner size="sm" />
+                    ) : (
+                      <Icon icon="solar:arrow-down-linear" width={14} />
+                    )}
+                    Load older
+                  </button>
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -586,7 +634,7 @@ function LogRow({
     <li className="bg-wd-surface">
       <button
         onClick={onToggle}
-        className="w-full grid grid-cols-[14px_150px_180px_minmax(180px,1fr)_110px_88px_60px_22px] items-center gap-x-3 px-4 py-2 text-left hover:bg-wd-surface-hover/60 transition-colors cursor-pointer"
+        className="w-full grid grid-cols-[14px_200px_180px_minmax(180px,1fr)_110px_88px_60px_22px] items-center gap-x-3 px-4 py-2 text-left hover:bg-wd-surface-hover/60 transition-colors cursor-pointer"
       >
         <span
           className={cn(
@@ -1064,5 +1112,28 @@ function KvList({ items }: { items: Array<[string, ReactNode]> }) {
   );
 }
 
+
+function TodayCountNotifications({ count }: { count: number | null }) {
+  if (count == null) {
+    return (
+      <span className="text-[11px] text-wd-muted font-mono opacity-60">
+        loading…
+      </span>
+    );
+  }
+  if (count === 0) {
+    return (
+      <span className="text-[11px] text-wd-muted font-mono">
+        no notifications in the last 24hrs
+      </span>
+    );
+  }
+  return (
+    <span className="text-[11px] text-wd-muted font-mono">
+      <span className="text-foreground">{count}</span>{" "}
+      {count === 1 ? "notification" : "notifications"} in the last 24hrs
+    </span>
+  );
+}
 
 export default memo(NotificationsTabBase);

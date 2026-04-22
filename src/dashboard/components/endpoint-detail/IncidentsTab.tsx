@@ -9,6 +9,8 @@
 import { memo, useMemo, useState } from "react";
 import { cn, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
+import type { DateValue, RangeValue } from "react-aria-components";
+import { getLocalTimeZone } from "@internationalized/date";
 import type { ApiIncident } from "../../types/api";
 import type { ApiChannel } from "../../types/notifications";
 import {
@@ -20,23 +22,20 @@ import {
   type Severity,
 } from "../incidents/incidentHelpers";
 import { TableHeader, TableRow } from "../incidents/IncidentsTable";
-import { FilterDropdown, FilterSearch, Segmented } from "./primitives";
+import {
+  DateRangeFilter,
+  FilterDropdown,
+  FilterSearch,
+  Segmented,
+} from "./primitives";
 
 type StatusFilter = "all" | "active" | "resolved";
-type RangeFilter = "24h" | "7d" | "30d" | "all";
-
-const RANGE_MS: Record<RangeFilter, number | null> = {
-  "24h": 86_400_000,
-  "7d": 7 * 86_400_000,
-  "30d": 30 * 86_400_000,
-  all: null,
-};
 
 interface Filters {
   status: StatusFilter;
   severity: Severity | "all";
   cause: string;
-  range: RangeFilter;
+  customRange: RangeValue<DateValue> | null;
   q: string;
 }
 
@@ -44,7 +43,7 @@ const DEFAULTS: Filters = {
   status: "all",
   severity: "all",
   cause: "all",
-  range: "30d",
+  customRange: null,
   q: "",
 };
 
@@ -74,13 +73,18 @@ function IncidentsTabBase({
 
   const filtered = useMemo(() => {
     const q = filters.q.trim().toLowerCase();
-    const cutoff = RANGE_MS[filters.range];
+    const tz = getLocalTimeZone();
+    const customFrom = filters.customRange
+      ? filters.customRange.start.toDate(tz).getTime()
+      : null;
+    const customTo = filters.customRange
+      ? filters.customRange.end.toDate(tz).getTime()
+      : null;
     return mine.filter((inc) => {
-      if (
-        cutoff != null &&
-        Date.now() - new Date(inc.startedAt).getTime() > cutoff
-      )
-        return false;
+      const started = new Date(inc.startedAt).getTime();
+      if (customFrom != null && customTo != null) {
+        if (started < customFrom || started > customTo) return false;
+      }
       if (filters.status !== "all" && inc.status !== filters.status)
         return false;
       if (filters.severity !== "all" && severityOf(inc) !== filters.severity)
@@ -121,22 +125,15 @@ function IncidentsTabBase({
   return (
     <div className="flex flex-col gap-3 min-w-0">
       <SummaryStrip kpi={kpi} />
-      <FilterBar
-        filters={filters}
-        onChange={patchFilters}
-        count={filtered.length}
-      />
+      <FilterBar filters={filters} onChange={patchFilters} />
 
       <div className="rounded-xl border border-wd-border/50 bg-wd-surface overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-wd-border/50">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <div className="text-[13px] font-semibold text-foreground">
               Timeline
             </div>
-            <span className="text-[11px] text-wd-muted font-mono">
-              {filtered.length}{" "}
-              {filtered.length === 1 ? "incident" : "incidents"}
-            </span>
+            <TodayCountIncidents incidents={mine} />
           </div>
           <div className="inline-flex items-center gap-1.5 text-[11px] text-wd-muted">
             <Icon icon="solar:sort-from-top-to-bottom-linear" width={16} />
@@ -146,48 +143,50 @@ function IncidentsTabBase({
 
         <TableHeader showEndpoint={false} />
 
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <Spinner size="lg" />
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <Icon
-              icon="solar:shield-check-linear"
-              width={28}
-              className="text-wd-success mb-3"
-            />
-            <div className="text-[13px] text-foreground font-medium">
-              No incidents match these filters.
+        <div className="min-h-[520px] flex flex-col">
+          {loading ? (
+            <div className="flex-1 flex items-center justify-center">
+              <Spinner size="lg" />
             </div>
-            <div className="text-[11px] text-wd-muted mt-1">
-              Try a wider window or clear filters above.
+          ) : filtered.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center">
+              <Icon
+                icon="solar:shield-check-linear"
+                width={28}
+                className="text-wd-success mb-3"
+              />
+              <div className="text-[13px] text-foreground font-medium">
+                No incidents match these filters.
+              </div>
+              <div className="text-[11px] text-wd-muted mt-1">
+                Try a wider window or clear filters above.
+              </div>
             </div>
-          </div>
-        ) : (
-          <div>
-            {[...filtered]
-              .sort((a, b) => {
-                const aActive = a.status === "active" ? 1 : 0;
-                const bActive = b.status === "active" ? 1 : 0;
-                if (aActive !== bActive) return bActive - aActive;
-                return (
-                  new Date(b.startedAt).getTime() -
-                  new Date(a.startedAt).getTime()
-                );
-              })
-              .map((inc) => (
-                <TableRow
-                  key={inc._id}
-                  incident={inc}
-                  endpoint={endpointById.get(inc.endpointId)}
-                  channelById={channelById}
-                  sparkline={sparklineByIncidentId.get(inc._id)}
-                  showEndpoint={false}
-                />
-              ))}
-          </div>
-        )}
+          ) : (
+            <div>
+              {[...filtered]
+                .sort((a, b) => {
+                  const aActive = a.status === "active" ? 1 : 0;
+                  const bActive = b.status === "active" ? 1 : 0;
+                  if (aActive !== bActive) return bActive - aActive;
+                  return (
+                    new Date(b.startedAt).getTime() -
+                    new Date(a.startedAt).getTime()
+                  );
+                })
+                .map((inc) => (
+                  <TableRow
+                    key={inc._id}
+                    incident={inc}
+                    endpoint={endpointById.get(inc.endpointId)}
+                    channelById={channelById}
+                    sparkline={sparklineByIncidentId.get(inc._id)}
+                    showEndpoint={false}
+                  />
+                ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -285,11 +284,9 @@ function SummaryCell({
 function FilterBar({
   filters,
   onChange,
-  count,
 }: {
   filters: Filters;
   onChange: (patch: Partial<Filters>) => void;
-  count: number;
 }) {
   const CAUSE_OPTS: Array<{ id: string; label: string }> = [
     { id: "all", label: "All causes" },
@@ -331,21 +328,12 @@ function FilterBar({
         onChange={(cause) => onChange({ cause })}
         ariaLabel="Incident cause"
       />
-      <Segmented<RangeFilter>
-        options={[
-          { key: "24h", label: "24h" },
-          { key: "7d", label: "7d" },
-          { key: "30d", label: "30d" },
-          { key: "all", label: "All" },
-        ]}
-        value={filters.range}
-        onChange={(range) => onChange({ range })}
-        ariaLabel="Incident time range"
+      <DateRangeFilter
+        value={filters.customRange}
+        onChange={(customRange) => onChange({ customRange })}
+        ariaLabel="Incident date range"
       />
       <div className="ml-auto flex items-center gap-3">
-        <span className="text-[11px] text-wd-muted font-mono">
-          {count} shown
-        </span>
         <FilterSearch
           ariaLabel="Search incidents"
           value={filters.q}
@@ -354,6 +342,41 @@ function FilterBar({
         />
       </div>
     </div>
+  );
+}
+
+function TodayCountIncidents({ incidents }: { incidents: ApiIncident[] }) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const recent = incidents.filter(
+    (i) =>
+      i.status === "active" || new Date(i.startedAt).getTime() >= cutoff,
+  );
+  if (recent.length === 0) {
+    return (
+      <span className="text-[11px] text-wd-muted font-mono">
+        no incidents in the last 24hrs
+      </span>
+    );
+  }
+  const active = recent.filter((i) => i.status === "active").length;
+  const resolved = recent.length - active;
+  return (
+    <span className="text-[11px] text-wd-muted font-mono inline-flex items-center gap-1.5 flex-wrap">
+      <span className="text-foreground">{recent.length}</span>{" "}
+      {recent.length === 1 ? "incident" : "incidents"} in the last 24hrs
+      {active > 0 && (
+        <>
+          <span className="text-wd-muted-soft">·</span>
+          <span className="text-wd-danger">{active} active</span>
+        </>
+      )}
+      {resolved > 0 && (
+        <>
+          <span className="text-wd-muted-soft">·</span>
+          <span className="text-wd-success">{resolved} resolved</span>
+        </>
+      )}
+    </span>
   );
 }
 

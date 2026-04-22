@@ -13,7 +13,12 @@ import type { DateValue, RangeValue } from "react-aria-components";
 import { getLocalTimeZone } from "@internationalized/date";
 import { useApi } from "../../hooks/useApi";
 import { useRuntimeInfo } from "../../hooks/useRuntimeInfo";
-import type { ApiCheck, ApiEndpoint, ApiPagination } from "../../types/api";
+import type {
+  ApiCheck,
+  ApiEndpoint,
+  ApiPagination,
+  HourlySummary,
+} from "../../types/api";
 import { formatDateTime, latencyColor, statusColors } from "../../utils/format";
 import { formatBytes } from "../../utils/formatBytes";
 import { reasonPhrase } from "../../utils/httpStatus";
@@ -22,38 +27,43 @@ import {
   FilterDropdown,
   FilterSearch,
   RainbowPlaceholder,
-  Segmented,
 } from "./primitives";
 
 type StatusFilter = "all" | "healthy" | "degraded" | "down";
-type RangeFilter = "1h" | "24h" | "7d" | "30d";
+type HttpClassFilter = "all" | "2xx" | "3xx" | "4xx" | "5xx" | "err";
 
 interface Props {
   endpoint: ApiEndpoint;
+  hourly24h?: HourlySummary[];
 }
 
 interface Filters {
   status: StatusFilter;
-  range: RangeFilter;
+  httpClass: HttpClassFilter;
   customRange: RangeValue<DateValue> | null;
   q: string;
 }
 
 const DEFAULT_FILTERS: Filters = {
   status: "all",
-  range: "24h",
+  httpClass: "all",
   customRange: null,
   q: "",
 };
 
-const RANGE_MS: Record<RangeFilter, number> = {
-  "1h": 3_600_000,
-  "24h": 86_400_000,
-  "7d": 7 * 86_400_000,
-  "30d": 30 * 86_400_000,
-};
+const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-function ChecksTabBase({ endpoint }: Props) {
+function httpClassOf(check: ApiCheck): HttpClassFilter {
+  const code = check.statusCode;
+  if (code == null) return "err";
+  if (code >= 500) return "5xx";
+  if (code >= 400) return "4xx";
+  if (code >= 300) return "3xx";
+  if (code >= 200) return "2xx";
+  return "err";
+}
+
+function ChecksTabBase({ endpoint, hourly24h }: Props) {
   const endpointId = endpoint._id;
   const { request } = useApi();
   const { runtime } = useRuntimeInfo();
@@ -77,9 +87,7 @@ function ChecksTabBase({ endpoint }: Props) {
         params.set("from", from.toISOString());
         params.set("to", to.toISOString());
       } else {
-        const from = new Date(
-          Date.now() - RANGE_MS[filters.range],
-        ).toISOString();
+        const from = new Date(Date.now() - DEFAULT_WINDOW_MS).toISOString();
         params.set("from", from);
       }
       if (filters.status !== "all") params.set("status", filters.status);
@@ -99,7 +107,6 @@ function ChecksTabBase({ endpoint }: Props) {
     },
     [
       endpointId,
-      filters.range,
       filters.customRange,
       filters.status,
       pagination?.nextCursor,
@@ -110,17 +117,23 @@ function ChecksTabBase({ endpoint }: Props) {
   useEffect(() => {
     void fetchChecks(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endpointId, filters.range, filters.customRange, filters.status]);
+  }, [endpointId, filters.customRange, filters.status]);
 
   const displayed = useMemo(() => {
     const q = filters.q.trim().toLowerCase();
-    if (!q) return checks;
-    return checks.filter((c) =>
-      `${c.statusCode ?? ""} ${c.status} ${c.statusReason ?? ""} ${c.errorMessage ?? ""}`
-        .toLowerCase()
-        .includes(q),
-    );
-  }, [checks, filters.q]);
+    return checks.filter((c) => {
+      if (filters.httpClass !== "all" && httpClassOf(c) !== filters.httpClass)
+        return false;
+      if (
+        q &&
+        !`${c.statusCode ?? ""} ${c.status} ${c.statusReason ?? ""} ${c.errorMessage ?? ""}`
+          .toLowerCase()
+          .includes(q)
+      )
+        return false;
+      return true;
+    });
+  }, [checks, filters.q, filters.httpClass]);
 
   const patchFilters = useCallback(
     (patch: Partial<Filters>) => setFilters((prev) => ({ ...prev, ...patch })),
@@ -129,28 +142,22 @@ function ChecksTabBase({ endpoint }: Props) {
 
   return (
     <div className="flex flex-col gap-3 min-w-0">
-      <FilterBar
-        filters={filters}
-        onChange={patchFilters}
-        count={displayed.length}
-      />
+      <FilterBar filters={filters} onChange={patchFilters} />
 
       <div className="rounded-xl border border-wd-border/50 bg-wd-surface overflow-hidden flex flex-col min-h-0">
         <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-wd-border/50">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <div className="text-[13px] font-semibold text-foreground">
               Recent checks
             </div>
-            <span className="text-[11px] text-wd-muted font-mono">
-              {displayed.length} shown
-            </span>
+            <TodayCountChecks hourly24h={hourly24h ?? []} />
           </div>
           <span className="text-[11px] text-wd-muted">
             Click a row to inspect
           </span>
         </div>
 
-        <div className="grid grid-cols-[14px_220px_70px_58px_84px_120px_minmax(140px,1fr)_22px] items-center gap-x-3 px-4 py-1.5 text-[10px] uppercase tracking-wider text-wd-muted border-b border-wd-border/40 font-semibold">
+        <div className="grid grid-cols-[14px_220px_70px_58px_84px_120px_minmax(140px,1fr)_22px] items-center gap-x-3 px-4 py-2.5 text-[10px] uppercase tracking-[0.08em] text-wd-muted border-b border-wd-border/50 bg-wd-surface-hover/30 font-semibold">
           <span />
           <span>When</span>
           <span>Result</span>
@@ -225,26 +232,12 @@ function ChecksTabBase({ endpoint }: Props) {
 function FilterBar({
   filters,
   onChange,
-  count,
 }: {
   filters: Filters;
   onChange: (patch: Partial<Filters>) => void;
-  count: number;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 min-w-0">
-      <Segmented<RangeFilter>
-        options={[
-          { key: "1h", label: "1h" },
-          { key: "24h", label: "24h" },
-          { key: "7d", label: "7d" },
-          { key: "30d", label: "30d" },
-        ]}
-        value={filters.range}
-        onChange={(range) => onChange({ range, customRange: null })}
-        ariaLabel="Check range"
-        mono
-      />
       <DateRangeFilter
         value={filters.customRange}
         onChange={(customRange) => onChange({ customRange })}
@@ -261,10 +254,20 @@ function FilterBar({
         onChange={(status) => onChange({ status })}
         ariaLabel="Check status"
       />
-      <div className="ml-auto flex items-center gap-3">
-        <span className="text-[11px] text-wd-muted font-mono">
-          {count} shown
-        </span>
+      <FilterDropdown<HttpClassFilter>
+        value={filters.httpClass}
+        options={[
+          { id: "all", label: "All HTTP classes" },
+          { id: "2xx", label: "2xx success", dot: "var(--wd-success)" },
+          { id: "3xx", label: "3xx redirect", dot: "var(--wd-primary)" },
+          { id: "4xx", label: "4xx client error", dot: "var(--wd-warning)" },
+          { id: "5xx", label: "5xx server error", dot: "var(--wd-danger)" },
+          { id: "err", label: "Network error", dot: "var(--wd-danger)" },
+        ]}
+        onChange={(httpClass) => onChange({ httpClass })}
+        ariaLabel="HTTP status class"
+      />
+      <div className="ml-auto">
         <FilterSearch
           ariaLabel="Search checks"
           value={filters.q}
@@ -273,6 +276,47 @@ function FilterBar({
         />
       </div>
     </div>
+  );
+}
+
+function TodayCountChecks({ hourly24h }: { hourly24h: HourlySummary[] }) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  let total = 0;
+  let healthy = 0;
+  let degraded = 0;
+  let down = 0;
+  for (const h of hourly24h) {
+    if (new Date(h.hour).getTime() < cutoff) continue;
+    total += h.totalChecks;
+    healthy += h.successCount;
+    degraded += h.degradedCount;
+    down += h.failCount;
+  }
+  if (total === 0) {
+    return (
+      <span className="text-[11px] text-wd-muted font-mono">
+        no checks in the last 24hrs
+      </span>
+    );
+  }
+  return (
+    <span className="text-[11px] text-wd-muted font-mono inline-flex items-center gap-1.5 flex-wrap">
+      <span className="text-foreground">{total}</span> checks in the last 24hrs
+      <span className="text-wd-muted-soft">·</span>
+      <span className="text-wd-success">{healthy} healthy</span>
+      {degraded > 0 && (
+        <>
+          <span className="text-wd-muted-soft">·</span>
+          <span className="text-wd-warning">{degraded} degraded</span>
+        </>
+      )}
+      {down > 0 && (
+        <>
+          <span className="text-wd-muted-soft">·</span>
+          <span className="text-wd-danger">{down} down</span>
+        </>
+      )}
+    </span>
   );
 }
 

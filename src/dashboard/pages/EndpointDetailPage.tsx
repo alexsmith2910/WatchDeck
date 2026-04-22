@@ -327,19 +327,32 @@ export default function EndpointDetailPage() {
     return m;
   }, [channels]);
 
-  const tabCounts = useMemo(
-    () => ({
-      incidents: incidents.length || undefined,
-      notifications:
-        (endpoint?.notificationChannelIds?.length ?? 0) +
-          (endpoint?.escalationChannelId ? 1 : 0) || undefined,
-    }),
-    [
-      incidents.length,
-      endpoint?.notificationChannelIds,
-      endpoint?.escalationChannelId,
-    ],
-  );
+  const [notifications24hCount, setNotifications24hCount] = useState<
+    number | null
+  >(null);
+  useEffect(() => {
+    if (!endpoint?._id) return;
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    void request<{ data: { endpointTotal: number } }>(
+      `/endpoints/${endpoint._id}/notifications/stats?from=${from}`,
+    ).then((res) => {
+      if (res?.status != null && res.status < 400) {
+        setNotifications24hCount(res.data?.data?.endpointTotal ?? 0);
+      }
+    });
+  }, [endpoint?._id, request]);
+
+  const tabCounts = useMemo(() => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const recentOrActive = incidents.filter(
+      (i) =>
+        i.status === "active" || new Date(i.startedAt).getTime() >= cutoff,
+    ).length;
+    return {
+      incidents: recentOrActive || undefined,
+      notifications: notifications24hCount || undefined,
+    };
+  }, [incidents, notifications24hCount]);
 
   // ── Actions ────────────────────────────────────────────────────────────
   const [pausing, setPausing] = useState(false);
@@ -491,7 +504,9 @@ export default function EndpointDetailPage() {
             incidents={incidents}
           />
         )}
-        {activeTab === "checks" && <ChecksTab endpoint={endpoint} />}
+        {activeTab === "checks" && (
+          <ChecksTab endpoint={endpoint} hourly24h={hourly24h} />
+        )}
         {activeTab === "incidents" && (
           <IncidentsTab
             endpointId={endpoint._id}

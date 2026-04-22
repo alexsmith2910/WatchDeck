@@ -101,6 +101,8 @@ interface FilterDropdownProps<T extends string> {
   onChange: (next: T) => void;
   ariaLabel?: string;
   minWidth?: number;
+  /** When true, the trigger stretches to fill its container instead of sitting inline. */
+  fullWidth?: boolean;
 }
 
 function StatusDot({ color }: { color: string }) {
@@ -119,18 +121,20 @@ export function FilterDropdown<T extends string>({
   onChange,
   ariaLabel,
   minWidth = 180,
+  fullWidth = false,
 }: FilterDropdownProps<T>) {
   const current = options.find((o) => o.id === value) ?? options[0];
   return (
-    <Dropdown>
-      <Dropdown.Trigger>
+    <Dropdown className={cn(fullWidth && "w-full")}>
+      <Dropdown.Trigger className={cn(fullWidth && "w-full")}>
         <div
           role="button"
           tabIndex={0}
           aria-label={ariaLabel}
           className={cn(
-            "inline-flex items-center justify-between gap-2 h-8 px-2.5 rounded-lg text-xs cursor-pointer min-w-[140px]",
+            "items-center justify-between gap-2 h-8 px-2.5 rounded-lg text-xs cursor-pointer",
             "bg-wd-surface border border-wd-border/50 hover:bg-wd-surface-hover transition-colors",
+            fullWidth ? "flex w-full" : "inline-flex min-w-[140px]",
           )}
         >
           <span className="inline-flex items-center gap-2 min-w-0">
