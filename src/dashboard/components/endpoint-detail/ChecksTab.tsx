@@ -340,7 +340,7 @@ function CheckRow({
         <span
           className={cn(
             "text-[11.5px] font-mono tabular-nums",
-            latencyColor(check.responseTime),
+            latencyColor(check.responseTime, endpoint.latencyThreshold),
           )}
         >
           {check.responseTime}
@@ -474,7 +474,7 @@ function CheckDetail({
           </div>
           <div className={KV_ROW}>
             <span className={KV_KEY}>Response time</span>
-            <span className={cn(KV_VAL, latencyColor(check.responseTime))}>
+            <span className={cn(KV_VAL, latencyColor(check.responseTime, endpoint.latencyThreshold))}>
               {check.responseTime}ms
             </span>
           </div>

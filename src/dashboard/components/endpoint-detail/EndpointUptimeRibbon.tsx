@@ -23,6 +23,7 @@ interface Props {
   endpointCreatedAt: string;
   window: Window;
   setWindow: (w: Window) => void;
+  latencyThreshold?: number | null;
 }
 
 function autoWindowFromAge(createdAt: string): Window {
@@ -50,6 +51,7 @@ function EndpointUptimeRibbonBase({
   loading,
   window,
   setWindow,
+  latencyThreshold,
 }: Props) {
   const history = useMemo(
     () => buildHistory(dailies, window),
@@ -119,7 +121,11 @@ function EndpointUptimeRibbonBase({
         />
       </div>
 
-      <UptimeBar history={history} loading={loading} />
+      <UptimeBar
+        history={history}
+        loading={loading}
+        latencyThreshold={latencyThreshold ?? null}
+      />
 
       <div className="flex items-center justify-between mt-2 text-[10.5px] font-mono text-wd-muted/70">
         <span>{window} days ago</span>

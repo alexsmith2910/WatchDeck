@@ -45,9 +45,19 @@ const statusSwatch: Record<DailyStatus, string> = {
 }
 
 // Same ladder as utils/format.ts::latencyColor so response-time rows get the
-// same semantic tint the table cells already use.
-function latencyTone(ms: number): { tint: string; swatch: string } {
+// same semantic tint the table cells already use. Accepts an optional
+// threshold so per-endpoint tooltips reflect that endpoint's own
+// latencyThreshold instead of a hardcoded 200/500 ladder.
+function latencyTone(
+  ms: number,
+  threshold?: number | null,
+): { tint: string; swatch: string } {
   if (ms === 0) return { tint: 'text-wd-muted', swatch: 'bg-wd-muted/60' }
+  if (threshold != null && threshold > 0) {
+    if (ms < threshold * 0.5) return { tint: 'text-wd-success', swatch: 'bg-wd-success' }
+    if (ms < threshold) return { tint: 'text-wd-warning', swatch: 'bg-wd-warning' }
+    return { tint: 'text-wd-danger', swatch: 'bg-wd-danger' }
+  }
   if (ms < 200) return { tint: 'text-wd-success', swatch: 'bg-wd-success' }
   if (ms < 500) return { tint: 'text-wd-warning', swatch: 'bg-wd-warning' }
   return { tint: 'text-wd-danger', swatch: 'bg-wd-danger' }
@@ -142,9 +152,11 @@ interface UptimeBarProps {
   history: DailyBucket[]
   loading?: boolean
   className?: string
+  /** Endpoint's own latencyThreshold in ms — tints the Avg/P95 tooltip rows. */
+  latencyThreshold?: number | null
 }
 
-function UptimeBar({ history, loading = false, className }: UptimeBarProps) {
+function UptimeBar({ history, loading = false, className, latencyThreshold }: UptimeBarProps) {
   const [hover, setHover] = useState<{ idx: number; rect: DOMRect } | null>(null)
   const [stage, setStage] = useState<Stage>(loading ? 'loading' : 'done')
   const loadStartMs = useRef<number>(performance.now())
@@ -220,14 +232,26 @@ function UptimeBar({ history, loading = false, className }: UptimeBarProps) {
       </div>
       {hovered && hover && typeof document !== 'undefined' &&
         createPortal(
-          <UptimeTooltip hovered={hovered} rect={hover.rect} />,
+          <UptimeTooltip
+            hovered={hovered}
+            rect={hover.rect}
+            latencyThreshold={latencyThreshold ?? null}
+          />,
           document.body,
         )}
     </>
   )
 }
 
-function UptimeTooltip({ hovered, rect }: { hovered: DailyBucket; rect: DOMRect }) {
+function UptimeTooltip({
+  hovered,
+  rect,
+  latencyThreshold,
+}: {
+  hovered: DailyBucket
+  rect: DOMRect
+  latencyThreshold: number | null
+}) {
   // Clamp the tooltip's left edge so it never clips past the viewport.
   // Half-width 130 covers typical content within the min-w-[220px] box.
   const HALF_WIDTH = 130
@@ -289,7 +313,7 @@ function UptimeTooltip({ hovered, rect }: { hovered: DailyBucket; rect: DOMRect 
               valueClass={hovered.failCount > 0 ? 'text-wd-danger' : 'text-foreground'}
             />
             {(() => {
-              const tone = latencyTone(hovered.avgResponseTime)
+              const tone = latencyTone(hovered.avgResponseTime, latencyThreshold)
               return (
                 <TipRow
                   label="Avg"
@@ -300,7 +324,7 @@ function UptimeTooltip({ hovered, rect }: { hovered: DailyBucket; rect: DOMRect 
               )
             })()}
             {hovered.p95ResponseTime > 0 && (() => {
-              const tone = latencyTone(hovered.p95ResponseTime)
+              const tone = latencyTone(hovered.p95ResponseTime, latencyThreshold)
               return (
                 <TipRow
                   label="P95"

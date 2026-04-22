@@ -167,7 +167,7 @@ function EndpointHeroBase({
               <b
                 className={cn(
                   "font-semibold font-mono",
-                  latencyColor(currentLatencyMs),
+                  latencyColor(currentLatencyMs, endpoint.latencyThreshold),
                 )}
               >
                 {currentLatencyMs}ms

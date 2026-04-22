@@ -66,6 +66,7 @@ interface Endpoint {
   status: EndpointStatus | null
   endpointStatus: 'active' | 'paused' | 'archived'
   checkInterval: number
+  latencyThreshold: number
   consecutiveFailures: number
   lastCheckAt: Date | null
   method?: string
@@ -94,6 +95,7 @@ function mapEndpoint(doc: ApiEndpoint): Endpoint {
     status: doc.lastStatus ?? null,
     endpointStatus: doc.status,
     checkInterval: doc.checkInterval,
+    latencyThreshold: doc.latencyThreshold,
     consecutiveFailures: doc.consecutiveFailures,
     lastCheckAt: doc.lastCheckAt ? new Date(doc.lastCheckAt) : null,
     method: doc.method,
@@ -470,6 +472,7 @@ export default function EndpointsPage() {
             ...(c.name !== undefined && { name: c.name }),
             ...(c.status !== undefined && { endpointStatus: c.status }),
             ...(c.checkInterval !== undefined && { checkInterval: c.checkInterval }),
+            ...(c.latencyThreshold !== undefined && { latencyThreshold: c.latencyThreshold }),
           }
         }).filter((ep) => {
           if (ep.id === evt.endpointId && evt.changes.status === 'archived') return false
@@ -1072,7 +1075,11 @@ export default function EndpointsPage() {
                           className="w-full"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <UptimeBar history={history ?? buildHistory([])} loading={aggLoading} />
+                          <UptimeBar
+                            history={history ?? buildHistory([])}
+                            loading={aggLoading}
+                            latencyThreshold={ep.latencyThreshold}
+                          />
                         </div>
                       )
                     })()}
@@ -1159,7 +1166,7 @@ export default function EndpointsPage() {
                               className={cn(
                                 'block w-full text-left text-xs font-mono font-medium',
                                 avg30d != null
-                                  ? latencyColor(avg30d)
+                                  ? latencyColor(avg30d, ep.latencyThreshold)
                                   : 'text-wd-muted/40',
                               )}
                             >
@@ -1180,29 +1187,30 @@ export default function EndpointsPage() {
                                     : tone === 'text-wd-danger'
                                       ? 'bg-wd-danger'
                                       : 'bg-wd-muted/40'
+                              const tint = (ms: number) => latencyColor(ms, ep.latencyThreshold)
                               return (
                                 <>
                                   {ep.responseTime != null && (
                                     <TipRow
                                       label="Latest"
                                       value={`${ep.responseTime}ms`}
-                                      color={swatchFor(latencyColor(ep.responseTime))}
-                                      className={latencyColor(ep.responseTime)}
+                                      color={swatchFor(tint(ep.responseTime))}
+                                      className={tint(ep.responseTime)}
                                     />
                                   )}
                                   {avg30d != null && (
                                     <TipRow
                                       label="Avg (30d)"
                                       value={`${avg30d}ms`}
-                                      color={swatchFor(latencyColor(avg30d))}
-                                      className={latencyColor(avg30d)}
+                                      color={swatchFor(tint(avg30d))}
+                                      className={tint(avg30d)}
                                     />
                                   )}
                                   <TipRow
                                     label="P95"
                                     value={`${p95Max}ms`}
-                                    color={swatchFor(latencyColor(p95Max))}
-                                    className={latencyColor(p95Max)}
+                                    color={swatchFor(tint(p95Max))}
+                                    className={tint(p95Max)}
                                   />
                                   <TipRow
                                     label="Min"
@@ -1213,11 +1221,11 @@ export default function EndpointsPage() {
                                   <TipRow
                                     label="Max"
                                     value={`${maxVal}ms`}
-                                    color={swatchFor(latencyColor(maxVal))}
-                                    className={latencyColor(maxVal)}
+                                    color={swatchFor(tint(maxVal))}
+                                    className={tint(maxVal)}
                                   />
                                   <div className="text-wd-muted/60 text-[10px] pt-1 border-t border-wd-border/50">
-                                    Rolling 30-day window
+                                    Rolling 30-day window · threshold {ep.latencyThreshold}ms
                                   </div>
                                 </>
                               )
@@ -1227,15 +1235,15 @@ export default function EndpointsPage() {
                                   label="Latest"
                                   value={`${ep.responseTime}ms`}
                                   color={
-                                    latencyColor(ep.responseTime) === 'text-wd-success'
+                                    latencyColor(ep.responseTime, ep.latencyThreshold) === 'text-wd-success'
                                       ? 'bg-wd-success'
-                                      : latencyColor(ep.responseTime) === 'text-wd-warning'
+                                      : latencyColor(ep.responseTime, ep.latencyThreshold) === 'text-wd-warning'
                                         ? 'bg-wd-warning'
-                                        : latencyColor(ep.responseTime) === 'text-wd-danger'
+                                        : latencyColor(ep.responseTime, ep.latencyThreshold) === 'text-wd-danger'
                                           ? 'bg-wd-danger'
                                           : 'bg-wd-muted/40'
                                   }
-                                  className={latencyColor(ep.responseTime)}
+                                  className={latencyColor(ep.responseTime, ep.latencyThreshold)}
                                 />
                                 <div className="text-wd-muted/60 text-[10px] pt-1 border-t border-wd-border/50">
                                   More stats after aggregation runs

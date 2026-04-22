@@ -470,6 +470,7 @@ export default function EndpointDetailPage() {
         endpointCreatedAt={endpoint.createdAt}
         window={ribbonWindow}
         setWindow={setRibbonWindow}
+        latencyThreshold={endpoint.latencyThreshold}
       />
 
       <EndpointTabs

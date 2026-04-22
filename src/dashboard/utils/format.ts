@@ -80,8 +80,26 @@ export function formatDate(date: Date | string): string {
   })
 }
 
-export function latencyColor(ms: number): string {
+/**
+ * Tint a response-time value against the endpoint's latencyThreshold (ms).
+ * Matches the backend status evaluator: at/above threshold = degraded = danger.
+ *
+ * Bands:
+ *   0                       → muted      (no data)
+ *   < threshold * 0.5       → success    (comfortably under threshold)
+ *   < threshold             → warning    (approaching threshold)
+ *   >= threshold            → danger     (backend marks this "degraded")
+ *
+ * When no threshold is available (legacy list rows etc.), falls back to the
+ * historical 200/500 ms ladder so the tint still reads correctly-ish.
+ */
+export function latencyColor(ms: number, threshold?: number | null): string {
   if (ms === 0) return 'text-wd-muted'
+  if (threshold != null && threshold > 0) {
+    if (ms < threshold * 0.5) return 'text-wd-success'
+    if (ms < threshold) return 'text-wd-warning'
+    return 'text-wd-danger'
+  }
   if (ms < 200) return 'text-wd-success'
   if (ms < 500) return 'text-wd-warning'
   return 'text-wd-danger'
