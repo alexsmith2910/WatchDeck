@@ -402,7 +402,7 @@ function MetricsTabBase({
         request<{ data: HourlySummary[] }>(
           `/endpoints/${endpointId}/hourly?limit=720`,
         ),
-        fetchAllChecksSince(Date.now() - 7 * 86_400_000, gen),
+        fetchAllChecksSince(Date.now() - 30 * 86_400_000, gen),
       ]);
       if (fetchGenRef.current !== gen || checks === null) return;
       setRangeHourly(hRes.status < 400 ? (hRes.data.data ?? []) : []);
@@ -971,8 +971,8 @@ function MetricsTabBase({
                   cursor={{ fill: "var(--wd-surface-hover)", opacity: 0.55 }}
                 />
                 <Bar dataKey="count" radius={[3, 3, 0, 0]}>
-                  {histogram.map((b, i) => (
-                    <Cell key={i} fill={b.fill} />
+                  {histogram.map((b) => (
+                    <Cell key={b.label} fill={b.fill} />
                   ))}
                 </Bar>
               </BarChart>
@@ -1147,8 +1147,8 @@ function MetricsTabBase({
                   strokeOpacity={0.5}
                 />
                 <Bar dataKey="avg" radius={[4, 4, 0, 0]}>
-                  {hourOfDay.map((b, i) => (
-                    <Cell key={i} fill={b.fill} />
+                  {hourOfDay.map((b) => (
+                    <Cell key={b.label} fill={b.fill} />
                   ))}
                 </Bar>
               </BarChart>
