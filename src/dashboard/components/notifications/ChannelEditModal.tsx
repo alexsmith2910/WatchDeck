@@ -30,6 +30,15 @@ import { toast } from '../../ui/toast'
 import type { ApiChannel, ChannelType, DeliveryPriority, SeverityFilter } from '../../types/notifications'
 import { CHANNEL_TYPE_ICON, CHANNEL_TYPE_LABEL } from '../../types/notifications'
 
+/** Browser-reported IANA timezone, or UTC on exotic runtimes where it throws. */
+function detectTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
+
 interface Props {
   open: boolean
   channel: ApiChannel | null        // null → create
@@ -86,7 +95,7 @@ function defaultForm(): FormState {
     quietHoursEnabled: false,
     quietStart: '22:00',
     quietEnd: '08:00',
-    quietTz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    quietTz: detectTimeZone(),
     rateLimitEnabled: false,
     maxPerMinute: 30,
     retryOnFailure: true,
