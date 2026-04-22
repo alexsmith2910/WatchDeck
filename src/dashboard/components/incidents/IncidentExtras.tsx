@@ -1,41 +1,166 @@
 /**
  * Trends row: incident-volume bars (14d, stacked severity), cause-breakdown
- * donut, and top-affected endpoints list. Everything is derived from the
- * incident-history page we already fetched — no extra API calls.
+ * donut, and top-affected endpoints list. All three cards read from the
+ * server-side `/incidents/stats` aggregation — the paginated incident list is
+ * never consulted for trend data, so bars are accurate regardless of how many
+ * incidents exist in the window.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '@iconify/react'
 import { cn } from '@heroui/react'
-import type { ApiIncident } from '../../types/api'
+import type { IncidentStats } from '../../types/api'
 import { timeAgo, formatDuration } from '../../utils/format'
-import {
-  causeBreakdown,
-  endpointDisplay,
-  flappingEndpoints,
-  topAffected,
-  volumeByDay,
-  type CauseSlice,
-  type EndpointLite,
-  type VolumeDay,
-} from './incidentHelpers'
+import { endpointDisplay, metaFor, type CauseKind, type EndpointLite } from './incidentHelpers'
 
-const DAY_MS = 86_400_000
-const WEEK_MS = 7 * DAY_MS
+// Colour and label tables for cause donut slices. Kept inline with this file
+// since it's the only consumer that needs them.
+const CAUSE_KIND_COLOR: Record<CauseKind, string> = {
+  down:     'var(--wd-danger)',
+  degraded: 'var(--wd-warning)',
+  latency:  'var(--wd-primary)',
+  ssl:      '#b19cd9',
+  body:     '#6aa6ff',
+  port:     'var(--wd-muted)',
+  other:    'var(--wd-muted)',
+}
+
+const CAUSE_KIND_LABEL: Record<CauseKind, string> = {
+  down:     'Down',
+  degraded: 'Degraded',
+  latency:  'Latency',
+  ssl:      'SSL',
+  body:     'Body',
+  port:     'Port',
+  other:    'Other',
+}
+
+const CAUSE_ORDER: CauseKind[] = ['down', 'degraded', 'latency', 'ssl', 'body', 'port', 'other']
+
+interface CauseSlice {
+  kind: CauseKind
+  label: string
+  count: number
+  color: string
+}
+
+interface VolumeDay {
+  date: string
+  label: string
+  critical: number
+  major: number
+  minor: number
+  total: number
+  isToday: boolean
+}
 
 interface Props {
-  historyIncidents: ApiIncident[]
+  stats: IncidentStats | null
   endpointById: Map<string, EndpointLite>
 }
 
-export function IncidentExtras({ historyIncidents, endpointById }: Props) {
+export function IncidentExtras({ stats, endpointById }: Props) {
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] gap-3 min-w-0">
-      <VolumeChart historyIncidents={historyIncidents} />
-      <CauseDonut historyIncidents={historyIncidents} />
-      <TopAffectedCard historyIncidents={historyIncidents} endpointById={endpointById} />
+      <VolumeChart stats={stats} />
+      <CauseDonut stats={stats} />
+      <TopAffectedCard stats={stats} endpointById={endpointById} />
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Stats-derived helpers
+// ---------------------------------------------------------------------------
+
+/** Fold server byDay causes into UI severity buckets for the Volume chart. */
+function volumeDaysFromStats(stats: IncidentStats | null, windowDays: number): VolumeDay[] {
+  const todayKey = localDayKey(new Date())
+  const days = (stats?.byDay ?? []).slice(-windowDays).map((d) => {
+    let critical = 0
+    let major = 0
+    let minor = 0
+    for (const [cause, n] of Object.entries(d.causes)) {
+      const sev = metaFor(cause).severity
+      if (sev === 'Critical') critical += n
+      else if (sev === 'Major') major += n
+      else minor += n
+    }
+    return {
+      date: d.date,
+      label: labelFromDateKey(d.date),
+      critical,
+      major,
+      minor,
+      total: d.total,
+      isToday: d.date === todayKey,
+    }
+  })
+  return days
+}
+
+function causeSlicesFromStats(stats: IncidentStats | null): CauseSlice[] {
+  const counts = new Map<CauseKind, number>()
+  for (const row of stats?.byCause ?? []) {
+    const kind = metaFor(row.cause).kind
+    counts.set(kind, (counts.get(kind) ?? 0) + row.count)
+  }
+  return CAUSE_ORDER
+    .filter((k) => (counts.get(k) ?? 0) > 0)
+    .map((k) => ({
+      kind: k,
+      label: CAUSE_KIND_LABEL[k],
+      count: counts.get(k)!,
+      color: CAUSE_KIND_COLOR[k],
+    }))
+}
+
+interface TopAffectedRow {
+  endpointId: string
+  incidents: number
+  totalDowntimeSec: number
+  lastStartedAt: string
+  trend: 'up' | 'down' | 'flat'
+}
+
+function topAffectedFromStats(stats: IncidentStats | null, limit = 5): TopAffectedRow[] {
+  if (!stats) return []
+  return stats.byEndpoint.slice(0, limit).map((r) => ({
+    endpointId: r.endpointId,
+    incidents: r.total,
+    totalDowntimeSec: r.totalDurationSec,
+    lastStartedAt: r.lastStartedAt,
+    trend: r.total > r.prevTotal ? 'up' : r.total < r.prevTotal ? 'down' : 'flat',
+  }))
+}
+
+/** Endpoints that fired ≥3 incidents on any single day in the window. */
+function flappingFromStats(stats: IncidentStats | null): Array<{ endpointId: string; toggles: number }> {
+  if (!stats) return []
+  const worstDay = new Map<string, number>()
+  for (const row of stats.byEndpointDay) {
+    const prev = worstDay.get(row.endpointId) ?? 0
+    if (row.count > prev) worstDay.set(row.endpointId, row.count)
+  }
+  return [...worstDay.entries()]
+    .filter(([, n]) => n >= 3)
+    .map(([endpointId, toggles]) => ({ endpointId, toggles }))
+    .sort((a, b) => b.toggles - a.toggles)
+}
+
+function localDayKey(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function labelFromDateKey(key: string): string {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -75,8 +200,8 @@ function CardHeader({
 // Volume chart — 14-day stacked severity bars
 // ---------------------------------------------------------------------------
 
-function VolumeChart({ historyIncidents }: { historyIncidents: ApiIncident[] }) {
-  const days = useMemo(() => volumeByDay(historyIncidents, 14), [historyIncidents])
+function VolumeChart({ stats }: { stats: IncidentStats | null }) {
+  const days = useMemo(() => volumeDaysFromStats(stats, 14), [stats])
   const max = Math.max(1, ...days.map((d) => d.total))
   const [hover, setHover] = useState<{ day: VolumeDay; rect: DOMRect } | null>(null)
 
@@ -224,35 +349,28 @@ function VolumeRow({ color, label, value }: { color: string; label: string; valu
 // Cause donut
 // ---------------------------------------------------------------------------
 
-function CauseDonut({ historyIncidents }: { historyIncidents: ApiIncident[] }) {
-  const slices = useMemo(() => causeBreakdown(historyIncidents, WEEK_MS), [historyIncidents])
+function CauseDonut({ stats }: { stats: IncidentStats | null }) {
+  const slices = useMemo(() => causeSlicesFromStats(stats), [stats])
   const total = slices.reduce((s, c) => s + c.count, 0)
-
-  const { totalAlerts, incidentCount } = useMemo(() => {
-    const cutoff = Date.now() - WEEK_MS
-    let alerts = 0
-    let count = 0
-    for (const inc of historyIncidents) {
-      if (new Date(inc.startedAt).getTime() < cutoff) continue
-      alerts += inc.notificationsSent
-      count++
-    }
-    return { totalAlerts: alerts, incidentCount: count }
-  }, [historyIncidents])
+  const windowDays = stats?.byDay.length ?? 0
+  const incidentCount = stats?.totals.total ?? 0
+  const totalAlerts = stats?.totals.notificationsSent ?? 0
   const fatigueScore = incidentCount > 0 ? (totalAlerts / incidentCount).toFixed(1) : '0.0'
 
   return (
     <div className="rounded-xl border border-wd-border/50 bg-wd-surface p-4 flex flex-col gap-3 min-h-[280px]">
       <CardHeader
         title="Cause Breakdown"
-        subtitle={`Last 7 days · ${total} incidents`}
+        subtitle={`Last ${windowDays} days · ${total} incidents`}
         icon="solar:pie-chart-2-linear"
         tileClass="bg-wd-warning/15 text-wd-warning"
       />
       {total === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center py-6">
           <Icon icon="solar:shield-check-linear" width={32} className="text-wd-success" />
-          <div className="text-[13px] font-medium text-foreground">No incidents in 7 days</div>
+          <div className="text-[13px] font-medium text-foreground">
+            No incidents in {windowDays || 14} days
+          </div>
           <div className="text-[11px] text-wd-muted">Nothing to chart.</div>
         </div>
       ) : (
@@ -412,20 +530,21 @@ function DonutTooltip({
 // ---------------------------------------------------------------------------
 
 function TopAffectedCard({
-  historyIncidents,
+  stats,
   endpointById,
 }: {
-  historyIncidents: ApiIncident[]
+  stats: IncidentStats | null
   endpointById: Map<string, EndpointLite>
 }) {
-  const rows = useMemo(() => topAffected(historyIncidents, WEEK_MS, 5), [historyIncidents])
-  const flapping = useMemo(() => flappingEndpoints(historyIncidents, DAY_MS), [historyIncidents])
+  const rows = useMemo(() => topAffectedFromStats(stats, 5), [stats])
+  const flapping = useMemo(() => flappingFromStats(stats), [stats])
+  const windowDays = stats?.byDay.length ?? 0
 
   return (
     <div className="rounded-xl border border-wd-border/50 bg-wd-surface p-4 flex flex-col gap-3 min-h-[280px]">
       <CardHeader
         title="Top Affected"
-        subtitle="Most incidents in last 7 days"
+        subtitle={`Most incidents in last ${windowDays} days`}
         icon="solar:crown-linear"
         tileClass="bg-wd-danger/15 text-wd-danger"
       />
@@ -476,7 +595,7 @@ function TopAffectedCard({
                   .slice(0, 2)
                   .map((f) => endpointDisplay(endpointById.get(f.endpointId)).name)
                   .join(', ')}{' '}
-                toggled ≥3× in the last 24h.
+                hit ≥3 incidents in a single day.
               </>
             )}
           </div>

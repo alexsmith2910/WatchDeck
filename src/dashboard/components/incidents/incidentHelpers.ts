@@ -4,8 +4,8 @@
  * The server-side `ApiIncident` carries the raw cause string; the UI derives
  * severity, visual kind, and display label from a single lookup table so every
  * component agrees on the mapping. Historical aggregations (volume by day,
- * cause breakdown, top affected, flapping) are all derived from the incident
- * list — we don't hit a dedicated stats endpoint.
+ * cause breakdown, top affected, flapping) are served pre-computed from the
+ * `/incidents/stats` endpoint and consumed directly by the trend components.
  */
 import type { ApiIncident } from '../../types/api'
 
@@ -119,184 +119,14 @@ export function liveElapsedSec(startedAt: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// Aggregations derived from the incident list
+// Per-endpoint sparkline payload — paired arrays so tooltip labels can map
+// each rendered point back to its check timestamp. Newest timestamp last so
+// the chart reads left-to-right.
 // ---------------------------------------------------------------------------
 
-/** Per-endpoint sparkline payload — paired arrays so tooltip labels can map
- *  each rendered point back to its check timestamp. Newest timestamp last so
- *  the chart reads left-to-right. */
 export interface EndpointSparkline {
   values: number[]
   timestamps: string[]
-}
-
-export interface VolumeDay {
-  date: string
-  label: string
-  critical: number
-  major: number
-  minor: number
-  total: number
-  isToday: boolean
-}
-
-// Local-calendar-day key (yyyy-mm-dd). Using toISOString here would silently
-// shift buckets by a day for anyone east of UTC, which drops "today" incidents
-// off the end of a 14-day window and mis-labels every row in the tooltip.
-export function localDayKey(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-export function volumeByDay(incidents: ApiIncident[], days = 14): VolumeDay[] {
-  const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const dayStarts: VolumeDay[] = []
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(startOfToday.getTime() - i * 86_400_000)
-    dayStarts.push({
-      date: localDayKey(d),
-      label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-      critical: 0,
-      major: 0,
-      minor: 0,
-      total: 0,
-      isToday: i === 0,
-    })
-  }
-  const buckets = new Map<string, VolumeDay>()
-  for (const d of dayStarts) buckets.set(d.date, d)
-
-  for (const inc of incidents) {
-    const dayKey = localDayKey(new Date(inc.startedAt))
-    const b = buckets.get(dayKey)
-    if (!b) continue
-    const sev = severityOf(inc)
-    if (sev === 'Critical') b.critical++
-    else if (sev === 'Major') b.major++
-    else b.minor++
-    b.total++
-  }
-  return dayStarts
-}
-
-export interface CauseSlice {
-  kind: CauseKind
-  label: string
-  count: number
-  color: string
-}
-
-const CAUSE_KIND_COLOR: Record<CauseKind, string> = {
-  down:     'var(--wd-danger)',
-  degraded: 'var(--wd-warning)',
-  latency:  'var(--wd-primary)',
-  ssl:      '#b19cd9',
-  body:     '#6aa6ff',
-  port:     'var(--wd-muted)',
-  other:    'var(--wd-muted)',
-}
-
-const CAUSE_KIND_LABEL: Record<CauseKind, string> = {
-  down:     'Down',
-  degraded: 'Degraded',
-  latency:  'Latency',
-  ssl:      'SSL',
-  body:     'Body',
-  port:     'Port',
-  other:    'Other',
-}
-
-export function causeBreakdown(incidents: ApiIncident[], windowMs: number): CauseSlice[] {
-  const cutoff = Date.now() - windowMs
-  const counts = new Map<CauseKind, number>()
-  for (const inc of incidents) {
-    if (new Date(inc.startedAt).getTime() < cutoff) continue
-    const kind = metaFor(inc.cause).kind
-    counts.set(kind, (counts.get(kind) ?? 0) + 1)
-  }
-  const order: CauseKind[] = ['down', 'degraded', 'latency', 'ssl', 'body', 'port', 'other']
-  return order
-    .filter((k) => (counts.get(k) ?? 0) > 0)
-    .map((k) => ({
-      kind: k,
-      label: CAUSE_KIND_LABEL[k],
-      count: counts.get(k)!,
-      color: CAUSE_KIND_COLOR[k],
-    }))
-}
-
-export interface TopAffectedRow {
-  endpointId: string
-  incidents: number
-  totalDowntimeSec: number
-  lastStartedAt: string
-  trend: 'up' | 'down' | 'flat'
-}
-
-export function topAffected(
-  incidents: ApiIncident[],
-  windowMs: number,
-  limit = 5,
-): TopAffectedRow[] {
-  const now = Date.now()
-  const cutoff = now - windowMs
-  const prevCutoff = cutoff - windowMs
-  const curByEp = new Map<string, ApiIncident[]>()
-  const prevByEp = new Map<string, number>()
-
-  for (const inc of incidents) {
-    const t = new Date(inc.startedAt).getTime()
-    if (t >= cutoff) {
-      const arr = curByEp.get(inc.endpointId) ?? []
-      arr.push(inc)
-      curByEp.set(inc.endpointId, arr)
-    } else if (t >= prevCutoff) {
-      prevByEp.set(inc.endpointId, (prevByEp.get(inc.endpointId) ?? 0) + 1)
-    }
-  }
-
-  const rows: TopAffectedRow[] = []
-  for (const [endpointId, incs] of curByEp) {
-    const totalDowntimeSec = incs.reduce((s, i) => {
-      if (i.durationSeconds != null) return s + i.durationSeconds
-      if (i.status === 'active') return s + Math.floor((now - new Date(i.startedAt).getTime()) / 1000)
-      return s
-    }, 0)
-    const lastStartedAt = incs.reduce(
-      (a, b) => (new Date(b.startedAt).getTime() > new Date(a).getTime() ? b.startedAt : a),
-      incs[0].startedAt,
-    )
-    const prev = prevByEp.get(endpointId) ?? 0
-    const cur = incs.length
-    const trend: 'up' | 'down' | 'flat' = cur > prev ? 'up' : cur < prev ? 'down' : 'flat'
-    rows.push({ endpointId, incidents: cur, totalDowntimeSec, lastStartedAt, trend })
-  }
-  return rows.sort((a, b) => b.incidents - a.incidents).slice(0, limit)
-}
-
-export interface FlappingEndpoint {
-  endpointId: string
-  toggles: number
-}
-
-export function flappingEndpoints(
-  incidents: ApiIncident[],
-  windowMs: number,
-  threshold = 3,
-): FlappingEndpoint[] {
-  const cutoff = Date.now() - windowMs
-  const counts = new Map<string, number>()
-  for (const inc of incidents) {
-    if (new Date(inc.startedAt).getTime() < cutoff) continue
-    counts.set(inc.endpointId, (counts.get(inc.endpointId) ?? 0) + 1)
-  }
-  return [...counts.entries()]
-    .filter(([, c]) => c >= threshold)
-    .map(([endpointId, toggles]) => ({ endpointId, toggles }))
-    .sort((a, b) => b.toggles - a.toggles)
 }
 
 // ---------------------------------------------------------------------------

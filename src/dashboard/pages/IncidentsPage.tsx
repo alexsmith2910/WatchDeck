@@ -19,7 +19,13 @@ import { Button, Spinner, cn } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
-import type { ApiCheck, ApiEndpoint, ApiIncident, ApiPagination } from '../types/api'
+import type {
+  ApiCheck,
+  ApiEndpoint,
+  ApiIncident,
+  ApiPagination,
+  IncidentStats,
+} from '../types/api'
 import type { ApiChannel } from '../types/notifications'
 import { IncidentHero, type HeroEndpointState } from '../components/incidents/IncidentHero'
 import { IncidentKpis } from '../components/incidents/IncidentKpis'
@@ -71,6 +77,7 @@ export default function IncidentsPage() {
   const [filters, setFilters] = useState<IncidentFilters>(DEFAULT_FILTERS)
   const [activeIncidents, setActiveIncidents] = useState<ApiIncident[]>([])
   const [historyIncidents, setHistoryIncidents] = useState<ApiIncident[]>([])
+  const [stats, setStats] = useState<IncidentStats | null>(null)
   const [endpoints, setEndpoints] = useState<ApiEndpoint[]>([])
   const [channels, setChannels] = useState<ApiChannel[]>([])
   // Keyed by incident _id so each row/hero card shows response times from the
@@ -254,11 +261,33 @@ export default function IncidentsPage() {
     [request, buildHistoryQuery],
   )
 
+  // ---- Fetch pre-aggregated stats ----
+  // Window is the wider of the user's range and 14 days so the Volume chart
+  // always has its full window regardless of the table filter. `all` falls
+  // back to 365 days as a sane upper bound.
+  const fetchStats = useCallback(async () => {
+    const ms = rangeToMs(filters.range)
+    const windowMs = ms === null ? 365 * DAY_MS : Math.max(ms, HISTORY_BASE_WINDOW_MS)
+    const params = new URLSearchParams()
+    params.set('from', new Date(Date.now() - windowMs).toISOString())
+    if (filters.endpointId !== 'all') params.set('endpointId', filters.endpointId)
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+      if (tz) params.set('tz', tz)
+    } catch {
+      // falls back to UTC
+    }
+    const res = await request<{ data: IncidentStats }>(
+      `/incidents/stats?${params.toString()}`,
+    )
+    if (res.status < 400) setStats(res.data.data)
+  }, [filters.range, filters.endpointId, request])
+
   // Reload first page whenever round-trip filters change.
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    Promise.all([fetchActive(), fetchHistory()])
+    Promise.all([fetchActive(), fetchHistory(), fetchStats()])
       .then(([, page]) => {
         if (cancelled) return
         setHistoryIncidents(page.items)
@@ -271,7 +300,7 @@ export default function IncidentsPage() {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [fetchActive, fetchHistory])
+  }, [fetchActive, fetchHistory, fetchStats])
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || !nextCursor) return
@@ -298,7 +327,7 @@ export default function IncidentsPage() {
       for (const v of fetchedVersionsRef.current) {
         if (v.includes(':active:')) fetchedVersionsRef.current.delete(v)
       }
-      const [, page] = await Promise.all([fetchActive(), fetchHistory()])
+      const [, page] = await Promise.all([fetchActive(), fetchHistory(), fetchStats()])
       setHistoryIncidents(page.items)
       setHasMore(page.pagination?.hasMore ?? false)
       setNextCursor(page.pagination?.nextCursor ?? null)
@@ -306,7 +335,7 @@ export default function IncidentsPage() {
     } finally {
       setRefreshing(false)
     }
-  }, [fetchActive, fetchHistory])
+  }, [fetchActive, fetchHistory, fetchStats])
 
   // ---- SSE subscriptions ----
   useEffect(() => {
@@ -321,8 +350,9 @@ export default function IncidentsPage() {
         ...prev.filter((i) => i._id !== evt.incident._id),
       ])
       setLastUpdatedAt(Date.now())
+      void fetchStats()
     })
-  }, [subscribe])
+  }, [subscribe, fetchStats])
 
   useEffect(() => {
     return subscribe('incident:resolved', (raw) => {
@@ -341,8 +371,9 @@ export default function IncidentsPage() {
         ),
       )
       setLastUpdatedAt(Date.now())
+      void fetchStats()
     })
-  }, [subscribe])
+  }, [subscribe, fetchStats])
 
   const onFiltersChange = useCallback((patch: Partial<IncidentFilters>) => {
     setFilters((f) => ({ ...f, ...patch }))
@@ -394,13 +425,13 @@ export default function IncidentsPage() {
           {/* KPI row */}
           <IncidentKpis
             activeIncidents={activeIncidents}
-            historyIncidents={historyIncidents}
+            stats={stats}
           />
 
           {/* Trends & causes */}
           <SectionHead title="Trends & causes" hint="Derived from the last 14 days" />
           <IncidentExtras
-            historyIncidents={historyIncidents}
+            stats={stats}
             endpointById={endpointById}
           />
 

@@ -3,21 +3,16 @@
  *
  * 4 tiles: Active Now, MTTR (7d), Resolved (7d), Flapping. Each follows the
  * same shape used by HealthPage: small tinted icon tile, big mono value,
- * contextual delta line, and a WideSpark footer computed from the incident
- * history.
+ * contextual delta line, and a WideSpark footer. All derivations read from
+ * the pre-aggregated `/incidents/stats` payload so the sparklines cover the
+ * full window regardless of how many incidents exist.
  */
 import { useMemo } from 'react'
 import { Icon } from '@iconify/react'
 import { cn } from '@heroui/react'
-import type { ApiIncident } from '../../types/api'
+import type { ApiIncident, IncidentStats } from '../../types/api'
 import { WideSpark } from '../health/HealthCharts'
-import {
-  flappingEndpoints,
-  localDayKey,
-  severityOf,
-  volumeByDay,
-  type VolumeDay,
-} from './incidentHelpers'
+import { metaFor, severityOf } from './incidentHelpers'
 
 type Tile = 'primary' | 'success' | 'warning' | 'danger'
 
@@ -32,89 +27,130 @@ function tileClass(tile: Tile): string {
 
 interface Props {
   activeIncidents: ApiIncident[]
-  historyIncidents: ApiIncident[]
+  stats: IncidentStats | null
 }
 
-const DAY_MS = 86_400_000
-const WEEK_MS = 7 * DAY_MS
+const SPARK_DAYS = 14
+const WEEK_DAYS = 7
 
-export function IncidentKpis({ activeIncidents, historyIncidents }: Props) {
+function todayKey(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function labelFromDateKey(key: string): string {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+export function IncidentKpis({ activeIncidents, stats }: Props) {
   const critCount = activeIncidents.filter((i) => severityOf(i) === 'Critical').length
   const majCount = activeIncidents.filter((i) => severityOf(i) === 'Major').length
 
-  // MTTR across resolved incidents in the last 7 days.
+  // Trailing 14 days lifted out of the stats window. Safe even when the
+  // window is shorter — slice just returns whatever's there.
+  const last14 = useMemo(() => (stats?.byDay ?? []).slice(-SPARK_DAYS), [stats])
+  const last14Keys = useMemo(() => new Set(last14.map((d) => d.date)), [last14])
+  const today = todayKey()
+
+  const sparkLabels = useMemo(
+    () => last14.map((d) => (d.date === today ? 'Today' : labelFromDateKey(d.date))),
+    [last14, today],
+  )
+
+  // 7d window: right-aligned so the rightmost day is "today".
+  const last7Keys = useMemo(
+    () => new Set(last14.slice(-WEEK_DAYS).map((d) => d.date)),
+    [last14],
+  )
+
+  // MTTR (7d) + resolved counts, with previous 7d for the delta.
   const { avgMttrSec, resolved7d, resolvedPrev7d } = useMemo(() => {
-    const now = Date.now()
-    const durations: number[] = []
+    if (!stats) return { avgMttrSec: 0, resolved7d: 0, resolvedPrev7d: 0 }
+    const mttrByDay = new Map(stats.resolvedDurationsByDay.map((r) => [r.date, r]))
     let cur = 0
-    let prev = 0
-    for (const inc of historyIncidents) {
-      if (inc.status !== 'resolved') continue
-      const t = new Date(inc.startedAt).getTime()
-      if (t >= now - WEEK_MS) {
-        cur++
-        if (inc.durationSeconds != null) durations.push(inc.durationSeconds)
-      } else if (t >= now - 2 * WEEK_MS) {
-        prev++
-      }
+    let durSum = 0
+    let durCount = 0
+    for (const key of last7Keys) {
+      const m = mttrByDay.get(key)
+      if (!m || m.count === 0) continue
+      cur += m.count
+      durSum += m.avgSec * m.count
+      durCount += m.count
     }
-    const avg = durations.length > 0 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0
-    return { avgMttrSec: avg, resolved7d: cur, resolvedPrev7d: prev }
-  }, [historyIncidents])
+    // Previous 7d window = the 7 days ending where last7 starts.
+    const prevWindow = stats.byDay.slice(-14, -7)
+    const prevKeys = new Set(prevWindow.map((d) => d.date))
+    let prev = 0
+    for (const key of prevKeys) {
+      const m = mttrByDay.get(key)
+      if (m) prev += m.count
+    }
+    return {
+      avgMttrSec: durCount > 0 ? Math.round(durSum / durCount) : 0,
+      resolved7d: cur,
+      resolvedPrev7d: prev,
+    }
+  }, [stats, last7Keys])
 
   const resolvedDeltaPct = resolvedPrev7d > 0
     ? Math.round(((resolved7d - resolvedPrev7d) / resolvedPrev7d) * 100)
     : null
 
-  const volume14d = useMemo<VolumeDay[]>(() => volumeByDay(historyIncidents, 14), [historyIncidents])
-  const totalSpark = volume14d.map((d) => d.total)
-  const criticalSpark = volume14d.map((d) => d.critical + d.major)
-  // All four sparklines share the same 14-day daily window, so a single label
-  // array drives every tooltip. "Today" replaces the date for the trailing
-  // bucket so users can read the rightmost point at a glance.
-  const sparkLabels = useMemo(
-    () => volume14d.map((d) => (d.isToday ? 'Today' : d.label)),
-    [volume14d],
+  const totalSpark = useMemo(() => last14.map((d) => d.total), [last14])
+
+  // Critical+Major per day, folded from per-cause counts via CAUSE_META.
+  const criticalSpark = useMemo(
+    () => last14.map((d) => {
+      let n = 0
+      for (const [cause, count] of Object.entries(d.causes)) {
+        const sev = metaFor(cause).severity
+        if (sev === 'Critical' || sev === 'Major') n += count
+      }
+      return n
+    }),
+    [last14],
   )
 
-  const flapping = useMemo(() => flappingEndpoints(historyIncidents, DAY_MS), [historyIncidents])
-  // Index lookup aligned with volume14d so all four sparklines share the same
-  // calendar-day x-axis as their labels. Without this, a rolling 24-hour
-  // bucketing would slide out of phase with the "Apr 9 → Today" labels.
-  const dayIndex = useMemo(() => {
-    const m = new Map<string, number>()
-    volume14d.forEach((d, i) => m.set(d.date, i))
-    return m
-  }, [volume14d])
-
+  // Flapping sparkline: per-day count of endpoints that hit ≥3 incidents
+  // on that day. Uses byEndpointDay so every endpoint's daily volume is
+  // represented regardless of pagination state.
   const flapSpark = useMemo(() => {
-    const counts = new Array<number>(volume14d.length).fill(0)
-    const perDayPerEp = new Map<string, number[]>()
-    for (const inc of historyIncidents) {
-      const idx = dayIndex.get(localDayKey(new Date(inc.startedAt)))
-      if (idx === undefined) continue
-      const arr = perDayPerEp.get(inc.endpointId) ?? new Array<number>(volume14d.length).fill(0)
-      arr[idx]++
-      perDayPerEp.set(inc.endpointId, arr)
+    if (!stats) return new Array<number>(last14.length).fill(0)
+    const perDay = new Map<string, Map<string, number>>()
+    for (const key of last14Keys) perDay.set(key, new Map())
+    for (const row of stats.byEndpointDay) {
+      const bucket = perDay.get(row.date)
+      if (!bucket) continue
+      bucket.set(row.endpointId, row.count)
     }
-    for (const arr of perDayPerEp.values()) {
-      for (let i = 0; i < counts.length; i++) if (arr[i] >= 3) counts[i]++
-    }
-    return counts
-  }, [historyIncidents, dayIndex, volume14d.length])
+    return last14.map((d) => {
+      const bucket = perDay.get(d.date)
+      if (!bucket) return 0
+      let n = 0
+      for (const count of bucket.values()) if (count >= 3) n++
+      return n
+    })
+  }, [stats, last14, last14Keys])
 
+  // Today's flapping endpoint count — drives the tile value.
+  const flappingToday = flapSpark[flapSpark.length - 1] ?? 0
+
+  // MTTR sparkline: per-day avg resolved duration in minutes.
   const mttrSpark = useMemo(() => {
-    const buckets: number[][] = Array.from({ length: volume14d.length }, () => [])
-    for (const inc of historyIncidents) {
-      if (inc.status !== 'resolved' || inc.durationSeconds == null) continue
-      const idx = dayIndex.get(localDayKey(new Date(inc.startedAt)))
-      if (idx === undefined) continue
-      buckets[idx].push(inc.durationSeconds / 60)
-    }
-    return buckets.map((arr) =>
-      arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length),
-    )
-  }, [historyIncidents, dayIndex, volume14d.length])
+    if (!stats) return new Array<number>(last14.length).fill(0)
+    const byDate = new Map(stats.resolvedDurationsByDay.map((r) => [r.date, r]))
+    return last14.map((d) => {
+      const m = byDate.get(d.date)
+      return m && m.count > 0 ? Math.round(m.avgSec / 60) : 0
+    })
+  }, [stats, last14])
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -174,11 +210,11 @@ export function IncidentKpis({ activeIncidents, historyIncidents }: Props) {
       />
       <KpiCard
         icon="solar:refresh-circle-linear"
-        tile={flapping.length > 0 ? 'warning' : 'success'}
+        tile={flappingToday > 0 ? 'warning' : 'success'}
         title="Flapping Endpoints"
-        value={flapping.length}
-        delta={flapping.length === 0 ? 'stable' : 'opened ≥3× in 24h'}
-        deltaTone={flapping.length === 0 ? 'success' : 'warning'}
+        value={flappingToday}
+        delta={flappingToday === 0 ? 'stable' : 'opened ≥3× today'}
+        deltaTone={flappingToday === 0 ? 'success' : 'warning'}
         spark={flapSpark}
         sparkStroke="var(--wd-warning)"
         sparkLabels={sparkLabels}

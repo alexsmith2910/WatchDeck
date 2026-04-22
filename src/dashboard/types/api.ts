@@ -3,6 +3,7 @@
 export interface ApiEndpoint {
   _id: string
   name: string
+  description?: string
   type: 'http' | 'port'
   url?: string
   method?: string
@@ -10,6 +11,7 @@ export interface ApiEndpoint {
   port?: number
   headers?: Record<string, string>
   expectedStatusCodes?: number[]
+  assertions?: Assertion[]
   checkInterval: number
   timeout: number
   enabled: boolean
@@ -35,9 +37,37 @@ export interface ApiEndpoint {
   updatedAt: string
 }
 
-export interface BodyValidationResult {
+export type AssertionKind = 'latency' | 'body' | 'header' | 'json' | 'ssl'
+export type AssertionOperator =
+  | 'lt' | 'lte' | 'gt' | 'gte' | 'eq' | 'neq'
+  | 'contains' | 'not_contains' | 'equals'
+  | 'exists' | 'not_exists'
+export type AssertionSeverity = 'down' | 'degraded'
+
+export interface Assertion {
+  kind: AssertionKind
+  operator: AssertionOperator
+  target?: string
+  value?: string
+  severity: AssertionSeverity
+}
+
+export interface AssertionResult {
+  index: number
+  kind: AssertionKind
+  operator: AssertionOperator
+  target?: string
+  value?: string
+  severity: AssertionSeverity
   passed: boolean
-  results: Array<{ rule?: string; actual?: string; error?: string }>
+  actual?: unknown
+  error?: string
+}
+
+export interface AssertionEvalResult {
+  passed: boolean
+  failedSeverity: AssertionSeverity | null
+  results: AssertionResult[]
 }
 
 export interface ApiCheck {
@@ -52,7 +82,7 @@ export interface ApiCheck {
   sslDaysRemaining?: number
   bodyBytes?: number
   bodyBytesTruncated?: boolean
-  bodyValidation?: BodyValidationResult
+  assertionResult?: AssertionEvalResult
   portOpen?: boolean
   duringMaintenance: boolean
 }
@@ -118,3 +148,52 @@ export interface UptimeStats {
 }
 
 export type EndpointStatus = 'healthy' | 'degraded' | 'down'
+
+// ---------------------------------------------------------------------------
+// Incident stats — pre-aggregated trends for the Incidents page
+// ---------------------------------------------------------------------------
+
+export interface IncidentStatsDay {
+  date: string
+  total: number
+  causes: Record<string, number>
+}
+
+export interface IncidentStatsCause {
+  cause: string
+  count: number
+}
+
+export interface IncidentStatsEndpoint {
+  endpointId: string
+  total: number
+  totalDurationSec: number
+  lastStartedAt: string
+  prevTotal: number
+}
+
+export interface IncidentStatsEndpointDay {
+  endpointId: string
+  date: string
+  count: number
+}
+
+export interface IncidentStatsMttrDay {
+  date: string
+  avgSec: number
+  count: number
+}
+
+export interface IncidentStats {
+  totals: {
+    total: number
+    active: number
+    resolved: number
+    notificationsSent: number
+  }
+  byDay: IncidentStatsDay[]
+  byCause: IncidentStatsCause[]
+  byEndpoint: IncidentStatsEndpoint[]
+  byEndpointDay: IncidentStatsEndpointDay[]
+  resolvedDurationsByDay: IncidentStatsMttrDay[]
+}
