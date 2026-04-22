@@ -4,6 +4,8 @@ import type { WatchDeckConfig } from '../config/types.js'
 import {
   StorageAdapter,
   type HealthCheckResult,
+  type IncidentStats,
+  type IncidentStatsFilter,
   type NotificationLogFilter,
   type NotificationStats,
   type NotificationStatsWindow,
@@ -32,6 +34,34 @@ import type {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * List every yyyy-MM-dd string between `from` and `to` (inclusive) as seen
+ * in the given IANA timezone. DST-resilient: steps at 12h so skipped/doubled
+ * days during transitions resolve via the de-duplication Set.
+ */
+function enumerateDayKeys(from: Date, to: Date, tz: string): string[] {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const toKey = fmt.format(to)
+  const step = 12 * 60 * 60 * 1000
+  const seen = new Set<string>()
+  const keys: string[] = []
+  for (let t = from.getTime(); t <= to.getTime(); t += step) {
+    const key = fmt.format(new Date(t))
+    if (!seen.has(key)) {
+      seen.add(key)
+      keys.push(key)
+    }
+  }
+  // Ensure the final day is included even if the step loop exited before it.
+  if (!seen.has(toKey)) keys.push(toKey)
+  return keys.filter((k) => k <= toKey).sort()
 }
 
 /**
@@ -67,6 +97,7 @@ function buildCheckDoc(payload: CheckWritePayload): CheckDoc {
   if (payload.sslDaysRemaining !== null) doc.sslDaysRemaining = payload.sslDaysRemaining
   if (payload.bodyBytes != null) doc.bodyBytes = payload.bodyBytes
   if (payload.bodyBytesTruncated) doc.bodyBytesTruncated = true
+  if (payload.assertionResult) doc.assertionResult = payload.assertionResult
   return doc
 }
 
@@ -661,6 +692,187 @@ export class MongoDBAdapter extends StorageAdapter {
         updatedAt: new Date(),
       },
     })
+  }
+
+  async getIncidentStats(filter: IncidentStatsFilter): Promise<IncidentStats> {
+    const db = this.getDb()
+    const coll = db.collection<IncidentDoc>(`${this.dbPrefix}incidents`)
+
+    const tz = filter.tz ?? 'UTC'
+    const windowMs = filter.to.getTime() - filter.from.getTime()
+    const prevFrom = new Date(filter.from.getTime() - windowMs)
+
+    const match: Record<string, unknown> = {
+      startedAt: { $gte: filter.from, $lte: filter.to },
+    }
+    if (filter.endpointId) {
+      match.endpointId = toObjectId(filter.endpointId, 'endpointId')
+    }
+
+    const dayFormat = { $dateToString: { date: '$startedAt', format: '%Y-%m-%d', timezone: tz } }
+
+    const [raw] = await coll
+      .aggregate<{
+        totals: Array<{
+          total: number
+          active: number
+          resolved: number
+          notificationsSent: number
+        }>
+        byDayCause: Array<{ _id: { date: string; cause: string }; count: number }>
+        byCause: Array<{ _id: string; count: number }>
+        byEndpoint: Array<{
+          _id: ObjectId
+          total: number
+          totalDurationSec: number
+          lastStartedAt: Date
+        }>
+        byEndpointDay: Array<{ _id: { endpointId: ObjectId; date: string }; count: number }>
+        resolvedDurationsByDay: Array<{ _id: string; avgSec: number; count: number }>
+      }>([
+        { $match: match },
+        {
+          $facet: {
+            totals: [
+              {
+                $group: {
+                  _id: null,
+                  total: { $sum: 1 },
+                  active: { $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] } },
+                  resolved: { $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, 1, 0] } },
+                  notificationsSent: { $sum: { $ifNull: ['$notificationsSent', 0] } },
+                },
+              },
+              {
+                $project: {
+                  _id: 0,
+                  total: 1,
+                  active: 1,
+                  resolved: 1,
+                  notificationsSent: 1,
+                },
+              },
+            ],
+            byDayCause: [
+              {
+                $group: {
+                  _id: { date: dayFormat, cause: '$cause' },
+                  count: { $sum: 1 },
+                },
+              },
+            ],
+            byCause: [
+              { $group: { _id: '$cause', count: { $sum: 1 } } },
+              { $sort: { count: -1 } },
+            ],
+            byEndpoint: [
+              {
+                $group: {
+                  _id: '$endpointId',
+                  total: { $sum: 1 },
+                  totalDurationSec: { $sum: { $ifNull: ['$durationSeconds', 0] } },
+                  lastStartedAt: { $max: '$startedAt' },
+                },
+              },
+            ],
+            byEndpointDay: [
+              {
+                $group: {
+                  _id: { endpointId: '$endpointId', date: dayFormat },
+                  count: { $sum: 1 },
+                },
+              },
+            ],
+            resolvedDurationsByDay: [
+              { $match: { status: 'resolved', durationSeconds: { $gt: 0 } } },
+              {
+                $group: {
+                  _id: dayFormat,
+                  avgSec: { $avg: '$durationSeconds' },
+                  count: { $sum: 1 },
+                },
+              },
+            ],
+          },
+        },
+      ])
+      .toArray()
+
+    // Previous-window counts per endpoint for trend calculation.
+    const prevAgg = await coll
+      .aggregate<{ _id: ObjectId; count: number }>([
+        {
+          $match: {
+            startedAt: { $gte: prevFrom, $lt: filter.from },
+            ...(filter.endpointId
+              ? { endpointId: toObjectId(filter.endpointId, 'endpointId') }
+              : {}),
+          },
+        },
+        { $group: { _id: '$endpointId', count: { $sum: 1 } } },
+      ])
+      .toArray()
+    const prevByEndpoint = new Map<string, number>()
+    for (const r of prevAgg) prevByEndpoint.set(r._id.toHexString(), r.count)
+
+    // ── Shape output ───────────────────────────────────────────────────────
+    const totals = raw?.totals[0] ?? {
+      total: 0,
+      active: 0,
+      resolved: 0,
+      notificationsSent: 0,
+    }
+
+    // Zero-filled per-day bucket list, keyed yyyy-mm-dd in the requested tz.
+    // Using Intl + the tz param keeps the server buckets aligned with what
+    // the client's calendar shows, so "today" doesn't slip a day near UTC
+    // day boundaries.
+    const dates = enumerateDayKeys(filter.from, filter.to, tz)
+    const byDayMap = new Map<string, { date: string; total: number; causes: Record<string, number> }>()
+    for (const d of dates) byDayMap.set(d, { date: d, total: 0, causes: {} })
+    for (const row of raw?.byDayCause ?? []) {
+      const bucket = byDayMap.get(row._id.date)
+      if (!bucket) continue
+      bucket.causes[row._id.cause] = (bucket.causes[row._id.cause] ?? 0) + row.count
+      bucket.total += row.count
+    }
+    const byDay = dates.map((d) => byDayMap.get(d)!)
+
+    const byCause = (raw?.byCause ?? []).map((r) => ({ cause: r._id, count: r.count }))
+
+    const byEndpoint = (raw?.byEndpoint ?? [])
+      .map((r) => ({
+        endpointId: r._id.toHexString(),
+        total: r.total,
+        totalDurationSec: r.totalDurationSec,
+        lastStartedAt: r.lastStartedAt.toISOString(),
+        prevTotal: prevByEndpoint.get(r._id.toHexString()) ?? 0,
+      }))
+      .sort((a, b) => b.total - a.total)
+
+    const byEndpointDay = (raw?.byEndpointDay ?? []).map((r) => ({
+      endpointId: r._id.endpointId.toHexString(),
+      date: r._id.date,
+      count: r.count,
+    }))
+
+    const mttrMap = new Map<string, { avgSec: number; count: number }>()
+    for (const row of raw?.resolvedDurationsByDay ?? []) {
+      mttrMap.set(row._id, { avgSec: Math.round(row.avgSec), count: row.count })
+    }
+    const resolvedDurationsByDay = dates.map((d) => {
+      const hit = mttrMap.get(d)
+      return { date: d, avgSec: hit?.avgSec ?? 0, count: hit?.count ?? 0 }
+    })
+
+    return {
+      totals,
+      byDay,
+      byCause,
+      byEndpoint,
+      byEndpointDay,
+      resolvedDurationsByDay,
+    }
   }
 
   // ---------------------------------------------------------------------------

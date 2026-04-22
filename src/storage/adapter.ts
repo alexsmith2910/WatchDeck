@@ -45,6 +45,68 @@ export interface NotificationStatsWindow {
   to: Date
 }
 
+// ---------------------------------------------------------------------------
+// Incident stats (aggregation for dashboard trends)
+// ---------------------------------------------------------------------------
+
+export interface IncidentStatsFilter {
+  from: Date
+  to: Date
+  endpointId?: string
+  /** IANA timezone used to bucket days (e.g. 'America/Los_Angeles'). Falls
+   *  back to UTC when absent. Clients that render calendar-day charts must
+   *  pass their own zone so bucket boundaries match what the user sees. */
+  tz?: string
+}
+
+export interface IncidentStatsDay {
+  date: string
+  total: number
+  causes: Record<string, number>
+}
+
+export interface IncidentStatsCause {
+  cause: string
+  count: number
+}
+
+export interface IncidentStatsEndpoint {
+  endpointId: string
+  total: number
+  totalDurationSec: number
+  lastStartedAt: string
+  /** Count over the equally-long window immediately preceding [from, to). */
+  prevTotal: number
+}
+
+export interface IncidentStatsEndpointDay {
+  endpointId: string
+  date: string
+  count: number
+}
+
+export interface IncidentStatsMttrDay {
+  date: string
+  avgSec: number
+  count: number
+}
+
+export interface IncidentStats {
+  totals: {
+    total: number
+    active: number
+    resolved: number
+    /** Sum of `notificationsSent` across all incidents in the window. */
+    notificationsSent: number
+  }
+  /** One entry per calendar day in [from, to], zero-filled. */
+  byDay: IncidentStatsDay[]
+  byCause: IncidentStatsCause[]
+  byEndpoint: IncidentStatsEndpoint[]
+  byEndpointDay: IncidentStatsEndpointDay[]
+  resolvedDurationsByDay: IncidentStatsMttrDay[]
+}
+
 export interface NotificationStats {
   total: number
   sent: number
@@ -263,6 +325,14 @@ export abstract class StorageAdapter {
     endpointId: string,
     incidentId: string | null,
   ): Promise<void>
+
+  /**
+   * Aggregate incident counts for the given window, pre-bucketed by day,
+   * cause, and endpoint. A single DB roundtrip that powers the incident-page
+   * trend charts and KPIs without requiring the client to paginate through
+   * individual incident documents.
+   */
+  abstract getIncidentStats(filter: IncidentStatsFilter): Promise<IncidentStats>
 
   // ---------------------------------------------------------------------------
   // Notification channels API
