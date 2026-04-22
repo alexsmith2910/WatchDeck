@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState } from 'react'
+import { useRef, useCallback, useEffect, useState } from 'react'
 import { Chip, Separator, Popover } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { cn } from '@heroui/react'
@@ -175,6 +175,14 @@ export default function StatusPill(props: StatusPillProps) {
 
   const scheduleClose = useCallback(() => {
     closeTimer.current = setTimeout(() => setIsOpen(false), 300)
+  }, [])
+
+  // Guard against a close timer firing after unmount — without this, the
+  // setIsOpen(false) would warn about setState on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current)
+    }
   }, [])
 
   return (
