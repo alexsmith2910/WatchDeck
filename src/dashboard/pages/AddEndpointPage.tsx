@@ -58,13 +58,13 @@ const httpSchema = baseSchema.extend({
     .refine(
       (val) => {
         try {
-          new URL(val)
-          return true
+          const u = new URL(val)
+          return u.protocol === 'http:' || u.protocol === 'https:'
         } catch {
           return false
         }
       },
-      { message: 'Must be a valid URL (include https://)' },
+      { message: 'Must be a valid http:// or https:// URL' },
     ),
   method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']),
   expectedStatusCodes: z.array(z.number()).min(1, 'At least one status code required'),

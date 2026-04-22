@@ -14,7 +14,7 @@
 import type { FastifyInstance } from 'fastify'
 import { ObjectId } from 'mongodb'
 import { eventBus } from '../../core/eventBus.js'
-import { formatError } from '../../utils/errors.js'
+import { formatError, type ValidationError } from '../../utils/errors.js'
 import { parsePagination, toEnvelope } from '../utils/pagination.js'
 import type { AppContext } from '../server.js'
 import type { EndpointDoc } from '../../storage/types.js'
@@ -23,38 +23,158 @@ import { runHttpCheck } from '../../checks/httpCheck.js'
 import { runPortCheck } from '../../checks/portCheck.js'
 
 // ---------------------------------------------------------------------------
-// POST /endpoints body schema
+// Body schemas (POST create, PUT update)
 // ---------------------------------------------------------------------------
+
+// Valid ranges for each per-endpoint monitoring override. Shared with the
+// settings route so PUT /endpoints/:id and PUT /endpoints/:id/settings reject
+// identical out-of-range values — and re-exported so the dashboard can surface
+// the same numbers in input hints without drifting.
+export const MONITORING_FIELD_RANGES = {
+  checkInterval: { min: 30, max: 86_400 },
+  timeout: { min: 1_000, max: 60_000 },
+  latencyThreshold: { min: 100, max: 30_000 },
+  sslWarningDays: { min: 0, max: 365 },
+  failureThreshold: { min: 1, max: 10 },
+  alertCooldown: { min: 0, max: 7_200 },
+  escalationDelay: { min: 0, max: 86_400 },
+} as const
+
+// Fields both routes accept. Deep validation for URL / host / port lives in
+// the helpers below so create and update share the exact same rules.
+export const mutableFieldProps = {
+  name: { type: 'string', minLength: 1, maxLength: 200 },
+  // HTTP
+  url: { type: 'string', minLength: 1 },
+  method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] },
+  headers: { type: 'object', additionalProperties: { type: 'string' } },
+  expectedStatusCodes: {
+    type: 'array',
+    items: { type: 'integer', minimum: 100, maximum: 599 },
+  },
+  bodyRules: { type: 'array' },
+  // Port
+  host: { type: 'string', minLength: 1 },
+  port: { type: 'integer', minimum: 1, maximum: 65535 },
+  // Shared overrides (integer ranges mirror MONITORING_FIELD_RANGES above)
+  checkInterval: {
+    type: 'integer',
+    minimum: MONITORING_FIELD_RANGES.checkInterval.min,
+    maximum: MONITORING_FIELD_RANGES.checkInterval.max,
+  },
+  timeout: {
+    type: 'integer',
+    minimum: MONITORING_FIELD_RANGES.timeout.min,
+    maximum: MONITORING_FIELD_RANGES.timeout.max,
+  },
+  latencyThreshold: {
+    type: 'integer',
+    minimum: MONITORING_FIELD_RANGES.latencyThreshold.min,
+    maximum: MONITORING_FIELD_RANGES.latencyThreshold.max,
+  },
+  sslWarningDays: {
+    type: 'integer',
+    minimum: MONITORING_FIELD_RANGES.sslWarningDays.min,
+    maximum: MONITORING_FIELD_RANGES.sslWarningDays.max,
+  },
+  failureThreshold: {
+    type: 'integer',
+    minimum: MONITORING_FIELD_RANGES.failureThreshold.min,
+    maximum: MONITORING_FIELD_RANGES.failureThreshold.max,
+  },
+  alertCooldown: {
+    type: 'integer',
+    minimum: MONITORING_FIELD_RANGES.alertCooldown.min,
+    maximum: MONITORING_FIELD_RANGES.alertCooldown.max,
+  },
+  recoveryAlert: { type: 'boolean' },
+  escalationDelay: {
+    type: 'integer',
+    minimum: MONITORING_FIELD_RANGES.escalationDelay.min,
+    maximum: MONITORING_FIELD_RANGES.escalationDelay.max,
+  },
+  escalationChannelId: { type: ['string', 'null'] },
+  notificationChannelIds: { type: 'array', items: { type: 'string' } },
+  pausedNotificationChannelIds: { type: 'array', items: { type: 'string' } },
+} as const
 
 const createBodySchema = {
   type: 'object',
   required: ['name', 'type'],
   properties: {
-    name: { type: 'string', minLength: 1, maxLength: 200 },
+    ...mutableFieldProps,
     type: { type: 'string', enum: ['http', 'port'] },
-    // HTTP
-    url: { type: 'string' },
-    method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] },
-    headers: { type: 'object', additionalProperties: { type: 'string' } },
-    expectedStatusCodes: { type: 'array', items: { type: 'integer' } },
-    bodyRules: { type: 'array' },
-    // Port
-    host: { type: 'string' },
-    port: { type: 'integer', minimum: 1, maximum: 65535 },
-    // Shared optional overrides
-    checkInterval: { type: 'integer' },
-    timeout: { type: 'integer' },
-    latencyThreshold: { type: 'integer' },
-    sslWarningDays: { type: 'integer' },
-    failureThreshold: { type: 'integer' },
-    alertCooldown: { type: 'integer' },
-    recoveryAlert: { type: 'boolean' },
-    escalationDelay: { type: 'integer' },
-    notificationChannelIds: { type: 'array', items: { type: 'string' } },
-    pausedNotificationChannelIds: { type: 'array', items: { type: 'string' } },
   },
   additionalProperties: false,
 } as const
+
+const updateBodySchema = {
+  type: 'object',
+  properties: mutableFieldProps,
+  additionalProperties: false,
+} as const
+
+// ---------------------------------------------------------------------------
+// Per-field validators shared by POST and PUT.
+// Each returns null when the value is valid, or a ValidationError describing
+// what went wrong. HTTP endpoints are rejected if the URL isn't parseable or
+// uses a protocol other than http(s) — the check engine only speaks those.
+// ---------------------------------------------------------------------------
+
+function validateUrlValue(url: unknown): ValidationError | null {
+  if (typeof url !== 'string' || url.trim() === '') {
+    return {
+      field: 'body.url',
+      value: url ?? null,
+      expected: 'string — valid http:// or https:// URL',
+      fix: 'Provide a URL starting with http:// or https://',
+    }
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return {
+      field: 'body.url',
+      value: url,
+      expected: 'valid http:// or https:// URL',
+      fix: 'Ensure the URL includes protocol and host (e.g. https://api.example.com/health)',
+    }
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return {
+      field: 'body.url',
+      value: url,
+      expected: 'http:// or https:// protocol',
+      fix: 'HTTP checks only support http:// or https:// — replace the scheme',
+    }
+  }
+  return null
+}
+
+function validateHostValue(host: unknown): ValidationError | null {
+  if (typeof host !== 'string' || host.trim() === '') {
+    return {
+      field: 'body.host',
+      value: host ?? null,
+      expected: 'string — hostname or IP address',
+      fix: 'Provide a hostname or IP address',
+    }
+  }
+  return null
+}
+
+function validatePortValue(port: unknown): ValidationError | null {
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+    return {
+      field: 'body.port',
+      value: port ?? null,
+      expected: 'integer 1–65535',
+      fix: 'Provide a TCP port number between 1 and 65535',
+    }
+  }
+  return null
+}
 
 export function endpointsRoutes(ctx: AppContext) {
   return async (fastify: FastifyInstance): Promise<void> => {
@@ -118,50 +238,24 @@ export function endpointsRoutes(ctx: AppContext) {
         )
       }
 
-      // Type-specific required field validation
-      const validationErrors: ReturnType<typeof formatError>['errors'] = []
+      // Type-specific required field validation — delegates deep checks to
+      // the shared helpers so POST and PUT reject the same inputs.
+      const validationErrors: ValidationError[] = []
       if (type === 'http') {
-        if (!body.url || typeof body.url !== 'string') {
-          validationErrors!.push({
-            field: 'body.url',
-            value: body.url ?? null,
-            expected: 'string — valid HTTP/HTTPS URL',
-            fix: 'Provide a URL starting with http:// or https://',
-          })
-        } else {
-          try { new URL(body.url as string) } catch {
-            validationErrors!.push({
-              field: 'body.url',
-              value: body.url,
-              expected: 'valid HTTP/HTTPS URL',
-              fix: 'Ensure the URL includes protocol (https://...)',
-            })
-          }
-        }
+        const err = validateUrlValue(body.url)
+        if (err) validationErrors.push(err)
       } else {
-        if (!body.host || typeof body.host !== 'string') {
-          validationErrors!.push({
-            field: 'body.host',
-            value: body.host ?? null,
-            expected: 'string — hostname or IP address',
-            fix: 'Provide a hostname or IP address',
-          })
-        }
-        if (body.port === undefined) {
-          validationErrors!.push({
-            field: 'body.port',
-            value: null,
-            expected: 'integer 1–65535',
-            fix: 'Provide a TCP port number',
-          })
-        }
+        const hostErr = validateHostValue(body.host)
+        if (hostErr) validationErrors.push(hostErr)
+        const portErr = validatePortValue(body.port)
+        if (portErr) validationErrors.push(portErr)
       }
 
-      if (validationErrors!.length > 0) {
+      if (validationErrors.length > 0) {
         return reply.code(422).send(
           formatError(
             'VALIDATION_ERROR',
-            `Request body has ${validationErrors!.length} error${validationErrors!.length === 1 ? '' : 's'}`,
+            `Request body has ${validationErrors.length} error${validationErrors.length === 1 ? '' : 's'}`,
             validationErrors,
           ),
         )
@@ -210,7 +304,7 @@ export function endpointsRoutes(ctx: AppContext) {
     })
 
     // ── PUT /endpoints/:id ───────────────────────────────────────────────────
-    fastify.put('/endpoints/:id', async (request, reply) => {
+    fastify.put('/endpoints/:id', { schema: { body: updateBodySchema } }, async (request, reply) => {
       const { id } = request.params as { id: string }
       if (!ObjectId.isValid(id)) {
         return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
@@ -221,9 +315,61 @@ export function endpointsRoutes(ctx: AppContext) {
         return reply.code(404).send(formatError('NOT_FOUND', `Endpoint ${id} not found`))
       }
 
-      const body = request.body as Record<string, unknown>
-      // Strip immutable fields
-      const { _id: _d, createdAt: _c, type: _t, ...changes } = body
+      const changes = { ...(request.body as Record<string, unknown>) }
+
+      // Deep validation for values the JSON schema only shallow-types. Only
+      // fields actually present in the update payload are checked — partial
+      // updates are the whole point of PUT here.
+      const validationErrors: ValidationError[] = []
+      if ('url' in changes) {
+        if (existing.type !== 'http') {
+          validationErrors.push({
+            field: 'body.url',
+            value: changes.url,
+            expected: 'omitted — this endpoint is a port check, not HTTP',
+            fix: 'Remove body.url; port endpoints use host + port instead',
+          })
+        } else {
+          const err = validateUrlValue(changes.url)
+          if (err) validationErrors.push(err)
+        }
+      }
+      if ('host' in changes) {
+        if (existing.type !== 'port') {
+          validationErrors.push({
+            field: 'body.host',
+            value: changes.host,
+            expected: 'omitted — this endpoint is HTTP, not a port check',
+            fix: 'Remove body.host; HTTP endpoints use url instead',
+          })
+        } else {
+          const err = validateHostValue(changes.host)
+          if (err) validationErrors.push(err)
+        }
+      }
+      if ('port' in changes) {
+        if (existing.type !== 'port') {
+          validationErrors.push({
+            field: 'body.port',
+            value: changes.port,
+            expected: 'omitted — this endpoint is HTTP, not a port check',
+            fix: 'Remove body.port; HTTP endpoints use url instead',
+          })
+        } else {
+          const err = validatePortValue(changes.port)
+          if (err) validationErrors.push(err)
+        }
+      }
+
+      if (validationErrors.length > 0) {
+        return reply.code(422).send(
+          formatError(
+            'VALIDATION_ERROR',
+            `Request body has ${validationErrors.length} error${validationErrors.length === 1 ? '' : 's'}`,
+            validationErrors,
+          ),
+        )
+      }
 
       // Coerce ID-typed fields the API receives as strings back into
       // ObjectIds. Mongo will happily store strings here, but code that
@@ -238,6 +384,11 @@ export function endpointsRoutes(ctx: AppContext) {
         changes.pausedNotificationChannelIds = (changes.pausedNotificationChannelIds as unknown[])
           .filter((v): v is string => typeof v === 'string' && ObjectId.isValid(v))
           .map((v) => new ObjectId(v))
+      }
+      if (typeof changes.escalationChannelId === 'string') {
+        changes.escalationChannelId = ObjectId.isValid(changes.escalationChannelId)
+          ? new ObjectId(changes.escalationChannelId)
+          : null
       }
 
       const updated = await ctx.adapter.updateEndpoint(id, changes as Partial<EndpointDoc>)

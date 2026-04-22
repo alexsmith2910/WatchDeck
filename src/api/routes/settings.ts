@@ -13,6 +13,7 @@ import { eventBus } from '../../core/eventBus.js'
 import { formatError } from '../../utils/errors.js'
 import type { AppContext } from '../server.js'
 import type { EndpointDoc } from '../../storage/types.js'
+import { mutableFieldProps } from './endpoints.js'
 
 /** Endpoint fields that can be overridden per-endpoint via the settings API. */
 const OVERRIDABLE_FIELDS = [
@@ -27,6 +28,18 @@ const OVERRIDABLE_FIELDS = [
   'escalationChannelId',
   'notificationChannelIds',
 ] as const
+
+// Narrow the shared mutable-field schema down to the fields this route accepts,
+// so range enforcement matches PUT /endpoints/:id exactly.
+const settingsBodyProps = Object.fromEntries(
+  OVERRIDABLE_FIELDS.map((f) => [f, mutableFieldProps[f]]),
+) as { [K in (typeof OVERRIDABLE_FIELDS)[number]]: (typeof mutableFieldProps)[K] }
+
+const settingsBodySchema = {
+  type: 'object',
+  properties: settingsBodyProps,
+  additionalProperties: false,
+} as const
 
 export function settingsRoutes(ctx: AppContext) {
   return async (fastify: FastifyInstance): Promise<void> => {
@@ -85,7 +98,7 @@ export function settingsRoutes(ctx: AppContext) {
       return reply.send({ data: overrides })
     })
 
-    fastify.put('/endpoints/:id/settings', async (request, reply) => {
+    fastify.put('/endpoints/:id/settings', { schema: { body: settingsBodySchema } }, async (request, reply) => {
       const { id } = request.params as { id: string }
       if (!ObjectId.isValid(id)) {
         return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
@@ -106,6 +119,20 @@ export function settingsRoutes(ctx: AppContext) {
         return reply.code(422).send(
           formatError('VALIDATION_ERROR', 'No overridable fields found in request body'),
         )
+      }
+
+      // Coerce ID-typed fields back into ObjectIds — the dispatcher's fan-out
+      // reads these as ObjectId instances, and mixing strings crashes at
+      // runtime. Mirrors the same coercion in PUT /endpoints/:id.
+      if (Array.isArray(changes.notificationChannelIds)) {
+        changes.notificationChannelIds = (changes.notificationChannelIds as unknown[])
+          .filter((v): v is string => typeof v === 'string' && ObjectId.isValid(v))
+          .map((v) => new ObjectId(v))
+      }
+      if (typeof changes.escalationChannelId === 'string') {
+        changes.escalationChannelId = ObjectId.isValid(changes.escalationChannelId)
+          ? new ObjectId(changes.escalationChannelId)
+          : null
       }
 
       const updated = await ctx.adapter.updateEndpoint(id, changes as Partial<EndpointDoc>)
