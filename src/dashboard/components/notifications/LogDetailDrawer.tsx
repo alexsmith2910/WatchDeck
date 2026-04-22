@@ -1,7 +1,9 @@
 /**
  * Log row detail drawer — right-side panel showing the full dispatch
  * (channel, endpoint, message, attempt history, errors) with retry for
- * failed rows.
+ * failed rows. The four rich cards (payload, response, retries, reproduce
+ * cURL) come from the shared `LogExpansionCards` component so this drawer
+ * and the endpoint-detail accordion render identically.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Button, Drawer, Spinner, cn } from '@heroui/react'
@@ -21,6 +23,7 @@ import {
   SEVERITY_STYLE,
   STATUS_STYLE,
 } from '../../types/notifications'
+import { LogExpansionCards } from './LogExpansionCards'
 
 interface Props {
   row: ApiNotificationLogRow | null
@@ -76,29 +79,12 @@ function LogDetailContent({
 }) {
   const { request } = useApi()
   const [retrying, setRetrying] = useState(false)
-  const [attempts, setAttempts] = useState<ApiNotificationLogRow[]>([])
-  const [attemptsLoading, setAttemptsLoading] = useState(false)
 
   const channel = useMemo(
-    () => channels.find((c) => c._id === row.channelId),
+    () => channels.find((c) => c._id === row.channelId) ?? null,
     [channels, row.channelId],
   )
   const st = STATUS_STYLE[row.deliveryStatus]
-
-  useEffect(() => {
-    setAttemptsLoading(true)
-    const rootId = row.retryOf ?? row._id
-    request<{ data: ApiNotificationLogRow }>(`/notifications/log/${rootId}`)
-      .then((r) => {
-        const rootRow = r.data?.data ?? null
-        const entries: ApiNotificationLogRow[] = []
-        if (rootRow) entries.push(rootRow)
-        if (row._id !== rootId) entries.push(row)
-        setAttempts(entries)
-      })
-      .catch(() => setAttempts([]))
-      .finally(() => setAttemptsLoading(false))
-  }, [request, row])
 
   async function retry() {
     setRetrying(true)
@@ -115,9 +101,6 @@ function LogDetailContent({
       setRetrying(false)
     }
   }
-
-  const canCopyCurl =
-    (row.channelType === 'webhook' || row.channelType === 'discord' || row.channelType === 'slack') && !!channel
 
   return (
     <div className="flex flex-col h-full bg-wd-surface">
@@ -203,74 +186,7 @@ function LogDetailContent({
           </Callout>
         )}
 
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-wd-muted mb-2">
-            Attempts
-          </div>
-          {attemptsLoading ? (
-            <ol className="flex flex-col gap-2" aria-label="Loading attempts">
-              {[0, 1].map((i) => (
-                <li
-                  key={i}
-                  className="flex items-center gap-3 bg-wd-surface-hover/40 border border-wd-border/40 rounded-lg px-2.5 py-2 animate-pulse"
-                >
-                  <span className="h-3 w-6 rounded bg-wd-border/60 shrink-0" />
-                  <span className="h-3.5 w-14 rounded bg-wd-border/60 shrink-0" />
-                  <span className="h-3 flex-1 rounded bg-wd-border/40" />
-                  <span className="h-3 w-12 rounded bg-wd-border/40 shrink-0" />
-                </li>
-              ))}
-            </ol>
-          ) : attempts.length === 0 ? (
-            <div className="text-[11px] text-wd-muted">No prior attempts on record.</div>
-          ) : (
-            <ol className="flex flex-col gap-2">
-              {attempts.map((a, i) => {
-                const as = STATUS_STYLE[a.deliveryStatus]
-                return (
-                  <li
-                    key={a._id}
-                    className="flex items-center gap-3 bg-wd-surface-hover/40 border border-wd-border/40 rounded-lg px-2.5 py-2"
-                  >
-                    <span className="text-[10px] font-mono text-wd-muted w-6 shrink-0">#{i + 1}</span>
-                    <span className={cn('inline-block text-[10px] font-medium rounded px-1.5 py-0.5', as.className)}>
-                      {as.label}
-                    </span>
-                    <span className="text-[11px] text-wd-muted flex-1 truncate">
-                      {a.failureReason ?? a.messageSummary}
-                    </span>
-                    <span className="text-[11px] text-wd-muted font-mono">
-                      {new Date(a.sentAt).toLocaleTimeString()}
-                    </span>
-                  </li>
-                )
-              })}
-            </ol>
-          )}
-        </div>
-
-        {canCopyCurl && channel && (
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-wd-muted mb-2">
-              Reproduce
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="!text-xs"
-              onPress={() => {
-                const target =
-                  channel.discordWebhookUrl ?? channel.slackWebhookUrl ?? channel.webhookUrl ?? row.channelTarget
-                const curl = `curl -X POST '${target}' -H 'Content-Type: application/json' -d '${JSON.stringify({ content: row.messageSummary })}'`
-                void navigator.clipboard.writeText(curl)
-                toast.success('Copied as cURL')
-              }}
-            >
-              <Icon icon="solar:copy-linear" width={16} className="mr-1" />
-              Copy as cURL
-            </Button>
-          </div>
-        )}
+        <LogExpansionCards row={row} channel={channel} />
       </Drawer.Body>
 
       {row.deliveryStatus === 'failed' && (
