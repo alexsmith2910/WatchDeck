@@ -52,7 +52,7 @@ function toneStroke(tone: Tone): string {
 function formatSslRemaining(days: number): string {
   if (days <= 0) return "0d";
   if (days < 60) return `${days}d`;
-  if (days < 730) return `${Math.round(days / 30)}m`;
+  if (days < 730) return `${Math.round(days / 30)}mo`;
   return `${Math.round(days / 365)}y`;
 }
 
