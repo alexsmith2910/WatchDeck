@@ -4,9 +4,6 @@
  * The left accent bar + icon tile colour to the live status (driven by the
  * SSE-updated ApiEndpoint), so this banner doubles as the "is this thing up
  * right now?" readout at the top of the page.
- *
- * Pieces currently not wired to the database (tags, group, region) render
- * inside a small rainbow placeholder row — visible stand-ins, no overlay copy.
  */
 import { memo, useState } from "react";
 import { Button, cn } from "@heroui/react";

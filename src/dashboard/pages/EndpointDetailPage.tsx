@@ -72,8 +72,27 @@ export default function EndpointDetailPage() {
   const [activeTab, setActiveTabState] = useState<EndpointTabId>(
     VALID_TABS.includes(initialTab) ? initialTab : "metrics",
   );
+  // Dirty state for the Settings tab. Lifted up here so we can:
+  //   1. warn the user before they flip to another top-level tab with
+  //      pending edits
+  //   2. attach a beforeunload handler so browser close / refresh prompts
+  //      the native "leave site?" dialog
+  const [settingsDirty, setSettingsDirty] = useState(false);
+
   const setActiveTab = useCallback(
     (tab: EndpointTabId) => {
+      // Leaving Settings with pending edits: prompt so the user doesn't
+      // silently lose their work when the SettingsTab unmounts.
+      if (
+        activeTab === "settings" &&
+        tab !== "settings" &&
+        settingsDirty &&
+        !window.confirm(
+          "You have unsaved changes in Settings. Leave without saving?",
+        )
+      ) {
+        return;
+      }
       setActiveTabState(tab);
       setSearchParams(
         (prev) => {
@@ -85,8 +104,20 @@ export default function EndpointDetailPage() {
         { replace: true },
       );
     },
-    [setSearchParams],
+    [activeTab, settingsDirty, setSearchParams],
   );
+
+  useEffect(() => {
+    if (!settingsDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      // Modern browsers ignore the string but require preventDefault +
+      // returnValue to show their generic "leave site?" prompt.
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [settingsDirty]);
 
   // ── Master range shared across all 4 Metrics-tab graphs ────────────────
   const [metricsRange, setMetricsRange] = useState<MetricsRange>("30d");
@@ -530,6 +561,7 @@ export default function EndpointDetailPage() {
             channels={channels}
             onEndpointUpdated={(next) => setEndpoint(next)}
             onDeleted={() => navigate("/endpoints")}
+            onDirtyChange={setSettingsDirty}
           />
         )}
       </div>

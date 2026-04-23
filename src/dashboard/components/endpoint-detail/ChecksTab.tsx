@@ -2,9 +2,10 @@
  * Checks tab — recent probe results with inline expansion.
  *
  * Each row opens a Request / Response / Assertions detail laid out per the
- * design mock in `temp/endpoint details/Endpoint.tabs.jsx`. Assertion wiring
- * is still TBD in the backend, so the Assertions block renders placeholder
- * rows inside a RainbowPlaceholder until that flow lands.
+ * design mock in `temp/endpoint details/Endpoint.tabs.jsx`. Assertion results
+ * come from the evaluator wired in `checks/evaluators/assertionsEval.ts`; each
+ * rule's pass/fail lands on `check.assertionResult.results` and drives both
+ * the row-level indicator dots and the expanded detail rows.
  */
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { cn, Spinner } from "@heroui/react";
@@ -26,7 +27,6 @@ import {
   DateRangeFilter,
   FilterDropdown,
   FilterSearch,
-  RainbowPlaceholder,
 } from "./primitives";
 
 type StatusFilter = "all" | "healthy" | "degraded" | "down";
@@ -339,8 +339,8 @@ function CheckRow({
 }) {
   const color = statusColors[check.status] ?? statusColors.unknown;
   const isFail = check.status === "down";
-  const assertions = check.bodyValidation?.results ?? [];
-  const passCount = assertions.filter((a) => !a.error).length;
+  const assertions = check.assertionResult?.results ?? [];
+  const passCount = assertions.filter((a) => a.passed).length;
   const totalCount = assertions.length;
 
   return (
@@ -400,8 +400,9 @@ function CheckRow({
                     key={i}
                     className={cn(
                       "w-[6px] h-[6px] rounded-[2px]",
-                      a.error ? "bg-wd-danger" : "bg-wd-success",
+                      assertionDotColor(a),
                     )}
+                    title={`${a.kind} ${a.operator}${a.value ? ` ${a.value}` : ""}${a.passed ? " · passed" : ` · failed (${a.severity})`}`}
                   />
                 ))}
               </span>
@@ -577,73 +578,137 @@ function CheckDetail({
 
       <div className="md:col-span-2">
         <h5 className={H5}>Assertions</h5>
-        <RainbowPlaceholder className="min-h-[96px]" rounded="rounded-lg">
-          <div className="flex flex-col gap-1">
-            <AssertionRow kind="status" op="===" value="200" passed />
-            <AssertionRow
-              kind="latency"
-              op="<"
-              value="800ms"
-              window="p95 / 5m"
-              passed
-            />
-            <AssertionRow
-              kind="body"
-              op="contains"
-              value={'"status":"ok"'}
-              passed
-            />
-            <AssertionRow
-              kind="header"
-              op="exists"
-              value="x-request-id"
-              passed
-            />
-          </div>
-        </RainbowPlaceholder>
+        <CheckAssertionsList check={check} endpoint={endpoint} />
       </div>
     </div>
   );
 }
 
-function AssertionRow({
-  kind,
-  op,
-  value,
-  window,
-  passed,
-  actual,
+// ---------------------------------------------------------------------------
+// Assertions block in the expanded Checks detail. Three render modes:
+//   - Endpoint has no assertions configured → muted empty line
+//   - Endpoint has assertions but the evaluator was skipped (base status was
+//     down before the assertion phase) → skipped notice
+//   - Evaluator ran → row per result
+// ---------------------------------------------------------------------------
+
+function CheckAssertionsList({
+  check,
+  endpoint,
 }: {
-  kind: string;
-  op: string;
-  value: string;
-  window?: string;
-  passed: boolean;
-  actual?: string;
+  check: ApiCheck;
+  endpoint: ApiEndpoint;
 }) {
+  const configured = endpoint.assertions ?? [];
+  const results = check.assertionResult?.results ?? [];
+
+  if (results.length === 0) {
+    if (configured.length === 0) {
+      return (
+        <div className="rounded-lg border border-dashed border-wd-border/50 bg-wd-surface-hover/20 px-3 py-3 text-[11.5px] text-wd-muted font-mono">
+          No assertions configured — add rules in Settings › Assertions.
+        </div>
+      );
+    }
+    return (
+      <div className="rounded-lg border border-dashed border-wd-border/50 bg-wd-surface-hover/20 px-3 py-3 text-[11.5px] text-wd-muted font-mono">
+        Skipped — the status-code gate failed before assertions ran.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border border-wd-border/40 bg-wd-surface-hover/30 p-1.5">
+      {results.map((r, i) => (
+        <AssertionRow key={i} result={r} />
+      ))}
+    </div>
+  );
+}
+
+const OP_LABEL: Record<string, string> = {
+  lt: "<",
+  lte: "≤",
+  gt: ">",
+  gte: "≥",
+  eq: "==",
+  neq: "≠",
+  contains: "contains",
+  not_contains: "does not contain",
+  equals: "equals",
+  exists: "exists",
+  not_exists: "does not exist",
+};
+
+function AssertionRow({
+  result,
+}: {
+  result: NonNullable<ApiCheck["assertionResult"]>["results"][number];
+}) {
+  const passed = result.passed;
+  const tone = passed
+    ? "bg-wd-success/[0.08] text-wd-success"
+    : result.severity === "down"
+      ? "bg-wd-danger/[0.08] text-wd-danger"
+      : "bg-wd-warning/[0.10] text-wd-warning";
+
+  const icon = passed
+    ? "solar:check-circle-bold"
+    : result.severity === "down"
+      ? "solar:close-circle-bold"
+      : "solar:danger-triangle-bold";
+
+  const opLabel = OP_LABEL[result.operator] ?? result.operator;
+  const showValue =
+    result.operator !== "exists" && result.operator !== "not_exists";
+
   return (
     <div
       className={cn(
         "flex items-center gap-2 px-2 py-[5px] rounded-md font-mono text-[11.5px]",
-        passed
-          ? "bg-wd-success/[0.08] text-wd-success"
-          : "bg-wd-danger/[0.08] text-wd-danger",
+        tone,
       )}
     >
-      <Icon
-        icon={passed ? "solar:check-circle-bold" : "solar:close-circle-bold"}
-        width={12}
-      />
-      <span>
-        <b className="font-semibold">{kind}</b>{" "}
-        <span className="text-wd-muted">{op}</span> {value}
+      <Icon icon={icon} width={12} />
+      <span className="min-w-0">
+        <b className="font-semibold">{result.kind}</b>{" "}
+        {result.target && (
+          <span className="text-wd-muted">{result.target} </span>
+        )}
+        <span className="text-wd-muted">{opLabel}</span>
+        {showValue && result.value !== undefined && (
+          <> {result.value}</>
+        )}
       </span>
-      {window && <span className="text-wd-muted">· {window}</span>}
-      {!passed && actual && (
-        <span className="text-wd-muted ml-auto">actual: {actual}</span>
+      {!passed && (
+        <span className="text-wd-muted ml-auto truncate max-w-[40%]">
+          {result.error
+            ? `error: ${result.error}`
+            : `actual: ${formatActual(result.actual)}`}
+        </span>
       )}
     </div>
   );
+}
+
+function formatActual(v: unknown): string {
+  if (v === undefined) return "—";
+  if (v === null) return "null";
+  if (typeof v === "string") return v.length > 60 ? v.slice(0, 57) + "…" : v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    const s = JSON.stringify(v);
+    return s.length > 60 ? s.slice(0, 57) + "…" : s;
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+function assertionDotColor(
+  r: NonNullable<ApiCheck["assertionResult"]>["results"][number],
+): string {
+  if (r.passed) return "bg-wd-success";
+  return r.severity === "down" ? "bg-wd-danger" : "bg-wd-warning";
 }
 
 export default memo(ChecksTabBase);

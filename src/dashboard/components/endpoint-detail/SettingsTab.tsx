@@ -12,14 +12,21 @@
 import {
   memo,
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Spinner, cn } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { useApi } from "../../hooks/useApi";
-import type { ApiEndpoint } from "../../types/api";
+import { useModules } from "../../hooks/useModules";
+import type {
+  ApiEndpoint,
+  AssertionEvalResult,
+  AssertionResult,
+} from "../../types/api";
 import type { ApiChannel } from "../../types/notifications";
 import { CHANNEL_TYPE_ICON } from "../../types/notifications";
 import { FilterDropdown, RainbowPlaceholder, SectionHead } from "./primitives";
@@ -43,21 +50,76 @@ interface Props {
   channels: ApiChannel[];
   onEndpointUpdated: (next: ApiEndpoint) => void;
   onDeleted: () => void;
+  /**
+   * Fires whenever the aggregate dirty state changes across all Settings
+   * panels. EndpointDetailPage uses this to intercept tab switches with a
+   * "discard unsaved changes?" confirm.
+   */
+  onDirtyChange?: (anyDirty: boolean) => void;
 }
+
+type DirtyMap = Record<Exclude<Section, "danger">, boolean>;
+
+const VALID_SECTIONS: Section[] = [
+  "general",
+  "monitoring",
+  "assertions",
+  "alerts",
+  "danger",
+];
 
 function SettingsTabBase({
   endpoint,
   channels,
   onEndpointUpdated,
   onDeleted,
+  onDirtyChange,
 }: Props) {
-  const [section, setSection] = useState<Section>("general");
+  // Deep-linkable section — `?section=danger` (e.g. from the Endpoints list
+  // Delete action) takes the user straight to Danger zone instead of General.
+  // Read once on mount; sidebar clicks keep the state internal so we don't
+  // thrash the URL on every switch.
+  const [searchParams] = useSearchParams();
+  const [section, setSection] = useState<Section>(() => {
+    const s = searchParams.get("section");
+    return s && (VALID_SECTIONS as string[]).includes(s) ? (s as Section) : "general";
+  });
+
+  // Per-section dirty tracking — each save-capable panel calls its
+  // onDirtyChange callback via useEffect, and we roll those up into an
+  // `anyDirty` signal that the parent page uses to gate tab switches.
+  const [dirty, setDirty] = useState<DirtyMap>({
+    general: false,
+    monitoring: false,
+    assertions: false,
+    alerts: false,
+  });
+  const setPanelDirty = useCallback(
+    (key: keyof DirtyMap) => (d: boolean) => {
+      setDirty((prev) => (prev[key] === d ? prev : { ...prev, [key]: d }));
+    },
+    [],
+  );
+  const anyDirty = dirty.general || dirty.monitoring || dirty.assertions || dirty.alerts;
+  useEffect(() => {
+    onDirtyChange?.(anyDirty);
+  }, [anyDirty, onDirtyChange]);
+  // Clear the parent's "settings are dirty" flag when this tab unmounts, so
+  // navigating away (after confirming discard) doesn't leave a stale flag
+  // that the beforeunload handler would still see as "in progress".
+  useEffect(() => {
+    return () => {
+      onDirtyChange?.(false);
+    };
+  }, [onDirtyChange]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-5">
       <nav className="rounded-xl border border-wd-border/50 bg-wd-surface p-1 self-start">
         {SECTIONS.map((s) => {
           const active = section === s.key;
+          const isDirty =
+            s.key !== "danger" && dirty[s.key as keyof DirtyMap];
           return (
             <button
               key={s.key}
@@ -70,34 +132,56 @@ function SettingsTabBase({
               )}
             >
               <Icon icon={s.icon} width={15} />
-              {s.label}
+              <span>{s.label}</span>
+              {isDirty && (
+                <span
+                  className="ml-auto h-1.5 w-1.5 rounded-full bg-wd-warning"
+                  aria-label="Unsaved changes"
+                  title="Unsaved changes"
+                />
+              )}
             </button>
           );
         })}
       </nav>
 
+      {/*
+        All panels stay mounted. Hiding the inactive ones with display:none
+        keeps form state + dirty tracking intact on section switches, so users
+        can flip between General / Monitoring / etc. without losing edits.
+      */}
       <div className="min-w-0 min-h-[520px]">
-        {section === "general" && (
+        <div className={cn(section !== "general" && "hidden")}>
           <GeneralPanel
             endpoint={endpoint}
             onEndpointUpdated={onEndpointUpdated}
+            onDirtyChange={setPanelDirty("general")}
           />
-        )}
-        {section === "monitoring" && (
+        </div>
+        <div className={cn(section !== "monitoring" && "hidden")}>
           <MonitoringPanel
             endpoint={endpoint}
-            channels={channels}
             onEndpointUpdated={onEndpointUpdated}
+            onJumpToSection={setSection}
+            onDirtyChange={setPanelDirty("monitoring")}
           />
-        )}
-        {section === "assertions" && <AssertionsPanel />}
-        {section === "alerts" && (
+        </div>
+        <div className={cn(section !== "assertions" && "hidden")}>
+          <AssertionsPanel
+            endpoint={endpoint}
+            onJumpToSection={setSection}
+            onEndpointUpdated={onEndpointUpdated}
+            onDirtyChange={setPanelDirty("assertions")}
+          />
+        </div>
+        <div className={cn(section !== "alerts" && "hidden")}>
           <AlertsPanel
             endpoint={endpoint}
             channels={channels}
             onEndpointUpdated={onEndpointUpdated}
+            onDirtyChange={setPanelDirty("alerts")}
           />
-        )}
+        </div>
         {section === "danger" && (
           <DangerPanel
             endpoint={endpoint}
@@ -114,7 +198,7 @@ function SettingsTabBase({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function Field({
+export function Field({
   label,
   hint,
   error,
@@ -150,10 +234,10 @@ function Field({
   );
 }
 
-const inputClass =
+export const inputClass =
   "w-full h-9 rounded-lg bg-wd-surface border border-wd-border/60 px-3 text-[12.5px] text-foreground font-mono focus:outline-none focus:border-wd-primary transition-colors";
 
-const errorInputClass =
+export const errorInputClass =
   "!border-wd-danger/60 focus:!border-wd-danger";
 
 // ---------------------------------------------------------------------------
@@ -163,12 +247,18 @@ const errorInputClass =
 function GeneralPanel({
   endpoint,
   onEndpointUpdated,
+  onDirtyChange,
 }: {
   endpoint: ApiEndpoint;
   onEndpointUpdated: (e: ApiEndpoint) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { request } = useApi();
+  const navigate = useNavigate();
   const [name, setName] = useState(endpoint.name);
+  const [description, setDescription] = useState(endpoint.description ?? "");
+  const [cloning, setCloning] = useState(false);
+  const [cloneError, setCloneError] = useState<string | null>(null);
   const [url, setUrl] = useState(endpoint.url ?? "");
   const [host, setHost] = useState(endpoint.host ?? "");
   const [port, setPort] = useState(
@@ -240,6 +330,7 @@ function GeneralPanel({
 
   const dirty =
     name !== endpoint.name ||
+    description !== (endpoint.description ?? "") ||
     url !== (endpoint.url ?? "") ||
     host !== (endpoint.host ?? "") ||
     port !== (endpoint.port != null ? String(endpoint.port) : "") ||
@@ -248,10 +339,14 @@ function GeneralPanel({
       (currentStatusKey !== initialStatusKey ||
         currentHeaderKey !== initialHeaderKey));
 
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
   const save = useCallback(async () => {
     setSaving(true);
     setError(null);
-    const body: Record<string, unknown> = { name };
+    const body: Record<string, unknown> = { name, description };
     if (endpoint.type === "http") {
       body.url = url;
       body.method = method;
@@ -284,6 +379,7 @@ function GeneralPanel({
     }
   }, [
     name,
+    description,
     url,
     method,
     host,
@@ -294,6 +390,22 @@ function GeneralPanel({
     request,
     onEndpointUpdated,
   ]);
+
+  const clone = useCallback(async () => {
+    setCloning(true);
+    setCloneError(null);
+    const res = await request<{ data: ApiEndpoint }>(
+      `/endpoints/${endpoint._id}/clone`,
+      { method: "POST" },
+    );
+    setCloning(false);
+    if (res.status < 400 && res.data.data) {
+      navigate(`/endpoints/${res.data.data._id}`);
+    } else {
+      const e = res.data as unknown as { message?: string };
+      setCloneError(e.message ?? "Failed to clone endpoint");
+    }
+  }, [endpoint._id, request, navigate]);
 
   return (
     <div className="rounded-xl border border-wd-border/50 bg-wd-surface p-5">
@@ -365,6 +477,26 @@ function GeneralPanel({
         )}
       </div>
 
+      <div className="mt-4">
+        <Field
+          label="Description"
+          hint={`${description.length}/500 · optional notes, shown only in Settings`}
+          error={description.length > 500}
+        >
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value.slice(0, 500))}
+            rows={3}
+            placeholder="What this endpoint is, who owns it, why it exists…"
+            className={cn(
+              "w-full rounded-lg bg-wd-surface border border-wd-border/60 px-3 py-2",
+              "text-[12.5px] text-foreground placeholder:text-wd-muted/70",
+              "focus:outline-none focus:border-wd-primary transition-colors resize-y min-h-[64px]",
+            )}
+          />
+        </Field>
+      </div>
+
       {endpoint.type === "http" && (
         <div className="mt-6 flex flex-col gap-6">
           <StatusCodeChips value={statusCodes} onChange={setStatusCodes} />
@@ -372,7 +504,7 @@ function GeneralPanel({
         </div>
       )}
 
-      <div className="flex items-center gap-3 mt-6 pt-4 border-t border-wd-border/40">
+      <div className="flex items-center gap-3 mt-6 pt-4 border-t border-wd-border/40 flex-wrap">
         <Button
           size="sm"
           variant="outline"
@@ -387,6 +519,20 @@ function GeneralPanel({
           )}
           Save changes
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="!rounded-lg"
+          onPress={clone}
+          isDisabled={cloning}
+        >
+          {cloning ? (
+            <Spinner size="sm" />
+          ) : (
+            <Icon icon="solar:copy-outline" width={16} />
+          )}
+          Clone endpoint
+        </Button>
         {saved && (
           <span className="inline-flex items-center gap-1 text-[11.5px] text-wd-success">
             <Icon icon="solar:check-circle-outline" width={13} />
@@ -397,6 +543,12 @@ function GeneralPanel({
           <span className="inline-flex items-center gap-1 text-[11.5px] text-wd-danger">
             <Icon icon="solar:danger-triangle-outline" width={13} />
             {error}
+          </span>
+        )}
+        {cloneError && (
+          <span className="inline-flex items-center gap-1 text-[11.5px] text-wd-danger">
+            <Icon icon="solar:danger-triangle-outline" width={13} />
+            {cloneError}
           </span>
         )}
         {!error && hasFieldError && (
@@ -475,7 +627,7 @@ const STATUS_PRESETS: Array<{ label: string; codes: number[] }> = [
   { label: "Just 200", codes: [200] },
 ];
 
-function StatusCodeChips({
+export function StatusCodeChips({
   value,
   onChange,
 }: {
@@ -635,7 +787,7 @@ const COMMON_HEADERS = [
   "Cookie",
 ];
 
-function HeaderRows({
+export function HeaderRows({
   value,
   onChange,
 }: {
@@ -780,7 +932,7 @@ function HeaderRows({
 // or API-origin values remain valid even if they're off-preset.
 type PresetOption = { id: string; label: string };
 
-const CHECK_INTERVAL_PRESETS: PresetOption[] = [
+export const CHECK_INTERVAL_PRESETS: PresetOption[] = [
   { id: "30", label: "30 seconds" },
   { id: "60", label: "1 minute" },
   { id: "120", label: "2 minutes" },
@@ -794,7 +946,7 @@ const CHECK_INTERVAL_PRESETS: PresetOption[] = [
   { id: "86400", label: "24 hours" },
 ];
 
-const TIMEOUT_PRESETS: PresetOption[] = [
+export const TIMEOUT_PRESETS: PresetOption[] = [
   { id: "1000", label: "1 second" },
   { id: "3000", label: "3 seconds" },
   { id: "5000", label: "5 seconds" },
@@ -804,7 +956,7 @@ const TIMEOUT_PRESETS: PresetOption[] = [
   { id: "60000", label: "60 seconds" },
 ];
 
-const LATENCY_PRESETS: PresetOption[] = [
+export const LATENCY_PRESETS: PresetOption[] = [
   { id: "250", label: "250 ms" },
   { id: "500", label: "500 ms" },
   { id: "1000", label: "1 second" },
@@ -814,7 +966,7 @@ const LATENCY_PRESETS: PresetOption[] = [
   { id: "30000", label: "30 seconds" },
 ];
 
-const SSL_WARNING_PRESETS: PresetOption[] = [
+export const SSL_WARNING_PRESETS: PresetOption[] = [
   { id: "0", label: "Off" },
   { id: "7", label: "7 days" },
   { id: "14", label: "14 days" },
@@ -823,7 +975,7 @@ const SSL_WARNING_PRESETS: PresetOption[] = [
   { id: "90", label: "90 days" },
 ];
 
-const FAILURE_THRESHOLD_PRESETS: PresetOption[] = [
+export const FAILURE_THRESHOLD_PRESETS: PresetOption[] = [
   { id: "1", label: "1 (fail-fast)" },
   { id: "2", label: "2" },
   { id: "3", label: "3" },
@@ -831,7 +983,7 @@ const FAILURE_THRESHOLD_PRESETS: PresetOption[] = [
   { id: "10", label: "10" },
 ];
 
-const ALERT_COOLDOWN_PRESETS: PresetOption[] = [
+export const ALERT_COOLDOWN_PRESETS: PresetOption[] = [
   { id: "0", label: "None" },
   { id: "60", label: "1 minute" },
   { id: "300", label: "5 minutes" },
@@ -841,7 +993,7 @@ const ALERT_COOLDOWN_PRESETS: PresetOption[] = [
   { id: "7200", label: "2 hours" },
 ];
 
-const ESCALATION_DELAY_PRESETS: PresetOption[] = [
+export const ESCALATION_DELAY_PRESETS: PresetOption[] = [
   { id: "0", label: "Off" },
   { id: "300", label: "5 minutes" },
   { id: "900", label: "15 minutes" },
@@ -858,7 +1010,7 @@ const ESCALATION_DELAY_PRESETS: PresetOption[] = [
  * created before presets existed, or values edited via the API), prepend a
  * "{n} {unit} (custom)" entry so the dropdown can still display + preserve it.
  */
-function withCustomOption(
+export function withCustomOption(
   presets: PresetOption[],
   value: number,
   customLabel: (n: number) => string,
@@ -868,7 +1020,7 @@ function withCustomOption(
   return [{ id, label: `${customLabel(value)} (custom)` }, ...presets];
 }
 
-const fmtSeconds = (n: number): string => {
+export const fmtSeconds = (n: number): string => {
   if (n === 0) return "0 seconds";
   if (n < 60) return `${n} second${n === 1 ? "" : "s"}`;
   if (n < 3600) {
@@ -879,20 +1031,74 @@ const fmtSeconds = (n: number): string => {
   return `${h} hour${h === 1 ? "" : "s"}`;
 };
 
-const fmtMs = (n: number): string =>
+export const fmtMs = (n: number): string =>
   n < 1000 ? `${n} ms` : `${n / 1000} second${n === 1000 ? "" : "s"}`;
 
-const fmtDays = (n: number): string =>
+export const fmtDays = (n: number): string =>
   n === 0 ? "Off" : `${n} day${n === 1 ? "" : "s"}`;
+
+// Stand-in for a Monitoring field that's been superseded by an assertion of
+// the matching kind. Shows the stored value as read-only context and offers a
+// one-click jump to the Assertions tab where the rule actually lives.
+function SupersededByAssertion({
+  currentLabel,
+  onJump,
+}: {
+  currentLabel: string;
+  onJump: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between gap-2 h-9 px-3 rounded-lg",
+        "bg-wd-surface-hover/40 border border-dashed border-wd-border/60",
+      )}
+    >
+      <span className="inline-flex items-center gap-2 text-[11.5px] text-wd-muted min-w-0">
+        <Icon
+          icon="solar:lock-keyhole-minimalistic-linear"
+          width={13}
+          className="shrink-0"
+        />
+        <span className="font-mono truncate">{currentLabel}</span>
+        <span className="hidden sm:inline text-[10.5px] text-wd-muted/70">
+          · managed in Assertions
+        </span>
+      </span>
+      <button
+        type="button"
+        onClick={onJump}
+        className={cn(
+          "inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10.5px] font-medium",
+          "text-wd-primary bg-wd-primary/10 hover:bg-wd-primary/15",
+          "transition-colors cursor-pointer shrink-0",
+        )}
+      >
+        Edit rule
+        <Icon icon="solar:alt-arrow-right-linear" width={11} />
+      </button>
+    </div>
+  );
+}
 
 function MonitoringPanel({
   endpoint,
   onEndpointUpdated,
+  onJumpToSection,
+  onDirtyChange,
 }: {
   endpoint: ApiEndpoint;
   onEndpointUpdated: (e: ApiEndpoint) => void;
+  onJumpToSection: (s: Section) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { request } = useApi();
+  const hasLatencyAssertion = (endpoint.assertions ?? []).some(
+    (a) => a.kind === "latency",
+  );
+  const hasSslAssertion = (endpoint.assertions ?? []).some(
+    (a) => a.kind === "ssl",
+  );
   const [checkInterval, setCheckInterval] = useState(endpoint.checkInterval);
   const [timeoutMs, setTimeoutMs] = useState(endpoint.timeout);
   const [latencyThreshold, setLatencyThreshold] = useState(
@@ -944,6 +1150,10 @@ function MonitoringPanel({
     failureThreshold,
     endpoint,
   ]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -1011,27 +1221,49 @@ function MonitoringPanel({
         </Field>
         <Field
           label="Latency threshold"
-          hint="Response time above this is flagged 'degraded'"
+          hint={
+            hasLatencyAssertion
+              ? "Superseded by a latency assertion"
+              : "Response time above this is flagged 'degraded'"
+          }
         >
-          <FilterDropdown<string>
-            value={String(latencyThreshold)}
-            options={latencyOptions}
-            onChange={(id) => setLatencyThreshold(Number(id))}
-            ariaLabel="Latency threshold"
-            fullWidth
-          />
+          {hasLatencyAssertion ? (
+            <SupersededByAssertion
+              currentLabel={fmtMs(latencyThreshold)}
+              onJump={() => onJumpToSection("assertions")}
+            />
+          ) : (
+            <FilterDropdown<string>
+              value={String(latencyThreshold)}
+              options={latencyOptions}
+              onChange={(id) => setLatencyThreshold(Number(id))}
+              ariaLabel="Latency threshold"
+              fullWidth
+            />
+          )}
         </Field>
         <Field
           label="SSL warning"
-          hint="Alert before the certificate expires"
+          hint={
+            hasSslAssertion
+              ? "Superseded by an SSL assertion"
+              : "Alert before the certificate expires"
+          }
         >
-          <FilterDropdown<string>
-            value={String(sslWarningDays)}
-            options={sslOptions}
-            onChange={(id) => setSslWarningDays(Number(id))}
-            ariaLabel="SSL warning"
-            fullWidth
-          />
+          {hasSslAssertion ? (
+            <SupersededByAssertion
+              currentLabel={fmtDays(sslWarningDays)}
+              onJump={() => onJumpToSection("assertions")}
+            />
+          ) : (
+            <FilterDropdown<string>
+              value={String(sslWarningDays)}
+              options={sslOptions}
+              onChange={(id) => setSslWarningDays(Number(id))}
+              ariaLabel="SSL warning"
+              fullWidth
+            />
+          )}
         </Field>
         <Field
           label="Failure threshold"
@@ -1087,10 +1319,12 @@ function AlertsPanel({
   endpoint,
   channels,
   onEndpointUpdated,
+  onDirtyChange,
 }: {
   endpoint: ApiEndpoint;
   channels: ApiChannel[];
   onEndpointUpdated: (e: ApiEndpoint) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { request } = useApi();
   const [alertCooldown, setAlertCooldown] = useState(endpoint.alertCooldown);
@@ -1141,6 +1375,10 @@ function AlertsPanel({
     notificationChannelIds,
     endpoint,
   ]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -1311,29 +1549,1177 @@ function AlertsPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Assertions — not yet stored in data model
+// Assertions — per-endpoint rule editor (HTTP only)
+//
+// First row is a locked mirror of the General-tab expectedStatusCodes — it is
+// the foundational "is this response successful?" gate and cannot be edited
+// here (a small link jumps back to General). Everything below is a
+// user-defined rule on three axes:
+//   kind (latency / body / header / json / ssl) → operator → value
+// Operators are scoped to the kind (e.g. `status > ok` is disallowed). The
+// value input shape follows from the selected operator.
+//
+// UI draft: save is disabled until the backend evaluator + body-text capture
+// land. A JSON preview at the bottom surfaces the payload shape so we can
+// settle storage before wiring.
 // ---------------------------------------------------------------------------
 
-function AssertionsPanel() {
+export type AssertionKind = "latency" | "body" | "header" | "json" | "ssl";
+
+export type AssertionOperator =
+  | "lt"
+  | "lte"
+  | "gt"
+  | "gte"
+  | "eq"
+  | "neq"
+  | "contains"
+  | "not_contains"
+  | "equals"
+  | "exists"
+  | "not_exists";
+
+export const MAX_ASSERTIONS = 10;
+
+export type AssertionSeverity = "down" | "degraded";
+
+export interface AssertionDraft {
+  id: string;
+  kind: AssertionKind;
+  operator: AssertionOperator;
+  /** Header name or JSON path — only meaningful for `header` / `json`. */
+  target?: string;
+  /** Comparison value — omitted for `exists` / `not_exists`. */
+  value?: string;
+  /**
+   * How a failure of this rule affects the composite check status.
+   * Defaults by kind: latency/ssl → "degraded"; body/header/json → "down".
+   */
+  severity: AssertionSeverity;
+}
+
+export function defaultSeverity(kind: AssertionKind): AssertionSeverity {
+  return kind === "latency" || kind === "ssl" ? "degraded" : "down";
+}
+
+const KIND_META: Record<
+  AssertionKind,
+  { label: string; icon: string; accent: string; tint: string; border: string }
+> = {
+  latency: {
+    label: "Latency",
+    icon: "solar:stopwatch-outline",
+    accent: "text-wd-info",
+    tint: "bg-wd-info/5",
+    border: "border-wd-info/25",
+  },
+  body: {
+    label: "Body",
+    icon: "solar:document-text-outline",
+    accent: "text-wd-primary",
+    tint: "bg-wd-primary/5",
+    border: "border-wd-primary/25",
+  },
+  header: {
+    label: "Header",
+    icon: "solar:code-square-outline",
+    accent: "text-wd-warning",
+    tint: "bg-wd-warning/5",
+    border: "border-wd-warning/25",
+  },
+  json: {
+    label: "JSON path",
+    icon: "solar:code-scan-outline",
+    accent: "text-wd-success",
+    tint: "bg-wd-success/5",
+    border: "border-wd-success/25",
+  },
+  ssl: {
+    label: "SSL days",
+    icon: "solar:shield-keyhole-outline",
+    accent: "text-foreground",
+    tint: "bg-wd-surface-hover/40",
+    border: "border-wd-border/50",
+  },
+};
+
+const OPERATOR_LABEL: Record<AssertionOperator, string> = {
+  lt: "<",
+  lte: "≤",
+  gt: ">",
+  gte: "≥",
+  eq: "==",
+  neq: "≠",
+  contains: "contains",
+  not_contains: "does not contain",
+  equals: "equals",
+  exists: "exists",
+  not_exists: "does not exist",
+};
+
+function operatorsFor(kind: AssertionKind): AssertionOperator[] {
+  switch (kind) {
+    case "latency":
+      return ["lt", "lte", "gt", "gte", "eq"];
+    case "body":
+      return ["contains", "not_contains", "equals"];
+    case "header":
+      return ["exists", "not_exists", "equals", "contains"];
+    case "json":
+      return [
+        "exists",
+        "not_exists",
+        "eq",
+        "neq",
+        "lt",
+        "lte",
+        "gt",
+        "gte",
+        "contains",
+      ];
+    case "ssl":
+      return ["lt", "lte", "gt", "gte", "eq"];
+  }
+}
+
+export function defaultAssertion(kind: AssertionKind): AssertionDraft {
+  const op = operatorsFor(kind)[0];
+  const id = newDraftId();
+  const severity = defaultSeverity(kind);
+  switch (kind) {
+    case "latency":
+      return { id, kind, operator: op, value: "800", severity };
+    case "body":
+      return { id, kind, operator: op, value: '"status":"ok"', severity };
+    case "header":
+      return { id, kind, operator: op, target: "content-type", value: "", severity };
+    case "json":
+      return { id, kind, operator: op, target: "$.status", value: "", severity };
+    case "ssl":
+      return { id, kind, operator: op, value: "30", severity };
+  }
+}
+
+function needsTarget(kind: AssertionKind): boolean {
+  return kind === "header" || kind === "json";
+}
+
+function newDraftId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : String(Math.random()).slice(2);
+}
+
+// Takes the server-persisted assertion array and attaches stable UI ids used
+// for React keys + dirty diffing. Safe to call with undefined.
+export function hydrateDrafts(input: ApiEndpoint["assertions"]): AssertionDraft[] {
+  if (!input) return [];
+  return input.map((a) => ({
+    id: newDraftId(),
+    kind: a.kind,
+    operator: a.operator,
+    severity: a.severity,
+    target: a.target,
+    value: a.value,
+  }));
+}
+
+// Inverse of hydrate — strip the UI-only id field and emit keys in a canonical
+// order so JSON.stringify output is stable across origins. Without this, a
+// draft built by `defaultAssertion` and an otherwise-identical draft rebuilt
+// via `hydrateDrafts` after save serialise to different strings (same data,
+// different key order) and the dirty-diff never clears.
+export function stripIds(
+  drafts: AssertionDraft[],
+): Array<Omit<AssertionDraft, "id">> {
+  return drafts.map((d) => ({
+    kind: d.kind,
+    operator: d.operator,
+    target: d.target,
+    value: d.value,
+    severity: d.severity,
+  }));
+}
+
+function needsValue(op: AssertionOperator): boolean {
+  return op !== "exists" && op !== "not_exists";
+}
+
+function targetPlaceholder(kind: AssertionKind): string {
+  if (kind === "header") return "content-type";
+  if (kind === "json") return "$.data.status";
+  return "";
+}
+
+function valueSuffix(kind: AssertionKind): string | null {
+  if (kind === "latency") return "ms";
+  if (kind === "ssl") return "days";
+  return null;
+}
+
+function valueIsNumeric(kind: AssertionKind): boolean {
+  return kind === "latency" || kind === "ssl";
+}
+
+const PRESET_ASSERTIONS: Array<{ label: string; build: () => AssertionDraft }> = [
+  {
+    label: "latency < 1s",
+    build: () => ({ ...defaultAssertion("latency"), operator: "lt", value: "1000" }),
+  },
+  {
+    label: 'body contains "ok"',
+    build: () => ({ ...defaultAssertion("body"), operator: "contains", value: '"ok"' }),
+  },
+  {
+    label: "content-type json",
+    build: () => ({
+      ...defaultAssertion("header"),
+      operator: "contains",
+      target: "content-type",
+      value: "application/json",
+    }),
+  },
+  {
+    label: "$.status == ok",
+    build: () => ({
+      ...defaultAssertion("json"),
+      operator: "eq",
+      target: "$.status",
+      value: "ok",
+    }),
+  },
+];
+
+interface TestResponse {
+  baseStatus: "healthy" | "degraded" | "down";
+  baseReason?: string | null;
+  probe: {
+    statusCode: number | null;
+    responseTime: number;
+    errorMessage: string | null;
+    contentType: string | null;
+    bodyBytes: number | null;
+    bodyBytesTruncated: boolean;
+    sslDaysRemaining: number | null;
+  };
+  assertionResult: AssertionEvalResult | null;
+}
+
+function AssertionsPanel({
+  endpoint,
+  onJumpToSection,
+  onEndpointUpdated,
+  onDirtyChange,
+}: {
+  endpoint: ApiEndpoint;
+  onJumpToSection: (s: Section) => void;
+  onEndpointUpdated: (e: ApiEndpoint) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  const { request } = useApi();
+  const { modules } = useModules();
+  const [assertions, setAssertions] = useState<AssertionDraft[]>(() =>
+    hydrateDrafts(endpoint.assertions),
+  );
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestResponse | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+  const isHttp = endpoint.type === "http";
+  const isHttps = (endpoint.url ?? "").startsWith("https://");
+  const sslChecksDisabled = !modules.sslChecks;
+
+  const updateAt = useCallback(
+    (i: number, next: AssertionDraft) => {
+      setAssertions((prev) => prev.map((a, idx) => (idx === i ? next : a)));
+    },
+    [],
+  );
+  const removeAt = useCallback((i: number) => {
+    setAssertions((prev) => prev.filter((_, idx) => idx !== i));
+  }, []);
+  const addAssertion = useCallback((kind: AssertionKind) => {
+    setAssertions((prev) =>
+      prev.length >= MAX_ASSERTIONS ? prev : [...prev, defaultAssertion(kind)],
+    );
+  }, []);
+
+  const atCap = assertions.length >= MAX_ASSERTIONS;
+
+  const initialKey = useMemo(
+    () => JSON.stringify(stripIds(hydrateDrafts(endpoint.assertions))),
+    [endpoint.assertions],
+  );
+  const currentKey = useMemo(
+    () => JSON.stringify(stripIds(assertions)),
+    [assertions],
+  );
+  const dirty = currentKey !== initialKey;
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  const save = useCallback(async () => {
+    setSaving(true);
+    setSaveError(null);
+    const payload = stripIds(assertions);
+    const res = await request<{ data: ApiEndpoint }>(
+      `/endpoints/${endpoint._id}/settings`,
+      { method: "PUT", body: { assertions: payload } },
+    );
+    setSaving(false);
+    if (res.status < 400 && res.data.data) {
+      onEndpointUpdated(res.data.data);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1500);
+    } else {
+      const e = res.data as unknown as { message?: string };
+      setSaveError(e.message ?? "Failed to save");
+    }
+  }, [assertions, endpoint._id, request, onEndpointUpdated]);
+
+  const runTest = useCallback(async () => {
+    setTesting(true);
+    setTestError(null);
+    const payload = stripIds(assertions);
+    const res = await request<{ data: TestResponse }>(
+      `/endpoints/${endpoint._id}/test-assertions`,
+      { method: "POST", body: { assertions: payload } },
+    );
+    setTesting(false);
+    if (res.status < 400 && res.data.data) {
+      setTestResult(res.data.data);
+    } else {
+      const e = res.data as unknown as { message?: string };
+      setTestError(e.message ?? "Test failed");
+      setTestResult(null);
+    }
+  }, [assertions, endpoint._id, request]);
+
+  const statusCodes = endpoint.expectedStatusCodes ?? [200];
+
+  if (!isHttp) {
+    return (
+      <div className="rounded-xl border border-wd-border/50 bg-wd-surface p-5">
+        <SectionHead
+          icon="solar:checklist-minimalistic-linear"
+          title="Assertions"
+          sub="Per-check rules · evaluated after the status code gate"
+        />
+        <div className="rounded-lg border border-dashed border-wd-border/60 bg-wd-surface-hover/30 px-4 py-6 flex items-center gap-3">
+          <Icon
+            icon="solar:plug-circle-outline"
+            width={22}
+            className="text-wd-muted shrink-0"
+          />
+          <div>
+            <div className="text-[12.5px] font-medium text-foreground">
+              Assertions are HTTP-only
+            </div>
+            <div className="text-[11.5px] text-wd-muted mt-0.5">
+              TCP port checks have no body, headers, or status code — a
+              successful connection is the only signal to assert on.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-xl border border-wd-border/50 bg-wd-surface p-5">
+    <div className="rounded-xl border border-wd-border/50 bg-wd-surface p-5 flex flex-col gap-5">
       <SectionHead
         icon="solar:checklist-minimalistic-linear"
         title="Assertions"
-        sub="Body validation rules"
+        sub="Per-check rules · all must pass, evaluated after the status code gate"
+        right={
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10.5px] font-mono",
+              atCap
+                ? "bg-wd-warning/10 text-wd-warning border border-wd-warning/30"
+                : "bg-wd-surface-hover/60 text-wd-muted border border-wd-border/50",
+            )}
+            title={atCap ? "Maximum reached" : undefined}
+          >
+            {assertions.length}/{MAX_ASSERTIONS}
+          </span>
+        }
       />
-      <RainbowPlaceholder className="min-h-[200px]">
-        <div className="text-[12px] text-white drop-shadow">
-          <div className="font-semibold mb-1">Assertions editor</div>
-          <div className="text-white/90">
-            Not yet wired · body-validation config will surface here once the
-            API exposes CRUD for rules.
+
+      <div className="flex flex-col gap-2">
+        <LockedStatusAssertion
+          codes={statusCodes}
+          onJumpToGeneral={() => onJumpToSection("general")}
+        />
+
+        {assertions.length === 0 ? (
+          <EmptyAssertionsHint onAdd={addAssertion} atCap={atCap} />
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {assertions.map((a, i) => (
+              <AssertionEditorRow
+                key={a.id}
+                index={i + 1}
+                value={a}
+                isHttps={isHttps}
+                sslChecksDisabled={sslChecksDisabled}
+                onChange={(next) => updateAt(i, next)}
+                onRemove={() => removeAt(i)}
+              />
+            ))}
           </div>
+        )}
+
+        {assertions.length > 0 && (
+          <AddAssertionMenu onAdd={addAssertion} atCap={atCap} />
+        )}
+      </div>
+
+      <AssertionPresetsRow
+        atCap={atCap}
+        onApply={(draft) =>
+          setAssertions((prev) =>
+            prev.length >= MAX_ASSERTIONS ? prev : [...prev, draft],
+          )
+        }
+      />
+
+      <div className="flex items-center gap-3 pt-4 border-t border-wd-border/40 flex-wrap">
+        <Button
+          size="sm"
+          variant="outline"
+          className="!rounded-lg"
+          onPress={save}
+          isDisabled={!dirty || saving}
+        >
+          {saving ? (
+            <Spinner size="sm" />
+          ) : (
+            <Icon icon="solar:diskette-outline" width={16} />
+          )}
+          Save changes
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="!rounded-lg"
+          onPress={runTest}
+          isDisabled={testing || assertions.length === 0}
+        >
+          {testing ? (
+            <Spinner size="sm" />
+          ) : (
+            <Icon icon="solar:play-circle-outline" width={16} />
+          )}
+          Test now
+        </Button>
+        <span className="inline-flex items-center gap-1 text-[10.5px] text-wd-muted">
+          <Icon icon="solar:info-circle-outline" width={11} />
+          Test runs one probe — no check is saved to history.
+        </span>
+        {saved && (
+          <span className="inline-flex items-center gap-1 text-[11.5px] text-wd-success">
+            <Icon icon="solar:check-circle-outline" width={13} />
+            Saved
+          </span>
+        )}
+        {saveError && (
+          <span className="inline-flex items-center gap-1 text-[11.5px] text-wd-danger">
+            <Icon icon="solar:danger-triangle-outline" width={13} />
+            {saveError}
+          </span>
+        )}
+      </div>
+
+      {testError && (
+        <div className="rounded-lg border border-wd-danger/40 bg-wd-danger/5 px-3 py-2 text-[11.5px] text-wd-danger inline-flex items-center gap-2">
+          <Icon icon="solar:danger-triangle-outline" width={13} />
+          {testError}
         </div>
-      </RainbowPlaceholder>
+      )}
+
+      {testResult && (
+        <AssertionTestResults
+          result={testResult}
+          onDismiss={() => setTestResult(null)}
+        />
+      )}
+
+      <AssertionRulesOfUse />
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Test results panel — rendered after the user clicks "Test now". Mirrors the
+// visual vocabulary of the Checks tab's expanded Assertions block so real
+// checks and test runs read the same.
+// ---------------------------------------------------------------------------
+
+function AssertionTestResults({
+  result,
+  onDismiss,
+}: {
+  result: TestResponse;
+  onDismiss: () => void;
+}) {
+  const { probe, assertionResult, baseStatus, baseReason } = result;
+  const baseTone =
+    baseStatus === "healthy"
+      ? "text-wd-success"
+      : baseStatus === "degraded"
+        ? "text-wd-warning"
+        : "text-wd-danger";
+
+  // When the probe itself failed (status-code gate down) we render a compact
+  // "probe failed, assertions skipped" notice instead of an empty rules list.
+  const probeFailed = baseStatus === "down";
+
+  return (
+    <div className="rounded-lg border border-wd-border/50 bg-wd-surface-hover/30 p-4 flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-wider text-wd-muted font-semibold">
+          <Icon icon="solar:play-circle-outline" width={13} />
+          Test result
+          <span className={cn("normal-case font-mono font-semibold", baseTone)}>
+            · {baseStatus}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="inline-flex items-center justify-center w-6 h-6 rounded-md text-wd-muted hover:text-foreground hover:bg-wd-surface-hover transition-colors cursor-pointer"
+          aria-label="Dismiss test result"
+        >
+          <Icon icon="solar:close-circle-outline" width={14} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 font-mono text-[11.5px]">
+        <ProbeField label="Status code" value={probe.statusCode ?? "—"} />
+        <ProbeField label="Response time" value={`${probe.responseTime} ms`} />
+        <ProbeField
+          label="Content-Type"
+          value={probe.contentType ?? "—"}
+          muted={!probe.contentType}
+        />
+        <ProbeField
+          label="Body"
+          value={
+            probe.bodyBytes != null
+              ? `${probe.bodyBytes}${probe.bodyBytesTruncated ? "+" : ""} B`
+              : "—"
+          }
+          muted={probe.bodyBytes == null}
+        />
+        <ProbeField
+          label="SSL days"
+          value={
+            probe.sslDaysRemaining != null ? `${probe.sslDaysRemaining}` : "—"
+          }
+          muted={probe.sslDaysRemaining == null}
+        />
+        {probe.errorMessage && (
+          <ProbeField label="Probe error" value={probe.errorMessage} danger />
+        )}
+      </div>
+
+      {probeFailed && (
+        <div className="rounded-md border border-dashed border-wd-danger/40 bg-wd-danger/5 px-3 py-2 text-[11.5px] text-wd-danger font-mono inline-flex items-center gap-2">
+          <Icon icon="solar:danger-triangle-outline" width={13} />
+          Probe {baseReason ? `failed: ${baseReason}` : "failed before assertions could run."}
+        </div>
+      )}
+
+      {!probeFailed && assertionResult && assertionResult.results.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {assertionResult.results.map((r, i) => (
+            <TestAssertionRow key={i} result={r} />
+          ))}
+        </div>
+      )}
+
+      {!probeFailed && assertionResult === null && (
+        <div className="text-[11px] text-wd-muted font-mono">
+          No assertions were evaluated — add or unsave some rules to test.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProbeField({
+  label,
+  value,
+  muted = false,
+  danger = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  muted?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <div className="flex gap-2 min-w-0">
+      <span className="text-wd-muted shrink-0 min-w-[90px]">{label}</span>
+      <span
+        className={cn(
+          "truncate",
+          danger ? "text-wd-danger" : muted ? "text-wd-muted" : "text-foreground",
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+const TEST_OP_LABEL: Record<string, string> = {
+  lt: "<",
+  lte: "≤",
+  gt: ">",
+  gte: "≥",
+  eq: "==",
+  neq: "≠",
+  contains: "contains",
+  not_contains: "does not contain",
+  equals: "equals",
+  exists: "exists",
+  not_exists: "does not exist",
+};
+
+function TestAssertionRow({ result }: { result: AssertionResult }) {
+  const passed = result.passed;
+  const tone = passed
+    ? "bg-wd-success/[0.08] text-wd-success"
+    : result.severity === "down"
+      ? "bg-wd-danger/[0.08] text-wd-danger"
+      : "bg-wd-warning/[0.10] text-wd-warning";
+  const icon = passed
+    ? "solar:check-circle-bold"
+    : result.severity === "down"
+      ? "solar:close-circle-bold"
+      : "solar:danger-triangle-bold";
+  const showValue =
+    result.operator !== "exists" && result.operator !== "not_exists";
+  const opLabel = TEST_OP_LABEL[result.operator] ?? result.operator;
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 px-2 py-[5px] rounded-md font-mono text-[11.5px]",
+        tone,
+      )}
+    >
+      <Icon icon={icon} width={12} />
+      <span className="min-w-0">
+        <b className="font-semibold">{result.kind}</b>{" "}
+        {result.target && (
+          <span className="text-wd-muted">{result.target} </span>
+        )}
+        <span className="text-wd-muted">{opLabel}</span>
+        {showValue && result.value !== undefined && <> {result.value}</>}
+      </span>
+      {!passed && (
+        <span className="text-wd-muted ml-auto truncate max-w-[45%]">
+          {result.error
+            ? `error: ${result.error}`
+            : `actual: ${formatTestActual(result.actual)}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function formatTestActual(v: unknown): string {
+  if (v === undefined) return "—";
+  if (v === null) return "null";
+  if (typeof v === "string") return v.length > 60 ? v.slice(0, 57) + "…" : v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    const s = JSON.stringify(v);
+    return s.length > 60 ? s.slice(0, 57) + "…" : s;
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rules of use — compact reference of per-kind constraints, limits, and the
+// syntax rules callers have to follow. Kept intentionally quiet (muted copy,
+// mono for identifiers) so it reads as reference, not a primary control.
+// ---------------------------------------------------------------------------
+
+export function AssertionRulesOfUse() {
+  const rules: Array<{ label: string; body: React.ReactNode }> = [
+    {
+      label: "Count",
+      body: (
+        <>
+          Max <b className="text-foreground">{MAX_ASSERTIONS}</b> assertions per
+          endpoint (status-code gate from General does not count).
+        </>
+      ),
+    },
+    {
+      label: "Latency",
+      body: (
+        <>
+          Value in milliseconds · range{" "}
+          <b className="text-foreground">0 – 60,000</b> (0–60 seconds). Operators:
+          &lt;, ≤, &gt;, ≥, ==.
+        </>
+      ),
+    },
+    {
+      label: "SSL days",
+      body: (
+        <>
+          Integer · range <b className="text-foreground">0 – 365</b>. Compares
+          against days remaining before certificate expiry.
+        </>
+      ),
+    },
+    {
+      label: "Body",
+      body: (
+        <>
+          Case-sensitive substring or exact match against the response body.
+          Value up to <b className="text-foreground">1,000</b> characters.
+          Response body capture is capped at the{" "}
+          <span className="text-foreground">maxBodyBytesToRead</span> config
+          value — oversized bodies are truncated before evaluation.
+        </>
+      ),
+    },
+    {
+      label: "Header names",
+      body: (
+        <>
+          <b className="text-foreground">Case-insensitive</b> match against
+          response headers (HTTP header names are not case-sensitive by spec).
+          Name up to <b className="text-foreground">128</b> characters, value up
+          to <b className="text-foreground">1,000</b>.
+        </>
+      ),
+    },
+    {
+      label: "JSON path",
+      body: (
+        <>
+          Dotted syntax · e.g.{" "}
+          <span className="text-foreground">$.data.status</span> or{" "}
+          <span className="text-foreground">items.0.name</span> (numeric
+          segments = array index). Path up to{" "}
+          <b className="text-foreground">256</b> characters. Wildcards, filters,
+          and recursive descent are <b className="text-foreground">not</b>{" "}
+          supported.
+        </>
+      ),
+    },
+    {
+      label: "Severity",
+      body: (
+        <>
+          Each rule marks the check as{" "}
+          <span className="text-wd-danger font-semibold">down</span> or{" "}
+          <span className="text-wd-warning font-semibold">degraded</span> on
+          failure. Defaults: latency/SSL → degraded · body/header/JSON → down.
+          Assertions are only evaluated when the status-code gate passes.
+        </>
+      ),
+    },
+  ];
+
+  return (
+    <details className="mt-1 group rounded-lg border border-wd-border/40 bg-wd-surface-hover/20 overflow-hidden">
+      <summary
+        className={cn(
+          "flex items-center justify-between gap-3 cursor-pointer select-none",
+          "px-4 py-3 list-none",
+          "hover:bg-wd-surface-hover/40 transition-colors",
+          "[&::-webkit-details-marker]:hidden",
+        )}
+      >
+        <span className="inline-flex items-center gap-2 text-[10px] uppercase tracking-wider text-wd-muted font-semibold">
+          <Icon icon="solar:book-outline" width={13} />
+          Rules of use
+        </span>
+        <Icon
+          icon="solar:alt-arrow-down-linear"
+          width={14}
+          className="text-wd-muted transition-transform group-open:rotate-180"
+        />
+      </summary>
+
+      <ul className="flex flex-col px-4 pb-4 pt-1 divide-y divide-wd-border/30">
+        {rules.map((r) => (
+          <li
+            key={r.label}
+            className="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-8 py-3 text-[11.5px] leading-relaxed first:pt-2 last:pb-1"
+          >
+            <span className="shrink-0 w-[96px] font-mono uppercase tracking-wider text-[10px] font-semibold text-wd-muted">
+              {r.label}
+            </span>
+            <span className="font-mono text-wd-muted/90 flex-1">{r.body}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Row: locked status-codes mirror (read-only, surfaces General-tab config)
+// ---------------------------------------------------------------------------
+
+export function LockedStatusAssertion({
+  codes,
+  onJumpToGeneral,
+}: {
+  codes: number[];
+  onJumpToGeneral: () => void;
+}) {
+  const sorted = useMemo(() => [...codes].sort((a, b) => a - b), [codes]);
+  const display = sorted.join(", ");
+  const opLabel = sorted.length === 1 ? "==" : "in";
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 px-2.5 py-2 rounded-md font-mono text-[12px]",
+        "bg-wd-success/[0.08] text-wd-success border border-wd-success/25",
+      )}
+    >
+      <Icon icon="solar:lock-keyhole-minimalistic-linear" width={13} />
+      <span>
+        <b className="font-semibold">status</b>{" "}
+        <span className="text-wd-muted">{opLabel}</span> {display || "—"}
+      </span>
+      <button
+        type="button"
+        onClick={onJumpToGeneral}
+        className={cn(
+          "ml-auto inline-flex items-center gap-1 h-6 px-2 rounded-md",
+          "text-[10.5px] font-sans font-medium text-wd-muted hover:text-foreground",
+          "bg-wd-surface hover:bg-wd-surface-hover border border-wd-border/50",
+          "transition-colors cursor-pointer",
+        )}
+      >
+        Edit in General
+        <Icon icon="solar:alt-arrow-right-linear" width={11} />
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Row: editable assertion
+// ---------------------------------------------------------------------------
+
+export function AssertionEditorRow({
+  index,
+  value,
+  isHttps,
+  sslChecksDisabled,
+  onChange,
+  onRemove,
+}: {
+  index: number;
+  value: AssertionDraft;
+  isHttps: boolean;
+  sslChecksDisabled: boolean;
+  onChange: (next: AssertionDraft) => void;
+  onRemove: () => void;
+}) {
+  const meta = KIND_META[value.kind];
+  const showTarget = needsTarget(value.kind);
+  const showValue = needsValue(value.operator);
+  const suffix = valueSuffix(value.kind);
+  const isNumeric = valueIsNumeric(value.kind);
+  // Two distinct warnings can fire on ssl rows — the URL-scheme one is hard
+  // (rule can never succeed), the module one is soft (user can flip a flag).
+  // Prefer the URL warning because it's the root cause; the module one is
+  // irrelevant if the endpoint isn't HTTPS in the first place.
+  const sslHttpsWarning = value.kind === "ssl" && !isHttps;
+  const sslModuleWarning =
+    value.kind === "ssl" && isHttps && sslChecksDisabled;
+
+  const changeKind = (kind: AssertionKind) => {
+    if (kind === value.kind) return;
+    const ops = operatorsFor(kind);
+    const nextOp = (ops.includes(value.operator) ? value.operator : ops[0]) as
+      | AssertionOperator;
+    const base = defaultAssertion(kind);
+    onChange({ ...base, id: value.id, operator: nextOp });
+  };
+
+  const changeOp = (op: AssertionOperator) => {
+    onChange({ ...value, operator: op });
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+    <div
+      className={cn(
+        "group flex items-stretch gap-0 rounded-md border overflow-hidden",
+        "transition-colors",
+        meta.border,
+      )}
+    >
+      <div className="shrink-0 flex items-center justify-center w-8 text-[10px] font-mono font-semibold text-wd-muted/60 select-none border-r border-wd-border/30 bg-wd-surface-hover/30">
+        {String(index).padStart(2, "0")}
+      </div>
+
+      <div
+        className={cn(
+          "flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1.5 flex-wrap",
+          meta.tint,
+        )}
+      >
+        <Icon icon={meta.icon} width={14} className={cn("shrink-0", meta.accent)} />
+
+        <FilterDropdown<AssertionKind>
+          value={value.kind}
+          options={(Object.keys(KIND_META) as AssertionKind[]).map((k) => ({
+            id: k,
+            label: KIND_META[k].label,
+          }))}
+          onChange={changeKind}
+          ariaLabel="Assertion kind"
+        />
+
+        {showTarget && (
+          <input
+            value={value.target ?? ""}
+            onChange={(e) => onChange({ ...value, target: e.target.value })}
+            placeholder={targetPlaceholder(value.kind)}
+            aria-label="Target"
+            className={cn(
+              "flex-1 min-w-[140px] h-8 px-2.5 rounded-md",
+              "bg-wd-surface border border-wd-border/50",
+              "text-[12px] font-mono text-foreground placeholder:text-wd-muted/70",
+              "focus:outline-none focus:border-wd-primary/60 transition-colors",
+            )}
+          />
+        )}
+
+        <FilterDropdown<AssertionOperator>
+          value={value.operator}
+          options={operatorsFor(value.kind).map((op) => ({
+            id: op,
+            label: OPERATOR_LABEL[op],
+          }))}
+          onChange={changeOp}
+          ariaLabel="Operator"
+        />
+
+        {showValue && (
+          <div className="relative flex-1 min-w-[160px] inline-flex items-center">
+            <input
+              value={value.value ?? ""}
+              onChange={(e) => onChange({ ...value, value: e.target.value })}
+              placeholder={isNumeric ? "0" : "value"}
+              inputMode={isNumeric ? "numeric" : undefined}
+              aria-label="Value"
+              className={cn(
+                "w-full h-8 pl-2.5 rounded-md",
+                suffix ? "pr-10" : "pr-2.5",
+                "bg-wd-surface border border-wd-border/50",
+                "text-[12px] font-mono text-foreground placeholder:text-wd-muted/70",
+                "focus:outline-none focus:border-wd-primary/60 transition-colors",
+              )}
+            />
+            {suffix && (
+              <span className="absolute right-2.5 text-[10.5px] font-mono text-wd-muted pointer-events-none">
+                {suffix}
+              </span>
+            )}
+          </div>
+        )}
+
+        <SeverityToggle
+          value={value.severity}
+          onChange={(sev) => onChange({ ...value, severity: sev })}
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove assertion ${index}`}
+        className="shrink-0 inline-flex items-center justify-center w-9 text-wd-muted hover:text-wd-danger hover:bg-wd-danger/5 border-l border-wd-border/30 transition-colors cursor-pointer"
+      >
+        <Icon icon="solar:trash-bin-minimalistic-linear" width={14} />
+      </button>
+    </div>
+
+    {sslHttpsWarning && (
+      <div className="ml-8 inline-flex items-center gap-1.5 text-[10.5px] text-wd-warning font-mono">
+        <Icon icon="solar:danger-triangle-outline" width={12} className="shrink-0" />
+        Endpoint is HTTP — SSL assertions require HTTPS and will always fail.
+      </div>
+    )}
+    {sslModuleWarning && (
+      <div className="ml-8 inline-flex items-center gap-1.5 text-[10.5px] text-wd-warning font-mono">
+        <Icon icon="solar:danger-triangle-outline" width={12} className="shrink-0" />
+        sslChecks module is disabled — enable it in watchdeck.config.js or this rule will always fail.
+      </div>
+    )}
+    </div>
+  );
+}
+
+// Two-state toggle that reads like a status pill so users instantly see what
+// failure mode this rule enforces. Matches the status colour tokens used in
+// the Hero banner and the Checks tab status dots.
+function SeverityToggle({
+  value,
+  onChange,
+}: {
+  value: AssertionSeverity;
+  onChange: (next: AssertionSeverity) => void;
+}) {
+  const isDown = value === "down";
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(isDown ? "degraded" : "down")}
+      aria-label={`On failure: mark as ${value} — click to switch`}
+      title={`On failure: mark as ${value}`}
+      className={cn(
+        "inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-[11px] font-mono font-semibold",
+        "transition-colors cursor-pointer",
+        isDown
+          ? "border-wd-danger/40 bg-wd-danger/10 text-wd-danger hover:bg-wd-danger/15"
+          : "border-wd-warning/40 bg-wd-warning/10 text-wd-warning hover:bg-wd-warning/15",
+      )}
+    >
+      <span
+        className={cn(
+          "h-1.5 w-1.5 rounded-full",
+          isDown ? "bg-wd-danger" : "bg-wd-warning",
+        )}
+      />
+      → {value}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Empty state + add-row affordance
+// ---------------------------------------------------------------------------
+
+export function EmptyAssertionsHint({
+  onAdd,
+  atCap,
+}: {
+  onAdd: (kind: AssertionKind) => void;
+  atCap: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-dashed border-wd-border/50 bg-wd-surface-hover/20 px-3 py-4 flex items-center gap-3">
+      <Icon
+        icon="solar:checklist-minimalistic-outline"
+        width={18}
+        className="text-wd-muted shrink-0"
+      />
+      <div className="flex-1 text-[11.5px] text-wd-muted">
+        No extra assertions yet · the status-code gate above is always enforced.
+        Add a rule to check latency, body, headers, or a JSON field.
+      </div>
+      <AddAssertionMenu onAdd={onAdd} atCap={atCap} compact />
+    </div>
+  );
+}
+
+export function AddAssertionMenu({
+  onAdd,
+  atCap,
+  compact = false,
+}: {
+  onAdd: (kind: AssertionKind) => void;
+  atCap: boolean;
+  compact?: boolean;
+}) {
+  const kinds = Object.keys(KIND_META) as AssertionKind[];
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-1.5 flex-wrap",
+        !compact && "pt-0.5",
+      )}
+    >
+      <span className="uppercase tracking-wider text-[9.5px] font-semibold text-wd-muted mr-0.5">
+        Add
+      </span>
+      {kinds.map((k) => {
+        const meta = KIND_META[k];
+        return (
+          <button
+            key={k}
+            onClick={() => onAdd(k)}
+            disabled={atCap}
+            title={atCap ? `Max ${MAX_ASSERTIONS} assertions per endpoint` : undefined}
+            className={cn(
+              "inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md",
+              "text-[11.5px] font-medium border",
+              atCap
+                ? "bg-wd-surface/40 border-wd-border/30 text-wd-muted/50 cursor-not-allowed"
+                : "bg-wd-surface hover:bg-wd-surface-hover border-wd-border/50 text-wd-muted hover:text-foreground cursor-pointer",
+              "transition-colors",
+            )}
+          >
+            <Icon icon={meta.icon} width={12} className={cn(!atCap && meta.accent)} />
+            {meta.label}
+          </button>
+        );
+      })}
+      {atCap && (
+        <span className="text-[10.5px] text-wd-warning inline-flex items-center gap-1 ml-1">
+          <Icon icon="solar:danger-triangle-outline" width={11} />
+          Max {MAX_ASSERTIONS} reached
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function AssertionPresetsRow({
+  onApply,
+  atCap,
+}: {
+  onApply: (draft: AssertionDraft) => void;
+  atCap: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="uppercase tracking-wider text-[9.5px] font-semibold text-wd-muted">
+        Common
+      </span>
+      {PRESET_ASSERTIONS.map((p) => (
+        <button
+          key={p.label}
+          onClick={() => onApply(p.build())}
+          disabled={atCap}
+          className={cn(
+            "inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-mono border transition-colors",
+            atCap
+              ? "bg-wd-surface/40 border-wd-border/30 text-wd-muted/50 cursor-not-allowed"
+              : "bg-wd-surface-hover/40 hover:bg-wd-surface-hover border-wd-border/40 text-wd-muted hover:text-foreground cursor-pointer",
+          )}
+        >
+          <Icon icon="solar:add-square-linear" width={11} />
+          {p.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 // Danger
@@ -1375,6 +2761,7 @@ function DangerPanel({
     if (res.status < 400) onDeleted();
   }, [confirm, endpoint._id, endpoint.name, request, onDeleted]);
 
+  const paused = endpoint.status === "paused";
   return (
     <div className="rounded-xl border border-wd-danger/40 bg-wd-danger/5 p-5">
       <SectionHead
@@ -1386,12 +2773,10 @@ function DangerPanel({
       <div className="flex items-start justify-between gap-4 py-3 border-b border-wd-border/40">
         <div className="min-w-0">
           <div className="text-[12.5px] font-medium text-foreground">
-            {endpoint.status === "paused"
-              ? "Resume monitoring"
-              : "Pause monitoring"}
+            {paused ? "Resume monitoring" : "Pause monitoring"}
           </div>
           <div className="text-[11.5px] text-wd-muted">
-            {endpoint.status === "paused"
+            {paused
               ? "Re-enable the scheduler for this endpoint."
               : "Stops scheduled checks. No alerts will fire while paused."}
           </div>
@@ -1399,11 +2784,19 @@ function DangerPanel({
         <Button
           size="sm"
           variant="outline"
+          className="!rounded-lg"
           onPress={togglePause}
           isDisabled={pausing}
         >
-          {pausing ? <Spinner size="sm" className="mr-1.5" /> : null}
-          {endpoint.status === "paused" ? "Resume" : "Pause"}
+          {pausing ? (
+            <Spinner size="sm" />
+          ) : (
+            <Icon
+              icon={paused ? "solar:play-circle-outline" : "solar:pause-circle-outline"}
+              width={16}
+            />
+          )}
+          {paused ? "Resume" : "Pause"}
         </Button>
       </div>
 
@@ -1413,11 +2806,12 @@ function DangerPanel({
             Delete endpoint
           </div>
           <div className="text-[11.5px] text-wd-muted">
-            Removes the endpoint, its schedule, and stops future checks.
-            Historical data is retained until pruned by aggregation.
+            Permanently removes the endpoint and stops future checks.
+            Historical checks and incidents stay in the database for
+            post-mortem.
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <input
             placeholder={`Type "${endpoint.name}" to confirm`}
             value={confirm}
@@ -1425,13 +2819,18 @@ function DangerPanel({
             className={cn(inputClass, "max-w-sm")}
           />
           <Button
-            color="danger"
             size="sm"
+            variant="outline"
+            className="!rounded-lg !border-wd-danger/50 !text-wd-danger hover:!bg-wd-danger/10"
             onPress={destroy}
             isDisabled={confirm !== endpoint.name || deleting}
           >
-            {deleting ? <Spinner size="sm" className="mr-1.5" /> : null}
-            Delete
+            {deleting ? (
+              <Spinner size="sm" />
+            ) : (
+              <Icon icon="solar:trash-bin-minimalistic-linear" width={16} />
+            )}
+            Delete endpoint
           </Button>
         </div>
       </div>
