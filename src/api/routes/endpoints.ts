@@ -5,6 +5,7 @@
  * GET    /endpoints/archived   — list archived
  * GET    /endpoints/:id        — single endpoint with latest check
  * POST   /endpoints            — create
+ * POST   /endpoints/:id/clone  — duplicate as a paused "Copy of ..."
  * PUT    /endpoints/:id        — update
  * DELETE /endpoints/:id        — archive (default) or hard delete (?mode=hard)
  * POST   /endpoints/:id/recheck — trigger immediate check
@@ -47,6 +48,7 @@ export const MONITORING_FIELD_RANGES = {
 // the helpers below so create and update share the exact same rules.
 export const mutableFieldProps = {
   name: { type: 'string', minLength: 1, maxLength: 200 },
+  description: { type: 'string', maxLength: 500 },
   // HTTP
   url: { type: 'string', minLength: 1 },
   method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] },
@@ -302,6 +304,7 @@ export function endpointsRoutes(ctx: AppContext) {
 
       const endpointData: Omit<EndpointDoc, '_id' | 'createdAt' | 'updatedAt'> = {
         name: body.name as string,
+        ...(body.description ? { description: body.description as string } : {}),
         type,
         enabled: true,
         status: 'active',
@@ -511,6 +514,52 @@ export function endpointsRoutes(ctx: AppContext) {
       }
 
       return reply.code(202).send({ status: 'scheduled' })
+    })
+
+    // ── POST /endpoints/:id/clone ────────────────────────────────────────────
+    // Duplicates the endpoint's config (URL/host, headers, thresholds, alerts,
+    // assertions) under a "Copy of {name}" title. Fresh check history —
+    // incidentId, consecutiveFailures, lastCheckAt are not carried over.
+    fastify.post('/endpoints/:id/clone', async (request, reply) => {
+      const { id } = request.params as { id: string }
+      if (!ObjectId.isValid(id)) {
+        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
+      }
+      const existing = await ctx.adapter.getEndpointById(id)
+      if (!existing) {
+        return reply.code(404).send(formatError('NOT_FOUND', `Endpoint ${id} not found`))
+      }
+
+      // Strip runtime-state fields; keep config. ObjectIds in channel-list
+      // fields are already ObjectId instances on the existing doc — carry
+      // them through as-is.
+      const {
+        _id: _omit_id,
+        createdAt: _omit_createdAt,
+        updatedAt: _omit_updatedAt,
+        lastCheckAt: _omit_lastCheckAt,
+        lastStatus: _omit_lastStatus,
+        lastResponseTime: _omit_lastResponseTime,
+        lastStatusCode: _omit_lastStatusCode,
+        lastErrorMessage: _omit_lastErrorMessage,
+        lastSslIssuer: _omit_lastSslIssuer,
+        currentIncidentId: _omit_currentIncidentId,
+        consecutiveFailures: _omit_consecutiveFailures,
+        ...configFields
+      } = existing
+
+      const cloneData: Omit<EndpointDoc, '_id' | 'createdAt' | 'updatedAt'> = {
+        ...configFields,
+        name: `Copy of ${existing.name}`,
+        status: 'paused', // safer default — the user hasn't reviewed it yet
+        consecutiveFailures: 0,
+      }
+
+      const clone = await ctx.adapter.createEndpoint(cloneData)
+
+      eventBus.emit('endpoint:created', { timestamp: new Date(), endpoint: clone })
+
+      return reply.code(201).send({ data: clone })
     })
 
     // ── PATCH /endpoints/:id/toggle ──────────────────────────────────────────

@@ -538,6 +538,19 @@ export default function EndpointsPage() {
     }
   }, [confirmDelete, deletingOne, request])
 
+  const handleClone = useCallback(
+    async (id: string) => {
+      const res = await request<{ data: { _id: string } }>(
+        `/endpoints/${id}/clone`,
+        { method: 'POST' },
+      )
+      if (res.status < 400 && res.data.data) {
+        navigate(`/endpoints/${res.data.data._id}?tab=settings`)
+      }
+    },
+    [request, navigate],
+  )
+
   const handleBulkRecheck = useCallback(
     async (ids: Set<string>) => {
       await Promise.all(
@@ -1309,12 +1322,15 @@ export default function EndpointsPage() {
                               if (key === 'recheck') handleRecheck(ep.id)
                               else if (key === 'toggle') handleToggle(ep.id)
                               else if (key === 'settings') navigate(`/endpoints/${ep.id}?tab=settings`)
+                              else if (key === 'clone') handleClone(ep.id)
                               else if (key === 'copy-url') {
                                 if (typeof navigator !== 'undefined' && navigator.clipboard) {
                                   navigator.clipboard.writeText(ep.url).catch(() => {})
                                 }
                               }
-                              else if (key === 'delete') setConfirmDelete(ep)
+                              // Destructive action lives in Danger zone — one
+                              // source of truth for delete confirmations.
+                              else if (key === 'delete') navigate(`/endpoints/${ep.id}?tab=settings&section=danger`)
                             }}
                           >
                             <Dropdown.Item id="recheck" className="!text-xs">
@@ -1336,6 +1352,10 @@ export default function EndpointsPage() {
                             <Dropdown.Item id="copy-url" className="!text-xs">
                               <Icon icon="solar:copy-linear" width={16} className="mr-1.5" />
                               Copy {ep.type === 'http' ? 'URL' : 'Address'}
+                            </Dropdown.Item>
+                            <Dropdown.Item id="clone" className="!text-xs">
+                              <Icon icon="solar:copy-outline" width={16} className="mr-1.5" />
+                              Clone Endpoint
                             </Dropdown.Item>
                             <Dropdown.Item id="settings" className="!text-xs">
                               <Icon icon="solar:settings-linear" width={16} className="mr-1.5" />
