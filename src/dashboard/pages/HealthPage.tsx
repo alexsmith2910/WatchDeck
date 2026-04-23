@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { Icon } from '@iconify/react'
 import { Button, Spinner, cn } from '@heroui/react'
 import { useApi } from '../hooks/useApi'
+import { useFormat } from '../hooks/useFormat'
 import { useSSE } from '../hooks/useSSE'
+import type { Preferences } from '../context/PreferencesContext'
+import { formatHour, formatTime } from '../utils/time'
 import {
   Heatmap,
   LineChart,
@@ -75,8 +78,8 @@ function formatUptime(seconds: number): { value: string; unit: string } {
   return { value: (seconds / 86_400).toFixed(1), unit: 'd' }
 }
 
-function formatStarted(ts: number): string {
-  return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+function formatStarted(ts: number, prefs: Preferences): string {
+  return formatHour(ts, prefs)
 }
 
 function formatUpdatedAgo(sec: number): string {
@@ -101,16 +104,12 @@ function formatCadence(ms: number): string {
   return `${Math.round(ms / 60_000)}m`
 }
 
-function bucketLabel(ts: number): string {
-  return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+function bucketLabel(ts: number, prefs: Preferences): string {
+  return formatHour(ts, prefs)
 }
 
-function bucketLabelWithSeconds(ts: number): string {
-  return new Date(ts).toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
+function bucketLabelWithSeconds(ts: number, prefs: Preferences): string {
+  return formatTime(ts, prefs)
 }
 
 // Passive probes refresh at PASSIVE_REFRESH_MS on the backend; use the same
@@ -121,13 +120,14 @@ function buildSparkLabels(
   length: number,
   lastProbedAt: number | null,
   cadenceMs: number,
+  prefs: Preferences,
 ): string[] {
   if (lastProbedAt === null || length === 0) return []
   const step = cadenceMs > 0 ? cadenceMs : PASSIVE_REFRESH_MS
   const labels: string[] = []
   for (let i = 0; i < length; i++) {
     const ts = lastProbedAt - (length - 1 - i) * step
-    labels.push(bucketLabelWithSeconds(ts))
+    labels.push(bucketLabelWithSeconds(ts, prefs))
   }
   return labels
 }
@@ -329,6 +329,7 @@ function SubsystemCard({
   onRunProbe: (sub: SubsystemSnapshot) => void
   isProbing: boolean
 }) {
+  const { prefs } = useFormat()
   const iconBg =
     sub.status === 'down'
       ? 'bg-wd-danger/15 text-wd-danger'
@@ -389,7 +390,7 @@ function SubsystemCard({
             color={sparkColor(sub.status)}
             width={88}
             height={34}
-            labels={buildSparkLabels(sub.sparkline.length, sub.lastProbedAt, sub.cadenceMs)}
+            labels={buildSparkLabels(sub.sparkline.length, sub.lastProbedAt, sub.cadenceMs, prefs)}
             formatValue={formatLatency}
           />
         </div>
@@ -438,6 +439,7 @@ function SubsystemCard({
 // ---------------------------------------------------------------------------
 
 function IncidentRow({ inc }: { inc: InternalIncident }) {
+  const { prefs } = useFormat()
   // Active incidents re-tick their duration text every second; resolved ones
   // are static. Scoping the interval here keeps HealthPage's tree stable when
   // no active incidents exist.
@@ -511,7 +513,7 @@ function IncidentRow({ inc }: { inc: InternalIncident }) {
             <span className="text-wd-muted/70">Subsystem:</span> {inc.subsystem}
           </span>
           <span>
-            <span className="text-wd-muted/70">Started:</span> {formatStarted(inc.startedAt)}
+            <span className="text-wd-muted/70">Started:</span> {formatStarted(inc.startedAt, prefs)}
           </span>
           <span>
             <span className="text-wd-muted/70">Updates:</span> {inc.commits}
@@ -556,6 +558,7 @@ export default function HealthPage() {
   const { request } = useApi()
   const { subscribe } = useSSE()
   const navigate = useNavigate()
+  const { prefs } = useFormat()
 
   const [snapshot, setSnapshot] = useState<SystemHealthSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
@@ -712,11 +715,11 @@ export default function HealthPage() {
   const probeLatencyData = useMemo<LineChartRow[]>(() => {
     if (!snapshot) return []
     return snapshot.probeHistory.points.map((p) => {
-      const row: LineChartRow = { ts: p.ts, label: bucketLabel(p.ts) }
+      const row: LineChartRow = { ts: p.ts, label: bucketLabel(p.ts, prefs) }
       for (const [id, v] of Object.entries(p.bySubsystem)) row[id] = v
       return row
     })
-  }, [snapshot])
+  }, [snapshot, prefs])
 
   const probeLatencySeries = useMemo<LineSeries[]>(() => {
     if (!snapshot) return []
@@ -732,10 +735,10 @@ export default function HealthPage() {
     if (!snapshot) return []
     return snapshot.activity.points.map((p) => ({
       ts: p.ts,
-      label: bucketLabelWithSeconds(p.ts),
+      label: bucketLabelWithSeconds(p.ts, prefs),
       checksPerSec: p.checksPerSec,
     }))
-  }, [snapshot])
+  }, [snapshot, prefs])
 
   const activeIncs = useMemo(
     () => (snapshot ? snapshot.incidents.filter((i) => i.status === 'active') : []),
@@ -783,16 +786,19 @@ export default function HealthPage() {
     snapshot.kpis.dbPingSpark.length,
     dbSub?.lastProbedAt ?? null,
     dbSub?.cadenceMs ?? 0,
+    prefs,
   )
   const schedSparkLabels = buildSparkLabels(
     snapshot.kpis.schedulerDriftSpark.length,
     schedSub?.lastProbedAt ?? null,
     schedSub?.cadenceMs ?? 0,
+    prefs,
   )
   const bufSparkLabels = buildSparkLabels(
     snapshot.kpis.bufferLatencySpark.length,
     bufSub?.lastProbedAt ?? null,
     bufSub?.cadenceMs ?? 0,
+    prefs,
   )
 
   return (

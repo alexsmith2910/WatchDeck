@@ -11,6 +11,7 @@ import { Link } from 'react-router-dom'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@heroui/react'
 import type { ApiChannel, ApiScheduledEscalation } from '../../types/notifications'
 import { formatCountdown } from './notificationHelpers'
+import { useFormat } from '../../hooks/useFormat'
 
 interface Props {
   escalations: ApiScheduledEscalation[]
@@ -117,6 +118,7 @@ function EscalationRow({
   channelLabel: string
   endpointLabel: string
 }) {
+  const fmt = useFormat()
   return (
     <Link
       to={`/incidents/${escalation.incidentId}`}
@@ -139,7 +141,7 @@ function EscalationRow({
           </span>
         </TooltipTrigger>
         <TooltipContent className="text-[11px] px-2 py-1">
-          Fires {new Date(escalation.firesAt).toLocaleString()}
+          Fires {fmt.ts(escalation.firesAt)}
         </TooltipContent>
       </Tooltip>
     </Link>

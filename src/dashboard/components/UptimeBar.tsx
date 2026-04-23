@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, memo } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@heroui/react'
 import type { DailySummary } from '../types/api'
+import { useFormat } from '../hooks/useFormat'
 
 export type DailyStatus = 'healthy' | 'degraded' | 'down' | 'paused' | 'nodata'
 
@@ -252,6 +253,7 @@ function UptimeTooltip({
   rect: DOMRect
   latencyThreshold: number | null
 }) {
+  const fmt = useFormat()
   // Clamp the tooltip's left edge so it never clips past the viewport.
   // Half-width 130 covers typical content within the min-w-[220px] box.
   const HALF_WIDTH = 130
@@ -280,11 +282,7 @@ function UptimeTooltip({
           )}
         >
           <span className="text-wd-muted/80">
-            {hovered.date.toLocaleDateString(undefined, {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
+            {fmt.date(hovered.date)}
           </span>
           <span className={statusTextColor[hovered.status]}>
             {statusLabel[hovered.status]}

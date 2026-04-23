@@ -22,7 +22,7 @@ import { Icon } from '@iconify/react'
 import { cn } from '@heroui/react'
 import type { ApiIncident } from '../../types/api'
 import type { ApiChannel, ChannelType } from '../../types/notifications'
-import { timeAgo } from '../../utils/format'
+import { useFormat } from '../../hooks/useFormat'
 import { WideSpark } from '../health/HealthCharts'
 import {
   endpointDisplay,
@@ -202,11 +202,12 @@ const HeroCard = memo(function HeroCard({
   sparkline: EndpointSparkline | undefined
 }) {
   const navigate = useNavigate()
+  const fmt = useFormat()
   const ep = endpointDisplay(endpoint)
   const sev = severityOf(incident)
   const meta = metaFor(incident.cause)
 
-  const lastCheckLabel = formatLastCheck(endpointState)
+  const lastCheckLabel = formatLastCheck(endpointState, fmt.relative)
   const lastCheckTone =
     endpointState?.lastStatus === 'down'
       ? 'text-wd-danger'
@@ -223,8 +224,8 @@ const HeroCard = memo(function HeroCard({
   // Memoize the labels array so WideSpark's React.memo can short-circuit on
   // re-renders (otherwise a fresh array every render busts the memo).
   const sparkLabels = useMemo(
-    () => sparkline?.timestamps.map(formatCheckTime) ?? [],
-    [sparkline],
+    () => sparkline?.timestamps.map((t) => `${fmt.dateShort(t)} · ${fmt.hour(t)}`) ?? [],
+    [sparkline, fmt],
   )
   const peak = sparkValues.length > 0 ? Math.max(...sparkValues) : 0
 
@@ -298,7 +299,7 @@ const HeroCard = memo(function HeroCard({
       <div className="flex flex-wrap gap-x-4 gap-y-1 pt-2 border-t border-dashed border-wd-border/60 text-[11px] text-wd-muted font-mono">
         <span className="inline-flex items-center gap-1.5">
           <Icon icon="solar:clock-circle-linear" width={16} />
-          Started <span className="text-foreground font-medium">{timeAgo(incident.startedAt)}</span>
+          Started <span className="text-foreground font-medium">{fmt.relative(incident.startedAt)}</span>
         </span>
         {lastCheckLabel && (
           <span className="inline-flex items-center gap-1.5">
@@ -343,16 +344,12 @@ const HeroCard = memo(function HeroCard({
   )
 })
 
-function formatCheckTime(iso: string): string {
-  const d = new Date(iso)
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  return `${date} · ${time}`
-}
-
-function formatLastCheck(st: HeroEndpointState | undefined): string | null {
+function formatLastCheck(
+  st: HeroEndpointState | undefined,
+  relative: (d: Date | string | number | null | undefined) => string,
+): string | null {
   if (!st || !st.lastCheckAt) return null
   const code = st.lastStatusCode != null ? String(st.lastStatusCode) : '—'
   const rt = st.lastResponseTime != null ? `${Math.round(st.lastResponseTime)}ms` : '—'
-  return `${code} · ${rt} · ${timeAgo(st.lastCheckAt)}`
+  return `${code} · ${rt} · ${relative(st.lastCheckAt)}`
 }

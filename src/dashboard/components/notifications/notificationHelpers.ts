@@ -5,6 +5,8 @@
  * bucketing in one place so every panel agrees on the same logic.
  */
 import type { ApiChannel, ApiNotificationLogRow, ApiNotificationStats, ChannelType } from '../../types/notifications'
+import { DEFAULT_PREFERENCES, type Preferences } from '../../context/PreferencesContext'
+import { formatHour } from '../../utils/time'
 
 export type OverallDeliveryState = 'operational' | 'degraded' | 'outage'
 export type ChannelUiStatus = 'healthy' | 'degraded' | 'failing' | 'paused'
@@ -192,6 +194,7 @@ export function bucketLog(
   log: ApiNotificationLogRow[],
   windowMs: number,
   bucketCount: number,
+  prefs: Preferences = DEFAULT_PREFERENCES,
 ): ChartBucket[] {
   const now = Date.now()
   const windowStart = now - windowMs
@@ -202,7 +205,7 @@ export function bucketLog(
   for (let i = 0; i < bucketCount; i++) {
     const tsMs = windowStart + i * step
     buckets.push({
-      label: new Date(tsMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
+      label: formatHour(tsMs, prefs),
       tsMs,
       slack: 0,
       discord: 0,

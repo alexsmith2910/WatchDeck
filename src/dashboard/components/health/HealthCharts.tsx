@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { Icon } from '@iconify/react'
 import { cn, Separator } from '@heroui/react'
 import type { HeatmapCell, HeatmapRow, ProbeStatus } from '../../types/systemHealth'
+import { useFormat } from '../../hooks/useFormat'
+import { formatDate, formatDateShort, formatHour } from '../../utils/time'
 
 // ---------------------------------------------------------------------------
 // Sparkline (inline)
@@ -673,23 +675,25 @@ export const Heatmap = memo(function Heatmap({
           })}
         </div>
       </div>
-      <div className="flex justify-between text-[10px] text-wd-muted font-mono pl-[100px] pr-1">
-        {labels
-          .filter((_, i) => i % Math.max(1, Math.ceil(labels.length / 6)) === 0 || i === labels.length - 1)
-          .map((l, i) => (
-            <span key={i}>
-              {new Date(l).toLocaleTimeString(undefined, {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </span>
-          ))}
-      </div>
+      <HeatmapAxisLabels labels={labels} />
       {hover && typeof document !== 'undefined' &&
         createPortal(<HeatmapTooltip hover={hover} />, document.body)}
     </div>
   )
 })
+
+function HeatmapAxisLabels({ labels }: { labels: string[] }) {
+  const fmt = useFormat()
+  return (
+    <div className="flex justify-between text-[10px] text-wd-muted font-mono pl-[100px] pr-1">
+      {labels
+        .filter((_, i) => i % Math.max(1, Math.ceil(labels.length / 6)) === 0 || i === labels.length - 1)
+        .map((l, i) => (
+          <span key={i}>{fmt.hour(l)}</span>
+        ))}
+    </div>
+  )
+}
 
 function formatApproxDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -704,23 +708,16 @@ function formatApproxDuration(ms: number): string {
 
 function HeatmapTooltip({ hover }: { hover: HeatmapHover }) {
   const { title, cell, bucketStartIso, bucketMinutes, intensity, rect, cadenceMs } = hover
+  const { prefs } = useFormat()
   const state = cellState(cell)
   const bucketStart = new Date(bucketStartIso)
   const bucketEnd = new Date(bucketStart.getTime() + bucketMinutes * 60_000)
   const sameDay = bucketStart.toDateString() === bucketEnd.toDateString()
-  const dateLabel = bucketStart.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-  const fmtTime = (d: Date) =>
-    d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  const dateLabel = formatDate(bucketStart, prefs)
+  const fmtTime = (d: Date) => formatHour(d, prefs)
   const rangeLabel = sameDay
     ? `${fmtTime(bucketStart)} – ${fmtTime(bucketEnd)}`
-    : `${fmtTime(bucketStart)} → ${bucketEnd.toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-      })} ${fmtTime(bucketEnd)}`
+    : `${fmtTime(bucketStart)} → ${formatDateShort(bucketEnd, prefs)} ${fmtTime(bucketEnd)}`
 
   const statusPill =
     state === 'down'

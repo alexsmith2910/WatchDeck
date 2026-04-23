@@ -13,6 +13,7 @@ import { cn } from '@heroui/react'
 import type { ApiIncident, IncidentStats } from '../../types/api'
 import { WideSpark } from '../health/HealthCharts'
 import { metaFor, severityOf } from './incidentHelpers'
+import { formatDateShort } from '../../utils/format'
 
 type Tile = 'primary' | 'success' | 'warning' | 'danger'
 
@@ -43,10 +44,7 @@ function todayKey(): string {
 
 function labelFromDateKey(key: string): string {
   const [y, m, d] = key.split('-').map(Number)
-  return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  })
+  return formatDateShort(new Date(y, (m ?? 1) - 1, d ?? 1))
 }
 
 export function IncidentKpis({ activeIncidents, stats }: Props) {

@@ -16,8 +16,11 @@ import {
 import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
 import type { ApiIncident, ApiEndpoint, ApiCheck, IncidentTimelineEvent } from '../types/api'
-import { formatDuration, formatDateTime, getIncidentRanges } from '../utils/format'
+import { formatDuration, getIncidentRanges } from '../utils/format'
+import { useFormat } from '../hooks/useFormat'
 import type { IncidentRange } from '../utils/format'
+import type { Preferences } from '../context/PreferencesContext'
+import { formatHour, formatTs } from '../utils/time'
 import ForegroundReferenceArea from '../components/ForegroundReferenceArea'
 
 // ---------------------------------------------------------------------------
@@ -74,9 +77,8 @@ function humanCause(cause: string): string {
 const MAX_INCIDENT_CHECKS = 1000
 
 /** Format a short time label for chart data points. */
-function formatChartTime(dateStr: string): string {
-  const d = new Date(dateStr)
-  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+function formatChartTime(dateStr: string, prefs: Preferences): string {
+  return formatHour(dateStr, prefs)
 }
 
 /** Compute the live or final duration in seconds. */
@@ -343,6 +345,7 @@ export default function IncidentDetailPage() {
   const navigate = useNavigate()
   const { request } = useApi()
   const { subscribe } = useSSE()
+  const fmt = useFormat()
 
   // State
   const [incident, setIncident] = useState<ApiIncident | null>(null)
@@ -559,14 +562,14 @@ export default function IncidentDetailPage() {
 
   const chartData = useMemo(() => {
     return allChecks.map((c) => ({
-      label: formatChartTime(c.timestamp),
+      label: formatChartTime(c.timestamp, fmt.prefs),
       avg: c.responseTime,
       fails: c.status === 'down' ? 1 : 0,
       degraded: c.status === 'degraded' ? 1 : 0,
       status: c.status,
       at: c.timestamp,
     }))
-  }, [allChecks])
+  }, [allChecks, fmt.prefs])
 
   const incidentRanges = useMemo(() => getIncidentRanges(chartData), [chartData])
 
@@ -1008,12 +1011,12 @@ export default function IncidentDetailPage() {
               <div className="mt-1.5 text-right text-[11px] text-wd-muted leading-snug">
                 <div>
                   <span className="text-wd-muted/70">Started </span>
-                  <span className="font-mono">{formatDateTime(incident.startedAt)}</span>
+                  <span className="font-mono">{fmt.ts(incident.startedAt)}</span>
                 </div>
                 {incident.resolvedAt && (
                   <div>
                     <span className="text-wd-muted/70">Resolved </span>
-                    <span className="font-mono">{formatDateTime(incident.resolvedAt)}</span>
+                    <span className="font-mono">{fmt.ts(incident.resolvedAt)}</span>
                   </div>
                 )}
               </div>
@@ -1434,6 +1437,7 @@ function DetailRow({
 /** Renders a detail grid for either an ApiCheck (persisted, has _id) or a
  *  live CheckPoint (SSE-derived, no _id, only core fields). */
 function CheckDetailGrid({ check }: { check: CheckPoint | ApiCheck }) {
+  const { prefs } = useFormat()
   const asApi = 'duringMaintenance' in check ? check : undefined
   return (
     <div className="space-y-2">
@@ -1442,7 +1446,7 @@ function CheckDetailGrid({ check }: { check: CheckPoint | ApiCheck }) {
       ) : (
         <DetailRow label="Source" value="Live (SSE)" />
       )}
-      <DetailRow label="Timestamp" value={new Date(check.timestamp).toLocaleString()} mono />
+      <DetailRow label="Timestamp" value={formatTs(check.timestamp, prefs)} mono />
       <DetailRow label="Status" value={check.status} />
       <DetailRow label="Response Time" value={`${check.responseTime}ms`} mono />
       {check.statusCode != null && (
@@ -1489,6 +1493,7 @@ function TimelineRowView({
   incident: ApiIncident
   duration: number
 }) {
+  const fmt = useFormat()
   const isExpanded = expandedRowKey === row.key
   const isPhaseMarker = row.event === 'opened' || row.event === 'resolved'
   const isGroup = row.event === 'check-group'
@@ -1584,7 +1589,7 @@ function TimelineRowView({
               </span>
             )}
             <span className="text-[11px] text-wd-muted font-mono">
-              {formatDateTime(row.at)}
+              {fmt.ts(row.at)}
             </span>
             {!isPhaseMarker && (
               <span className="text-[10px] font-mono text-wd-muted/70">
@@ -1629,17 +1634,9 @@ function TimelineRowView({
                   </span>
                   <span className="text-[11px] text-wd-muted/80">
                     ·{' '}
-                    {new Date(row.groupMembers[0].at).toLocaleTimeString(undefined, {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {fmt.hour(row.groupMembers[0].at)}
                     {' – '}
-                    {new Date(
-                      row.groupMembers[row.groupMembers.length - 1].at,
-                    ).toLocaleTimeString(undefined, {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {fmt.hour(row.groupMembers[row.groupMembers.length - 1].at)}
                   </span>
                 </div>
                 )
@@ -1712,11 +1709,7 @@ function TimelineRowView({
                     className="flex items-center gap-2 text-[11px] rounded px-2 py-1 bg-wd-surface/50"
                   >
                     <span className="text-wd-muted font-mono w-[90px] shrink-0">
-                      {new Date(m.at).toLocaleTimeString(undefined, {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                      })}
+                      {fmt.time(m.at)}
                     </span>
                     <span className="text-wd-muted/70 font-mono text-[10px] w-[64px] shrink-0">
                       {formatRelativeFromAnchor(m.at, incident.startedAt)}
@@ -1775,13 +1768,13 @@ function TimelineRowView({
                 {incident.causeDetail && (
                   <DetailRow label="Detail" value={incident.causeDetail} />
                 )}
-                <DetailRow label="Started" value={formatDateTime(incident.startedAt)} mono />
+                <DetailRow label="Started" value={fmt.ts(incident.startedAt)} mono />
               </div>
             ) : row.event === 'resolved' ? (
               <div className="space-y-2">
                 <DetailRow
                   label="Resolved"
-                  value={incident.resolvedAt ? formatDateTime(incident.resolvedAt) : '—'}
+                  value={incident.resolvedAt ? fmt.ts(incident.resolvedAt) : '—'}
                   mono
                 />
                 <DetailRow
@@ -1936,6 +1929,7 @@ function ChartStatusStrip({ points }: { points: ChartPoint[] }) {
 // ---------------------------------------------------------------------------
 
 function RelatedIncidentRow({ incident }: { incident: ApiIncident }) {
+  const fmt = useFormat()
   const active = incident.status === 'active'
   const durationSeconds =
     incident.durationSeconds ??
@@ -1979,7 +1973,7 @@ function RelatedIncidentRow({ incident }: { incident: ApiIncident }) {
         {formatDuration(durationSeconds)}
       </span>
       <span className="text-[11px] text-wd-muted min-w-[140px] text-right font-mono">
-        {formatDateTime(incident.startedAt)}
+        {fmt.ts(incident.startedAt)}
       </span>
     </Link>
   )

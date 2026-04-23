@@ -19,7 +19,8 @@ import { Icon } from '@iconify/react'
 import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
 import type { ApiEndpoint, ApiPagination, DailySummary, UptimeStats, EndpointStatus } from '../types/api'
-import { timeAgo, formatTime, latencyColor, uptimeColor } from '../utils/format'
+import { latencyColor, uptimeColor } from '../utils/format'
+import { useFormat } from '../hooks/useFormat'
 import UptimeBar, { buildHistory, avg30dResponse, avg30dUptime, type DailyBucket } from '../components/UptimeBar'
 
 // ---------------------------------------------------------------------------
@@ -209,6 +210,7 @@ export default function EndpointsPage() {
   const navigate = useNavigate()
   const { request } = useApi()
   const { subscribe } = useSSE()
+  const fmt = useFormat()
 
   // Data state
   const [endpoints, setEndpoints] = useState<Endpoint[]>([])
@@ -1259,14 +1261,14 @@ export default function EndpointsPage() {
                     <Tooltip delay={400} closeDelay={0}>
                       <TooltipTrigger className="!block !w-full !text-left !justify-start">
                         <span className="block w-full text-left text-xs font-mono text-wd-muted">
-                          {timeAgo(ep.lastCheckAt)}
+                          {fmt.relative(ep.lastCheckAt)}
                         </span>
                       </TooltipTrigger>
                       <TooltipContent className={TIP_CLS}>
                         <TipHeader>Last Check</TipHeader>
                         <TipRow
                           label="Checked at"
-                          value={formatTime(ep.lastCheckAt)}
+                          value={fmt.ts(ep.lastCheckAt)}
                           color="bg-wd-primary"
                           className="text-foreground"
                         />

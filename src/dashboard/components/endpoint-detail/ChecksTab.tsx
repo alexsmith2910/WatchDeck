@@ -13,6 +13,7 @@ import { Icon } from "@iconify/react";
 import type { DateValue, RangeValue } from "react-aria-components";
 import { getLocalTimeZone } from "@internationalized/date";
 import { useApi } from "../../hooks/useApi";
+import { useFormat } from "../../hooks/useFormat";
 import { useRuntimeInfo } from "../../hooks/useRuntimeInfo";
 import type {
   ApiCheck,
@@ -20,7 +21,7 @@ import type {
   ApiPagination,
   HourlySummary,
 } from "../../types/api";
-import { formatDateTime, latencyColor, statusColors } from "../../utils/format";
+import { latencyColor, statusColors } from "../../utils/format";
 import { formatBytes } from "../../utils/formatBytes";
 import { reasonPhrase } from "../../utils/httpStatus";
 import {
@@ -337,6 +338,7 @@ function CheckRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const fmt = useFormat();
   const color = statusColors[check.status] ?? statusColors.unknown;
   const isFail = check.status === "down";
   const assertions = check.assertionResult?.results ?? [];
@@ -359,7 +361,7 @@ function CheckRow({
         <span className={cn("w-2 h-2 rounded-full shrink-0", color.dot)} />
 
         <span className="text-[11.5px] font-mono text-foreground truncate">
-          {formatDateTime(check.timestamp)}
+          {fmt.ts(check.timestamp)}
         </span>
 
         <span
@@ -465,6 +467,7 @@ function CheckDetail({
   endpoint: ApiEndpoint;
   probeName: string;
 }) {
+  const fmt = useFormat();
   const requestTarget =
     endpoint.type === "http"
       ? (endpoint.url ?? "—")
@@ -491,7 +494,7 @@ function CheckDetail({
           <div className={KV_ROW}>
             <span className={KV_KEY}>Timestamp</span>
             <span className={KV_VAL}>
-              {formatDateTime(check.timestamp)}
+              {fmt.ts(check.timestamp)}
             </span>
           </div>
           <div className={KV_ROW}>

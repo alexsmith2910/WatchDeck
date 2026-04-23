@@ -13,6 +13,7 @@ import { Icon } from "@iconify/react";
 import UptimeBar, { buildHistory } from "../UptimeBar";
 import type { DailySummary } from "../../types/api";
 import { uptimeColor } from "../../utils/format";
+import { useFormat } from "../../hooks/useFormat";
 import { Segmented } from "./primitives";
 
 type Window = 30 | 60 | 90;
@@ -53,6 +54,7 @@ function EndpointUptimeRibbonBase({
   setWindow,
   latencyThreshold,
 }: Props) {
+  const fmt = useFormat();
   const history = useMemo(
     () => buildHistory(dailies, window),
     [dailies, window],
@@ -96,10 +98,7 @@ function EndpointUptimeRibbonBase({
                 <>
                   Worst day:{" "}
                   <b className="font-mono text-foreground">
-                    {worst.date.toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    })}
+                    {fmt.dateShort(worst.date)}
                   </b>{" "}
                   at {worst.uptimePercent?.toFixed(2)}%
                 </>

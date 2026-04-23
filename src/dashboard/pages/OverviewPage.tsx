@@ -8,6 +8,9 @@ import KpiCard from '../components/KpiCard'
 import OverviewChart from '../components/OverviewChart'
 import { Segmented } from '../components/endpoint-detail/primitives'
 import { getIncidentRanges } from '../utils/format'
+import { useFormat } from '../hooks/useFormat'
+import { formatDateShort, formatHour, formatTime } from '../utils/time'
+import type { Preferences } from '../context/PreferencesContext'
 
 // ---------------------------------------------------------------------------
 // API types
@@ -88,19 +91,16 @@ const TIME_RANGES: { key: TimeRange; label: string; hoursNeeded: number }[] = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatHour(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+function formatHourLabel(iso: string, prefs: Preferences): string {
+  return formatHour(iso, prefs)
 }
 
-function formatDay(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+function formatDay(iso: string, prefs: Preferences): string {
+  return formatDateShort(iso, prefs)
 }
 
-function formatMinute(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+function formatMinute(iso: string, prefs: Preferences): string {
+  return formatTime(iso, prefs)
 }
 
 /** Human-friendly duration for the data warning */
@@ -119,6 +119,7 @@ export default function OverviewPage() {
   const navigate = useNavigate()
   const { request } = useApi()
   const { subscribe } = useSSE()
+  const { prefs } = useFormat()
 
   const [endpoints, setEndpoints] = useState<ApiEndpoint[]>([])
   const [activeIncidents, setActiveIncidents] = useState<ApiIncident[]>([])
@@ -241,11 +242,11 @@ export default function OverviewPage() {
             const max = Math.max(...b.rts)
             const fails = b.down
             const degraded = b.degraded
-            rtData.push({ label: formatMinute(key), avg, min, max, fails, degraded })
+            rtData.push({ label: formatMinute(key, prefs), avg, min, max, fails, degraded })
             const uptimeVal = b.total > 0 ? Math.round((b.healthy / b.total) * 10000) / 100 : 100
             const downPctVal = b.total > 0 ? Math.round((b.down / b.total) * 10000) / 100 : 0
             avData.push({
-              label: formatMinute(key),
+              label: formatMinute(key, prefs),
               uptime: uptimeVal,
               downPercent: downPctVal,
               fails,
@@ -356,7 +357,7 @@ export default function OverviewPage() {
       const sorted = [...byHour.entries()].sort(([a], [b]) => a.localeCompare(b))
       const rtData: Record<string, string | number>[] = []
       const avData: Record<string, string | number>[] = []
-      const labelFn = sorted.length > 48 ? formatDay : formatHour
+      const labelFn = sorted.length > 48 ? formatDay : formatHourLabel
       for (const [key, b] of sorted) {
         const avg = Math.round(b.rts.reduce((s, v) => s + v, 0) / b.rts.length)
         const p95 = Math.round(Math.max(...b.p95s))
@@ -365,8 +366,8 @@ export default function OverviewPage() {
         const uptime = Math.round(b.uptimes.reduce((s, v) => s + v, 0) / b.uptimes.length * 100) / 100
         const total = b.healthy + b.degraded + b.down
         const downPct = total > 0 ? Math.round((b.down / total) * 10000) / 100 : 0
-        rtData.push({ label: labelFn(key), avg, p95, min, max, fails: b.down, degraded: b.degraded })
-        avData.push({ label: labelFn(key), uptime, downPercent: downPct, fails: b.down, degraded: b.degraded, incidents: 0 })
+        rtData.push({ label: labelFn(key, prefs), avg, p95, min, max, fails: b.down, degraded: b.degraded })
+        avData.push({ label: labelFn(key, prefs), uptime, downPercent: downPct, fails: b.down, degraded: b.degraded, incidents: 0 })
       }
 
       if (!isCancelled) {
@@ -409,8 +410,8 @@ export default function OverviewPage() {
         const uptime = Math.round(b.uptimes.reduce((s, v) => s + v, 0) / b.uptimes.length * 100) / 100
         const downPct = uptime < 100 ? Math.round((100 - uptime) * 100) / 100 : 0
         const fails = b.incidents
-        rtData.push({ label: formatDay(key), avg, p95, min, max, fails })
-        avData.push({ label: formatDay(key), uptime, downPercent: downPct, fails, incidents: 0 })
+        rtData.push({ label: formatDay(key, prefs), avg, p95, min, max, fails })
+        avData.push({ label: formatDay(key, prefs), uptime, downPercent: downPct, fails, incidents: 0 })
       }
 
       if (!isCancelled) {

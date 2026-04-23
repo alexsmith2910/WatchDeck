@@ -10,7 +10,8 @@ import { createPortal } from 'react-dom'
 import { Icon } from '@iconify/react'
 import { cn } from '@heroui/react'
 import type { IncidentStats } from '../../types/api'
-import { timeAgo, formatDuration } from '../../utils/format'
+import { formatDateShort, formatDuration } from '../../utils/format'
+import { useFormat } from '../../hooks/useFormat'
 import { endpointDisplay, metaFor, type CauseKind, type EndpointLite } from './incidentHelpers'
 
 // Colour and label tables for cause donut slices. Kept inline with this file
@@ -156,11 +157,11 @@ function localDayKey(d: Date): string {
 }
 
 function labelFromDateKey(key: string): string {
+  // The key is an already-localised calendar day (yyyy-MM-dd) — build the
+  // Date in local time so it renders on the intended day, then delegate to
+  // the preference-aware short date formatter.
   const [y, m, d] = key.split('-').map(Number)
-  return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  })
+  return formatDateShort(new Date(y, (m ?? 1) - 1, d ?? 1))
 }
 
 // ---------------------------------------------------------------------------
@@ -543,6 +544,7 @@ function TopAffectedCard({
   const rows = useMemo(() => topAffectedFromStats(stats, 5), [stats])
   const flapping = useMemo(() => flappingFromStats(stats), [stats])
   const windowDays = stats?.byDay.length ?? 0
+  const fmt = useFormat()
 
   return (
     <div className="rounded-xl border border-wd-border/50 bg-wd-surface p-4 flex flex-col gap-3 min-h-[280px]">
@@ -572,7 +574,7 @@ function TopAffectedCard({
                 <div className="min-w-0 flex-1">
                   <div className="text-[12.5px] font-medium text-foreground truncate">{ep.name}</div>
                   <div className="text-[10.5px] text-wd-muted font-mono">
-                    {formatDuration(r.totalDowntimeSec)} total · last {timeAgo(r.lastStartedAt)}
+                    {formatDuration(r.totalDowntimeSec)} total · last {fmt.relative(r.lastStartedAt)}
                   </div>
                 </div>
                 <span className="font-mono text-[13px] font-semibold text-foreground shrink-0">

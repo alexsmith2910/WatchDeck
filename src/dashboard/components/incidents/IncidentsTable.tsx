@@ -37,7 +37,7 @@ import {
   type Severity,
 } from './incidentHelpers'
 import { WideSpark } from '../health/HealthCharts'
-import { timeAgo } from '../../utils/format'
+import { useFormat } from '../../hooks/useFormat'
 import { LiveDuration } from './LiveTime'
 
 export type StatusFilter = 'all' | 'active' | 'resolved'
@@ -451,6 +451,7 @@ export const TableRow = memo(function TableRow({
   showEndpoint?: boolean
 }) {
   const navigate = useNavigate()
+  const fmt = useFormat()
   const ep = endpointDisplay(endpoint)
   const sev = severityOf(incident)
   const meta = metaFor(incident.cause)
@@ -460,8 +461,8 @@ export const TableRow = memo(function TableRow({
   // Memoize labels so WideSpark's memo short-circuits when the row re-renders
   // for unrelated reasons (otherwise a fresh array busts it every time).
   const sparkLabels = useMemo(
-    () => sparkline?.timestamps.map(formatCheckTime) ?? [],
-    [sparkline],
+    () => sparkline?.timestamps.map((t) => `${fmt.dateShort(t)} · ${fmt.hour(t)}`) ?? [],
+    [sparkline, fmt],
   )
   const sparkColor = isActive ? 'var(--wd-danger)' : 'var(--wd-muted)'
   const channels =
@@ -548,9 +549,9 @@ export const TableRow = memo(function TableRow({
       </div>
 
       <div className="min-w-0">
-        <div className="text-[11.5px] text-foreground font-mono">{timeAgo(incident.startedAt)}</div>
+        <div className="text-[11.5px] text-foreground font-mono">{fmt.relative(incident.startedAt)}</div>
         <div className="text-[10px] text-wd-muted/80 font-mono truncate">
-          {fmtAbsTime(incident.startedAt)}
+          {fmtAbsTime(incident.startedAt, fmt.prefs)}
         </div>
       </div>
 
@@ -609,13 +610,6 @@ export const TableRow = memo(function TableRow({
     </div>
   )
 })
-
-function formatCheckTime(iso: string): string {
-  const d = new Date(iso)
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  return `${date} · ${time}`
-}
 
 const CHANNEL_ICON: Record<ChannelType, string> = {
   discord: 'ic:baseline-discord',

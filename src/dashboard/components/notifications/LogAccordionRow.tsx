@@ -21,7 +21,7 @@ import {
   type ApiChannel,
   type ApiNotificationLogRow,
 } from "../../types/notifications";
-import { formatDateTime, timeAgo } from "../../utils/format";
+import { useFormat } from "../../hooks/useFormat";
 import { buildCurl, resolveLiveUrl } from "./notificationCurl";
 
 export const LOG_ROW_GRID =
@@ -55,6 +55,7 @@ interface LogRowProps {
 }
 
 export function LogRow({ row, channel, expanded, onToggle }: LogRowProps) {
+  const fmt = useFormat();
   const style = STATUS_STYLE[row.deliveryStatus];
   const latency =
     row.latencyMs != null
@@ -80,9 +81,9 @@ export function LogRow({ row, channel, expanded, onToggle }: LogRowProps) {
           )}
         />
         <span className="text-[11.5px] font-mono text-foreground truncate leading-tight">
-          {formatDateTime(row.sentAt)}
+          {fmt.ts(row.sentAt)}
           <span className="block text-[10px] text-wd-muted">
-            {timeAgo(row.sentAt)}
+            {fmt.relative(row.sentAt)}
           </span>
         </span>
         <span className="flex items-center gap-1.5 min-w-0">
@@ -153,7 +154,8 @@ function LogExpansion({
   row: ApiNotificationLogRow;
   channel: ApiChannel | null;
 }) {
-  const firedAt = formatDateTime(row.sentAt);
+  const fmt = useFormat();
+  const firedAt = fmt.ts(row.sentAt);
   const triggerId =
     row.incidentId ??
     row.retryOf ??
@@ -255,8 +257,9 @@ function prettyJson(body: string | undefined | null): {
 }
 
 function ResponseSection({ row }: { row: ApiNotificationLogRow }) {
+  const fmt = useFormat();
   const res = row.response;
-  const sentAt = formatDateTime(row.sentAt);
+  const sentAt = fmt.ts(row.sentAt);
   const method = row.request?.method;
   const target = res?.url ?? row.request?.url;
 

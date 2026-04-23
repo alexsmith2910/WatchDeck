@@ -8,6 +8,8 @@
  * `/incidents/stats` endpoint and consumed directly by the trend components.
  */
 import type { ApiIncident } from '../../types/api'
+import { DEFAULT_PREFERENCES, type Preferences } from '../../context/PreferencesContext'
+import { formatDateShort, formatHour } from '../../utils/time'
 
 // ---------------------------------------------------------------------------
 // Cause catalog
@@ -106,12 +108,15 @@ export function fmtLiveDuration(totalSec: number): string {
   return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
 }
 
-export function fmtAbsTime(iso: string): string {
+export function fmtAbsTime(
+  iso: string,
+  prefs: Preferences = DEFAULT_PREFERENCES,
+): string {
   const d = new Date(iso)
   const today = new Date()
   const sameDay = d.toDateString() === today.toDateString()
-  if (sameDay) return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
+  if (sameDay) return formatHour(d, prefs)
+  return `${formatDateShort(d, prefs)} ${formatHour(d, prefs)}`
 }
 
 export function liveElapsedSec(startedAt: string): number {

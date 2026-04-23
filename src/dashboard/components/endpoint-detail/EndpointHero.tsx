@@ -9,7 +9,8 @@ import { memo, useState } from "react";
 import { Button, cn } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import type { ApiEndpoint } from "../../types/api";
-import { latencyColor, timeAgo } from "../../utils/format";
+import { latencyColor } from "../../utils/format";
+import { useFormat } from "../../hooks/useFormat";
 
 type HeroStatus = "healthy" | "degraded" | "down" | "paused";
 
@@ -74,6 +75,7 @@ function EndpointHeroBase({
   pausing,
   runningNow,
 }: EndpointHeroProps) {
+  const fmt = useFormat();
   const meta = statusMeta[status];
   const [copied, setCopied] = useState(false);
 
@@ -177,7 +179,7 @@ function EndpointHeroBase({
               <Icon icon="solar:history-outline" width={13} />
               last check{" "}
               <b className="font-semibold text-foreground">
-                {timeAgo(endpoint.lastCheckAt)}
+                {fmt.relative(endpoint.lastCheckAt)}
               </b>
             </span>
           )}

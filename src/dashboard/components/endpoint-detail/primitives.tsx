@@ -4,7 +4,7 @@
  * filter bars, dropdowns, and rainbow placeholders read the same across the
  * dashboard.
  */
-import { memo, useRef, type ReactNode } from "react";
+import { memo, useMemo, useRef, type ReactNode } from "react";
 import {
   DateRangePicker,
   Dropdown,
@@ -19,6 +19,9 @@ import type { Selection } from "@heroui/react";
 import type { DateValue, RangeValue, TimeValue } from "react-aria-components";
 import { getLocalTimeZone, Time, today } from "@internationalized/date";
 import { Icon } from "@iconify/react";
+import { useFormat } from "../../hooks/useFormat";
+import { formatDateShort, formatHour } from "../../utils/time";
+import type { Preferences } from "../../context/PreferencesContext";
 
 // ---------------------------------------------------------------------------
 // Segmented toggle — matches IncidentsTable's filter-bar toggles exactly.
@@ -124,9 +127,15 @@ export function FilterDropdown<T extends string>({
   fullWidth = false,
 }: FilterDropdownProps<T>) {
   const current = options.find((o) => o.id === value) ?? options[0];
+  // Memoise the Set / style object so HeroUI (react-aria underneath) doesn't
+  // treat a fresh reference as a prop change on every render — that was
+  // bouncing the internal collection store into an infinite setProps loop
+  // when parent state updates happened to cascade through this dropdown.
+  const selectedKeys = useMemo(() => new Set<string>([value]), [value]);
+  const popoverStyle = useMemo(() => ({ minWidth }), [minWidth]);
   return (
-    <Dropdown className={cn(fullWidth && "w-full")}>
-      <Dropdown.Trigger className={cn(fullWidth && "w-full")}>
+    <Dropdown className={fullWidth ? "w-full" : undefined}>
+      <Dropdown.Trigger className={fullWidth ? "w-full" : undefined}>
         <div
           role="button"
           tabIndex={0}
@@ -150,10 +159,10 @@ export function FilterDropdown<T extends string>({
           />
         </div>
       </Dropdown.Trigger>
-      <Dropdown.Popover placement="bottom start" style={{ minWidth }}>
+      <Dropdown.Popover placement="bottom start" style={popoverStyle}>
         <Dropdown.Menu
           selectionMode="single"
-          selectedKeys={new Set([value])}
+          selectedKeys={selectedKeys}
           onSelectionChange={(keys: Selection) => {
             const sel = [...keys][0];
             if (sel != null) onChange(String(sel) as T);
@@ -249,18 +258,10 @@ function isEndOfDay(d: DateValue): boolean {
   return d.hour === 23 && d.minute === 59;
 }
 
-function formatRangeLabel(v: RangeValue<DateValue>): string {
+function formatRangeLabel(v: RangeValue<DateValue>, prefs: Preferences): string {
   const tz = getLocalTimeZone();
-  const fmtDate = (d: DateValue) =>
-    d.toDate(tz).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
-  const fmtTime = (d: DateValue) =>
-    d.toDate(tz).toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    });
+  const fmtDate = (d: DateValue) => formatDateShort(d.toDate(tz), prefs);
+  const fmtTime = (d: DateValue) => formatHour(d.toDate(tz), prefs);
   // Hide times only when the range still reads as "full-day" on both ends
   // (start at 00:00, end at 23:59 or 00:00). Any user-set time surfaces in
   // the label so the filter state is self-describing.
@@ -279,8 +280,9 @@ export function DateRangeFilter({
   placeholder = "Custom range",
 }: DateRangeFilterProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const { prefs } = useFormat();
   const hasValue = value != null;
-  const label = hasValue ? formatRangeLabel(value) : placeholder;
+  const label = hasValue ? formatRangeLabel(value, prefs) : placeholder;
   const maxValue = today(getLocalTimeZone());
   const handleChange = (next: RangeValue<DateValue> | null) => {
     if (!next) {

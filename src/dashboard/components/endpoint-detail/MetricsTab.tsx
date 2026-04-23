@@ -35,7 +35,9 @@ import type {
   DailySummary,
   HourlySummary,
 } from "../../types/api";
-import { formatHour } from "../../utils/format";
+import { formatDateShort, formatHour } from "../../utils/time";
+import type { Preferences } from "../../context/PreferencesContext";
+import { useFormat } from "../../hooks/useFormat";
 import type { IncidentRange } from "../../utils/format";
 import ForegroundReferenceArea from "../ForegroundReferenceArea";
 import { Segmented, SectionHead } from "./primitives";
@@ -152,17 +154,14 @@ function formatMs(v: number): string {
   return `${v}`;
 }
 
-function rawChecksToPoints(checks: ApiCheck[]): ChartPoint[] {
+function rawChecksToPoints(checks: ApiCheck[], prefs: Preferences): ChartPoint[] {
   return [...checks]
     .sort(
       (a, b) =>
         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     )
     .map((c) => ({
-      label: new Date(c.timestamp).toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      label: formatHour(c.timestamp, prefs),
       ts: new Date(c.timestamp).getTime(),
       spanMs: 60_000,
       avg: c.responseTime,
@@ -173,11 +172,11 @@ function rawChecksToPoints(checks: ApiCheck[]): ChartPoint[] {
     }));
 }
 
-function hourlyToPoints(hourly: HourlySummary[]): ChartPoint[] {
+function hourlyToPoints(hourly: HourlySummary[], prefs: Preferences): ChartPoint[] {
   return [...hourly]
     .sort((a, b) => new Date(a.hour).getTime() - new Date(b.hour).getTime())
     .map((h) => ({
-      label: formatHour(h.hour),
+      label: formatHour(h.hour, prefs),
       ts: new Date(h.hour).getTime(),
       spanMs: 3_600_000,
       avg: h.avgResponseTime,
@@ -194,6 +193,7 @@ function hourlyToPoints(hourly: HourlySummary[]): ChartPoint[] {
 function dailyToPoints(
   daily: DailySummary[],
   hourlies: HourlySummary[],
+  prefs: Preferences,
 ): ChartPoint[] {
   return [...daily]
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
@@ -210,10 +210,7 @@ function dailyToPoints(
         }
       }
       return {
-        label: new Date(d.date).toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-        }),
+        label: formatDateShort(d.date, prefs),
         ts: dayStart,
         spanMs: 86_400_000,
         avg: d.avgResponseTime,
@@ -226,17 +223,14 @@ function dailyToPoints(
 }
 
 
-function rawChecksToRatePoints(checks: ApiCheck[]): PassRatePoint[] {
+function rawChecksToRatePoints(checks: ApiCheck[], prefs: Preferences): PassRatePoint[] {
   return [...checks]
     .sort(
       (a, b) =>
         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     )
     .map((c) => ({
-      label: new Date(c.timestamp).toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      label: formatHour(c.timestamp, prefs),
       passRate: c.status === "healthy" ? 100 : c.status === "degraded" ? 50 : 0,
       total: 1,
       success: c.status === "healthy" ? 1 : 0,
@@ -248,11 +242,11 @@ function rawChecksToRatePoints(checks: ApiCheck[]): PassRatePoint[] {
     }));
 }
 
-function hourlyToRatePoints(hourly: HourlySummary[]): PassRatePoint[] {
+function hourlyToRatePoints(hourly: HourlySummary[], prefs: Preferences): PassRatePoint[] {
   return [...hourly]
     .sort((a, b) => new Date(a.hour).getTime() - new Date(b.hour).getTime())
     .map((h) => ({
-      label: formatHour(h.hour),
+      label: formatHour(h.hour, prefs),
       passRate: h.uptimePercent,
       total: h.totalChecks,
       success: h.successCount,
@@ -263,7 +257,7 @@ function hourlyToRatePoints(hourly: HourlySummary[]): PassRatePoint[] {
     }));
 }
 
-function dailyToRatePoints(daily: DailySummary[]): PassRatePoint[] {
+function dailyToRatePoints(daily: DailySummary[], prefs: Preferences): PassRatePoint[] {
   return [...daily]
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .map((d) => {
@@ -273,10 +267,7 @@ function dailyToRatePoints(daily: DailySummary[]): PassRatePoint[] {
       const success = Math.round((d.uptimePercent / 100) * d.totalChecks);
       const fail = Math.max(0, d.totalChecks - success);
       return {
-        label: new Date(d.date).toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-        }),
+        label: formatDateShort(d.date, prefs),
         passRate: d.uptimePercent,
         total: d.totalChecks,
         success,
@@ -302,6 +293,7 @@ function MetricsTabBase({
   incidents,
 }: Props) {
   const { request } = useApi();
+  const { prefs } = useFormat();
   const [rangeChecks, setRangeChecks] = useState<ApiCheck[]>([]);
   const [rangeHourly, setRangeHourly] = useState<HourlySummary[]>([]);
   const [rangeDaily, setRangeDaily] = useState<DailySummary[]>([]);
@@ -421,14 +413,14 @@ function MetricsTabBase({
   // areas. 24h at one-check-per-minute is ~1440 points, comfortably within
   // recharts' render budget.
   const rtData = useMemo<ChartPoint[]>(() => {
-    if (range === "1h" || range === "24h") return rawChecksToPoints(rangeChecks);
+    if (range === "1h" || range === "24h") return rawChecksToPoints(rangeChecks, prefs);
     if (range === "7d") {
-      const pts = dailyToPoints(rangeDaily, rangeHourly);
+      const pts = dailyToPoints(rangeDaily, rangeHourly, prefs);
       if (pts.length >= 3) return pts;
-      return hourlyToPoints(rangeHourly);
+      return hourlyToPoints(rangeHourly, prefs);
     }
-    return dailyToPoints(rangeDaily, rangeHourly);
-  }, [range, rangeChecks, rangeHourly, rangeDaily]);
+    return dailyToPoints(rangeDaily, rangeHourly, prefs);
+  }, [range, rangeChecks, rangeHourly, rangeDaily, prefs]);
 
   // ── Incident overlays on the RT chart ──────────────────────────────────
   // Severity per bucket is folded from three sources:
@@ -625,19 +617,19 @@ function MetricsTabBase({
   // Mirrors rtData's source selection but pulls from success/fail counts so
   // the tooltip can show pass/total, not just the rate.
   const passRateData = useMemo<PassRatePoint[]>(() => {
-    if (range === "1h") return rawChecksToRatePoints(rangeChecks);
+    if (range === "1h") return rawChecksToRatePoints(rangeChecks, prefs);
     if (range === "24h") {
-      const pts = hourlyToRatePoints(rangeHourly);
+      const pts = hourlyToRatePoints(rangeHourly, prefs);
       if (pts.length >= 4) return pts;
-      return rawChecksToRatePoints(rangeChecks);
+      return rawChecksToRatePoints(rangeChecks, prefs);
     }
     if (range === "7d") {
-      const pts = dailyToRatePoints(rangeDaily);
+      const pts = dailyToRatePoints(rangeDaily, prefs);
       if (pts.length >= 3) return pts;
-      return hourlyToRatePoints(rangeHourly);
+      return hourlyToRatePoints(rangeHourly, prefs);
     }
-    return dailyToRatePoints(rangeDaily);
-  }, [range, rangeChecks, rangeHourly, rangeDaily]);
+    return dailyToRatePoints(rangeDaily, prefs);
+  }, [range, rangeChecks, rangeHourly, rangeDaily, prefs]);
 
   // Zoom the Y domain when all points are high so sub-percent dips remain
   // visible instead of flattening against the top. The per-check stairstep

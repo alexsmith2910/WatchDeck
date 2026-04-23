@@ -21,6 +21,7 @@ import type {
 import { formatDuration } from "../../utils/format";
 import { WideSpark } from "../health/HealthCharts";
 import { useSlo } from "../../hooks/useSlo";
+import { useFormat } from "../../hooks/useFormat";
 import { Icon } from "@iconify/react";
 
 type Tone = "primary" | "success" | "warning" | "danger" | "muted";
@@ -81,11 +82,6 @@ function sortedHourly(hourly: HourlySummary[]): HourlySummary[] {
     .slice(-24);
 }
 
-function hourLabels(hourly: HourlySummary[]): string[] {
-  return hourly.map((h) =>
-    new Date(h.hour).toLocaleTimeString(undefined, { hour: "2-digit" }),
-  );
-}
 
 function EndpointKpiStripBase({
   endpoint,
@@ -96,10 +92,14 @@ function EndpointKpiStripBase({
   incidents,
 }: Props) {
   const { slo } = useSlo();
+  const fmt = useFormat();
   const liveStatus = latestCheck?.status ?? endpoint.lastStatus ?? "healthy";
 
   const sortedHr = useMemo(() => sortedHourly(hourly24h), [hourly24h]);
-  const sparkLabels = useMemo(() => hourLabels(sortedHr), [sortedHr]);
+  const sparkLabels = useMemo(
+    () => sortedHr.map((h) => fmt.hour(h.hour)),
+    [sortedHr, fmt],
+  );
   const successSpark = useMemo(() => sortedHr.map((h) => h.uptimePercent), [sortedHr]);
 
   // ── Response time · 1h — avg + per-check spark from last-hour raw checks ─
@@ -116,14 +116,8 @@ function EndpointKpiStripBase({
     [lastHourSorted],
   );
   const rtSparkLabels = useMemo(
-    () =>
-      lastHourSorted.map((c) =>
-        new Date(c.timestamp).toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      ),
-    [lastHourSorted],
+    () => lastHourSorted.map((c) => fmt.hour(c.timestamp)),
+    [lastHourSorted, fmt],
   );
   const avg1hLatency = useMemo(() => {
     if (lastHourSorted.length === 0) return null;
@@ -204,14 +198,8 @@ function EndpointKpiStripBase({
   }, [sortedDaily, incidents, slo.windowDays, budgetAllowableSecs]);
 
   const budgetSparkLabels = useMemo(
-    () =>
-      sortedDaily.map((d) =>
-        new Date(d.date).toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-        }),
-      ),
-    [sortedDaily],
+    () => sortedDaily.map((d) => fmt.dateShort(d.date)),
+    [sortedDaily, fmt],
   );
 
   const downtimeTone: Tone =
@@ -262,9 +250,9 @@ function EndpointKpiStripBase({
     return {
       active: false,
       value: formatDuration(secs),
-      sub: `since ${new Date(resolved[0].resolvedAt!).toLocaleDateString()}`,
+      sub: `since ${fmt.date(resolved[0].resolvedAt!)}`,
     };
-  }, [incidents]);
+  }, [incidents, fmt]);
 
   const sslDays = latestCheck?.sslDaysRemaining ?? null;
   const sslTone: Tone =

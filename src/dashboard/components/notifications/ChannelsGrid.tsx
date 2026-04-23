@@ -18,6 +18,7 @@ import {
 } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { useApi } from '../../hooks/useApi'
+import { useFormat } from '../../hooks/useFormat'
 import { toast } from '../../ui/toast'
 import { WideSpark } from '../health/HealthCharts'
 import type {
@@ -86,6 +87,7 @@ const STATUS_STYLE: Record<ChannelUiStatus, { label: string; chip: string; card:
 }
 
 export function ChannelsGrid({ channels, stats, recentLog, onChanged, onFilterByChannel }: Props) {
+  const fmt = useFormat()
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<ApiChannel | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ApiChannel | null>(null)
@@ -107,10 +109,9 @@ export function ChannelsGrid({ channels, stats, recentLog, onChanged, onFilterBy
     const bucketCount = 24
     const step = windowMs / bucketCount
     const start = Date.now() - windowMs
-    return Array.from({ length: bucketCount }, (_, i) =>
-      new Date(start + i * step).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
-    )
-  }, [recentLog])
+    return Array.from({ length: bucketCount }, (_, i) => fmt.hour(start + i * step))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recentLog, fmt])
 
   if (channels.length === 0) {
     return (

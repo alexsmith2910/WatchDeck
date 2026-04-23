@@ -18,6 +18,7 @@ import type {
   ApiScheduledEscalation,
 } from '../../types/notifications'
 import { bucketLog, medianLatency } from './notificationHelpers'
+import { useFormat } from '../../hooks/useFormat'
 
 interface Props {
   stats: ApiNotificationStats | null
@@ -59,9 +60,10 @@ function deltaClass(tone: Tone): string {
 }
 
 export function NotificationKpis({ stats, recentLog, escalations }: Props) {
+  const { prefs } = useFormat()
   // Single bucketLog call — all three sparks share the same 24h × 24-bucket window.
   const sparks = useMemo(() => {
-    const buckets = bucketLog(recentLog, 24 * 60 * 60 * 1000, 24)
+    const buckets = bucketLog(recentLog, 24 * 60 * 60 * 1000, 24, prefs)
     const labels = buckets.map((b) => b.label)
     const throughput = buckets.map((b) => b.slack + b.discord + b.email + b.webhook)
     const latency = buckets.map((b) => b.p50 ?? 0)
@@ -71,7 +73,7 @@ export function NotificationKpis({ stats, recentLog, escalations }: Props) {
       return total === 0 ? 100 : (good / total) * 100
     })
     return { labels, throughput, latency, success }
-  }, [recentLog])
+  }, [recentLog, prefs])
 
   const sent = stats?.sent ?? 0
   const failed = stats?.failed ?? 0
