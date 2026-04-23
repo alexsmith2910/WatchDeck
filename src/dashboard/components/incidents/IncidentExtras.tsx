@@ -197,11 +197,15 @@ function CardHeader({
 }
 
 // ---------------------------------------------------------------------------
-// Volume chart — 14-day stacked severity bars
+// Volume chart — stacked severity bars, one per day in the stats window
 // ---------------------------------------------------------------------------
 
 function VolumeChart({ stats }: { stats: IncidentStats | null }) {
-  const days = useMemo(() => volumeDaysFromStats(stats, 14), [stats])
+  const windowDays = stats?.byDay.length ?? 0
+  const days = useMemo(
+    () => volumeDaysFromStats(stats, windowDays || 14),
+    [stats, windowDays],
+  )
   const max = Math.max(1, ...days.map((d) => d.total))
   const [hover, setHover] = useState<{ day: VolumeDay; rect: DOMRect } | null>(null)
 
@@ -217,7 +221,7 @@ function VolumeChart({ stats }: { stats: IncidentStats | null }) {
     <div className="rounded-xl border border-wd-border/50 bg-wd-surface p-4 flex flex-col gap-3 min-h-[280px]">
       <CardHeader
         title="Incident Volume"
-        subtitle="Last 14 days · stacked by severity"
+        subtitle={`Last ${windowDays || 14} days · stacked by severity`}
         icon="solar:chart-square-linear"
         tileClass="bg-wd-primary/15 text-wd-primary"
         right={
