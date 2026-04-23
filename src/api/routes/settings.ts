@@ -27,6 +27,7 @@ const OVERRIDABLE_FIELDS = [
   'escalationDelay',
   'escalationChannelId',
   'notificationChannelIds',
+  'assertions',
 ] as const
 
 // Narrow the shared mutable-field schema down to the fields this route accepts,

@@ -1,4 +1,5 @@
 import type {
+  AssertionEvalResult,
   EndpointDoc,
   IncidentDoc,
   NotificationKind,
@@ -45,6 +46,7 @@ export interface EventMap {
     sslIssuer: { o?: string; cn?: string } | null
     bodyBytes: number | null
     bodyBytesTruncated: boolean
+    assertionResult: AssertionEvalResult | null
   }
 
   // -------------------------------------------------------------------------

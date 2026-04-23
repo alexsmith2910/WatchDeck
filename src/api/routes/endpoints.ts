@@ -17,10 +17,13 @@ import { eventBus } from '../../core/eventBus.js'
 import { formatError, type ValidationError } from '../../utils/errors.js'
 import { parsePagination, toEnvelope } from '../utils/pagination.js'
 import type { AppContext } from '../server.js'
-import type { EndpointDoc } from '../../storage/types.js'
+import type { Assertion, EndpointDoc } from '../../storage/types.js'
 import type { EventMap } from '../../core/eventTypes.js'
 import { runHttpCheck } from '../../checks/httpCheck.js'
 import { runPortCheck } from '../../checks/portCheck.js'
+import { evaluateStatus } from '../../checks/evaluators/statusEval.js'
+import { evaluateAssertions } from '../../checks/evaluators/assertionsEval.js'
+import { evaluateSsl } from '../../checks/evaluators/sslEval.js'
 
 // ---------------------------------------------------------------------------
 // Body schemas (POST create, PUT update)
@@ -52,7 +55,29 @@ export const mutableFieldProps = {
     type: 'array',
     items: { type: 'integer', minimum: 100, maximum: 599 },
   },
-  bodyRules: { type: 'array' },
+  assertions: {
+    type: 'array',
+    maxItems: 10,
+    items: {
+      type: 'object',
+      required: ['kind', 'operator', 'severity'],
+      additionalProperties: false,
+      properties: {
+        kind: { type: 'string', enum: ['latency', 'body', 'header', 'json', 'ssl'] },
+        operator: {
+          type: 'string',
+          enum: [
+            'lt', 'lte', 'gt', 'gte', 'eq', 'neq',
+            'contains', 'not_contains', 'equals',
+            'exists', 'not_exists',
+          ],
+        },
+        severity: { type: 'string', enum: ['down', 'degraded'] },
+        target: { type: 'string', maxLength: 256 },
+        value: { type: 'string', maxLength: 1000 },
+      },
+    },
+  },
   // Port
   host: { type: 'string', minLength: 1 },
   port: { type: 'integer', minimum: 1, maximum: 65535 },
@@ -106,6 +131,17 @@ const createBodySchema = {
     type: { type: 'string', enum: ['http', 'port'] },
   },
   additionalProperties: false,
+} as const
+
+// Body schema for POST /endpoints/:id/test-assertions — optionally accepts a
+// draft assertions array so the dashboard can test unsaved edits without a
+// round-trip through Save first.
+const testAssertionsBodySchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    assertions: mutableFieldProps.assertions,
+  },
 } as const
 
 const updateBodySchema = {
@@ -290,7 +326,7 @@ export function endpointsRoutes(ctx: AppContext) {
         endpointData.headers = (body.headers as Record<string, string>) ?? {}
         endpointData.expectedStatusCodes =
           (body.expectedStatusCodes as number[] | undefined) ?? cfg.expectedStatusCodes
-        if (body.bodyRules) endpointData.bodyRules = body.bodyRules as EndpointDoc['bodyRules']
+        if (body.assertions) endpointData.assertions = body.assertions as EndpointDoc['assertions']
       } else {
         endpointData.host = body.host as string
         endpointData.port = body.port as number
@@ -577,6 +613,106 @@ export function endpointsRoutes(ctx: AppContext) {
 
       return reply.code(400).send(formatError('INVALID_TYPE', 'type must be http or port'))
     })
+
+    // ── POST /endpoints/:id/test-assertions ───────────────────────────────────
+    // Runs the endpoint's probe + evaluator once against the supplied (or
+    // saved) assertions and returns the result. Does NOT emit check:complete,
+    // does NOT persist to mx_checks — so the user can iterate on draft rules
+    // without polluting the real check history.
+    fastify.post(
+      '/endpoints/:id/test-assertions',
+      { schema: { body: testAssertionsBodySchema } },
+      async (request, reply) => {
+        const { id } = request.params as { id: string }
+        if (!ObjectId.isValid(id)) {
+          return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
+        }
+        const endpoint = await ctx.adapter.getEndpointById(id)
+        if (!endpoint) {
+          return reply.code(404).send(formatError('NOT_FOUND', `Endpoint ${id} not found`))
+        }
+        if (endpoint.type !== 'http') {
+          return reply.code(400).send(
+            formatError('HTTP_ONLY', 'Assertions are only supported on HTTP endpoints'),
+          )
+        }
+
+        const body = (request.body as { assertions?: Assertion[] } | undefined) ?? {}
+        const assertions = body.assertions ?? endpoint.assertions ?? []
+        const isHttps = (endpoint.url ?? '').startsWith('https://')
+
+        // Mirror the scheduler's invocation exactly so the test produces the
+        // same data a real check would — otherwise users would see "works in
+        // test, fails in production" drift.
+        const probe = await runHttpCheck({
+          url: endpoint.url!,
+          method: endpoint.method ?? 'GET',
+          headers: endpoint.headers ?? {},
+          timeout: endpoint.timeout,
+          captureSsl: isHttps && ctx.config.modules.sslChecks,
+          captureBodySize: ctx.config.captureBodySize,
+          maxBodyBytesToRead: ctx.config.maxBodyBytesToRead,
+        })
+
+        const hasLatencyAssertion = assertions.some((r) => r.kind === 'latency')
+        const hasSslAssertion = assertions.some((r) => r.kind === 'ssl')
+
+        const base = evaluateStatus({
+          type: 'http',
+          statusCode: probe.statusCode,
+          responseTime: probe.responseTime,
+          errorMessage: probe.errorMessage,
+          expectedStatusCodes: endpoint.expectedStatusCodes ?? [200],
+          latencyThreshold: endpoint.latencyThreshold,
+          skipLatencyCheck: hasLatencyAssertion,
+        })
+
+        // Mirror the checkRunner: SSL warning can upgrade healthy → degraded
+        // when no SSL assertion is overriding. Keeps Test output consistent
+        // with what a real scheduled check would produce.
+        let baseStatus = base.status
+        let baseReason = base.statusReason
+        if (baseStatus === 'healthy' && !hasSslAssertion) {
+          const sslEval_ = evaluateSsl({
+            sslDaysRemaining: probe.sslDaysRemaining,
+            sslWarningDays: endpoint.sslWarningDays,
+          })
+          if (sslEval_.status === 'degraded') {
+            baseStatus = 'degraded'
+            baseReason = sslEval_.statusReason
+          }
+        }
+
+        const assertionResult =
+          baseStatus !== 'down' && assertions.length > 0
+            ? evaluateAssertions({
+                assertions,
+                body: probe.body,
+                headers: probe.headers,
+                responseTime: probe.responseTime,
+                sslDaysRemaining: probe.sslDaysRemaining,
+                isHttps,
+              })
+            : null
+
+        return reply.send({
+          data: {
+            baseStatus,
+            baseReason,
+            probe: {
+              statusCode: probe.statusCode,
+              responseTime: probe.responseTime,
+              errorMessage: probe.errorMessage,
+              contentType: probe.headers?.['content-type'] ?? null,
+              bodyBytes: probe.bodyBytes,
+              bodyBytesTruncated: probe.bodyBytesTruncated,
+              sslDaysRemaining: probe.sslDaysRemaining,
+            },
+            assertionResult,
+          },
+        })
+      },
+    )
   }
 }
 

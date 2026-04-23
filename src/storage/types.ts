@@ -41,29 +41,66 @@ export interface CheckWritePayload {
   sslDaysRemaining: number | null
   bodyBytes?: number | null
   bodyBytesTruncated?: boolean
+  assertionResult?: AssertionEvalResult
 }
 
 // ---------------------------------------------------------------------------
 // Shared sub-types
 // ---------------------------------------------------------------------------
 
-export interface BodyRule {
-  type: 'contains' | 'not_contains' | 'json_path'
-  value: string
-  /** JSONPath expression — only used when type is json_path */
-  path?: string
-  /** Expected value for json_path comparisons */
-  expected?: unknown
+/**
+ * Per-endpoint assertion rule. Configured in the dashboard's Assertions tab,
+ * evaluated by `assertionsEval.ts` after the status-code gate. See that file
+ * for operator semantics and the kind → operator matrix.
+ */
+export type AssertionKind = 'latency' | 'body' | 'header' | 'json' | 'ssl'
+
+export type AssertionOperator =
+  | 'lt'
+  | 'lte'
+  | 'gt'
+  | 'gte'
+  | 'eq'
+  | 'neq'
+  | 'contains'
+  | 'not_contains'
+  | 'equals'
+  | 'exists'
+  | 'not_exists'
+
+export type AssertionSeverity = 'down' | 'degraded'
+
+export interface Assertion {
+  kind: AssertionKind
+  operator: AssertionOperator
+  /** Header name (kind=header) or dotted JSON path (kind=json). */
+  target?: string
+  /** Comparison value as a string. Omitted for exists / not_exists. */
+  value?: string
+  severity: AssertionSeverity
 }
 
-export interface BodyValidationResult {
+export interface AssertionResult {
+  /** Position of this rule in endpoint.assertions at evaluation time. */
+  index: number
+  kind: AssertionKind
+  operator: AssertionOperator
+  target?: string
+  value?: string
+  severity: AssertionSeverity
   passed: boolean
-  results: Array<{
-    rule: BodyRule
-    passed: boolean
-    actual?: unknown
-    error?: string
-  }>
+  /** The value the rule was compared against, coerced for display. */
+  actual?: unknown
+  /** Populated when the rule couldn't evaluate cleanly (body not JSON, etc). */
+  error?: string
+}
+
+export interface AssertionEvalResult {
+  /** True only when every rule passed. */
+  passed: boolean
+  /** Worst severity among failed rules, null when all passed. */
+  failedSeverity: AssertionSeverity | null
+  results: AssertionResult[]
 }
 
 export interface MaintenanceWindow {
@@ -86,6 +123,8 @@ export interface IncidentTimelineEvent {
 export interface EndpointDoc {
   _id: ObjectId
   name: string
+  /** Free-text notes. Shown on the General tab. Not used by any evaluator. */
+  description?: string
   type: 'http' | 'port'
 
   // HTTP fields
@@ -93,7 +132,8 @@ export interface EndpointDoc {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD'
   headers?: Record<string, string>
   expectedStatusCodes?: number[]
-  bodyRules?: BodyRule[]
+  /** Ordered list of extra checks run after the status-code gate. Max 10 per endpoint. */
+  assertions?: Assertion[]
 
   // Port fields
   host?: string
@@ -155,7 +195,7 @@ export interface CheckDoc {
   bodyBytes?: number
   /** True when the body read was capped at `config.maxBodyBytesToRead`. */
   bodyBytesTruncated?: boolean
-  bodyValidation?: BodyValidationResult
+  assertionResult?: AssertionEvalResult
 
   // Port-specific
   portOpen?: boolean

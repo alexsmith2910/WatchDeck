@@ -126,6 +126,7 @@ export class BufferPipeline {
       sslDaysRemaining: payload.sslDaysRemaining,
       bodyBytes: payload.bodyBytes,
       bodyBytesTruncated: payload.bodyBytesTruncated,
+      ...(payload.assertionResult ? { assertionResult: payload.assertionResult } : {}),
     }
 
     // Happy path: DB connected and we are not actively draining.

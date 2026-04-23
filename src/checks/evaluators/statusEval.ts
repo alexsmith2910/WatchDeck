@@ -7,6 +7,8 @@
  *   2. Port check: not open → down
  *   3. HTTP: status code not in expectedStatusCodes → down
  *   4. Response time exceeds latencyThreshold → degraded
+ *      (skipped when `skipLatencyCheck` is true — the endpoint has a
+ *      latency assertion that fully supersedes this check)
  *   5. Otherwise → healthy
  */
 
@@ -17,6 +19,13 @@ export interface StatusEvalInput {
   errorMessage: string | null
   expectedStatusCodes: number[]
   latencyThreshold: number
+  /**
+   * When true, bypass the latency-threshold branch. The caller (checkRunner)
+   * sets this when the endpoint has a `kind: 'latency'` assertion configured,
+   * so the user's explicit rule is the single source of truth for latency
+   * outcomes instead of two overlapping signals at the same severity.
+   */
+  skipLatencyCheck?: boolean
   /** Set for port checks */
   portOpen?: boolean
 }
@@ -42,7 +51,7 @@ export function evaluateStatus(input: StatusEvalInput): StatusEvalResult {
         statusReason: input.errorMessage ?? 'Port connection refused',
       }
     }
-    // Rule 4: latency
+    // Rule 4: latency (port checks never have assertions, so always applies)
     if (input.responseTime > input.latencyThreshold) {
       return {
         status: 'degraded',
@@ -60,8 +69,8 @@ export function evaluateStatus(input: StatusEvalInput): StatusEvalResult {
     }
   }
 
-  // Rule 4: latency
-  if (input.responseTime > input.latencyThreshold) {
+  // Rule 4: latency — skipped when a latency assertion supersedes this check.
+  if (!input.skipLatencyCheck && input.responseTime > input.latencyThreshold) {
     return {
       status: 'degraded',
       statusReason: `${input.responseTime}ms exceeds ${input.latencyThreshold}ms threshold`,

@@ -25,6 +25,11 @@ export interface HttpCheckResult {
   bodyBytes: number | null
   /** True when the body read was cut off at `maxBodyBytesToRead`. */
   bodyBytesTruncated: boolean
+  /**
+   * Response headers with lowercase keys. Multi-value headers are joined with
+   * `, ` (HTTP multi-header semantics). Null when the request never completed.
+   */
+  headers: Record<string, string> | null
   sslDaysRemaining: number | null
   sslIssuer: SslIssuer | null
   errorMessage: string | null
@@ -69,6 +74,7 @@ export async function runHttpCheck(params: {
       body: null,
       bodyBytes: null,
       bodyBytesTruncated: false,
+      headers: null,
       sslDaysRemaining: null,
       sslIssuer: null,
       errorMessage: `Invalid URL: ${url}`,
@@ -154,6 +160,7 @@ export async function runHttpCheck(params: {
         body: read.body,
         bodyBytes: read.bodyBytes,
         bodyBytesTruncated: read.truncated,
+        headers: normalizeHeaders(response.headers),
         sslDaysRemaining,
         sslIssuer,
         errorMessage: null,
@@ -166,6 +173,7 @@ export async function runHttpCheck(params: {
         body: null,
         bodyBytes: null,
         bodyBytesTruncated: false,
+        headers: null,
         sslDaysRemaining,
         sslIssuer,
         errorMessage: err instanceof Error ? err.message : String(err),
@@ -199,6 +207,7 @@ export async function runHttpCheck(params: {
       body: read.body,
       bodyBytes: read.bodyBytes,
       bodyBytesTruncated: read.truncated,
+      headers: normalizeHeaders(response.headers),
       sslDaysRemaining: null,
       sslIssuer: null,
       errorMessage: null,
@@ -211,6 +220,7 @@ export async function runHttpCheck(params: {
       body: null,
       bodyBytes: null,
       bodyBytesTruncated: false,
+      headers: null,
       sslDaysRemaining: null,
       sslIssuer: null,
       errorMessage: err instanceof Error ? err.message : String(err),
@@ -229,37 +239,25 @@ interface ReadResult {
 }
 
 /**
- * Read the response body into a string and optionally count bytes.
+ * Read the response body into a string and count bytes as we go.
  *
- * Prefers a trusted Content-Length header when body-size capture is on, so
- * HEAD requests and large GETs can skip the read entirely. When the header is
- * absent or untrusted, streams chunks up to `maxBodyBytesToRead` and counts
- * bytes as it goes.
+ * Always streams the body (up to `maxBodyBytesToRead`) rather than short-
+ * circuiting on Content-Length, because assertion rules need the decoded
+ * text — skipping the read would make body / json / header assertions fail
+ * with "Response body not captured" on any well-behaved server that sends
+ * Content-Length.
+ *
+ * HEAD is the one case where there's genuinely no body; we return early.
  */
 async function readBodyWithMeta(
-  stream: AsyncIterable<Uint8Array> & { text(): Promise<string> },
-  headers: Record<string, string | string[] | undefined>,
+  stream: AsyncIterable<Uint8Array>,
+  _headers: Record<string, string | string[] | undefined>,
   opts: { captureBodySize: boolean; maxBodyBytesToRead: number; isHead: boolean },
 ): Promise<ReadResult> {
-  // HEAD — no body to read.
   if (opts.isHead) {
     return { body: null, bodyBytes: opts.captureBodySize ? 0 : null, truncated: false }
   }
 
-  // Cheap path: trusted Content-Length + no string body needed.
-  if (opts.captureBodySize) {
-    const cl = headerValue(headers['content-length'])
-    const parsed = cl !== undefined ? Number.parseInt(cl, 10) : NaN
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      // Drain the stream in the background — can't return without consuming.
-      try {
-        for await (const _ of stream) { /* drop */ }
-      } catch { /* ignore */ }
-      return { body: null, bodyBytes: parsed, truncated: false }
-    }
-  }
-
-  // Streaming read with optional cap.
   try {
     const chunks: Uint8Array[] = []
     let bytes = 0
@@ -267,7 +265,7 @@ async function readBodyWithMeta(
     const cap = opts.maxBodyBytesToRead
     for await (const chunk of stream) {
       const part = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk as ArrayBufferLike)
-      if (opts.captureBodySize && bytes + part.byteLength > cap) {
+      if (bytes + part.byteLength > cap) {
         const remaining = cap - bytes
         if (remaining > 0) {
           chunks.push(part.subarray(0, remaining))
@@ -290,7 +288,20 @@ async function readBodyWithMeta(
   }
 }
 
-function headerValue(v: string | string[] | undefined): string | undefined {
-  if (v === undefined) return undefined
-  return Array.isArray(v) ? v[0] : v
+/**
+ * Lowercase-key, comma-joined view of undici's headers map.
+ *
+ * undici delivers header values as `string | string[] | undefined` depending
+ * on whether the wire repeated the header. Assertion evaluators want a flat
+ * `Record<string, string>` with canonical casing, so we normalize once here.
+ */
+function normalizeHeaders(
+  raw: Record<string, string | string[] | undefined>,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (value === undefined) continue
+    out[key.toLowerCase()] = Array.isArray(value) ? value.join(', ') : value
+  }
+  return out
 }
