@@ -20,6 +20,7 @@ import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { useApi } from "../hooks/useApi";
 import { useSSE } from "../hooks/useSSE";
+import { useFormat } from "../hooks/useFormat";
 import { Segmented } from "../components/endpoint-detail/primitives";
 import { NotificationKpis } from "../components/notifications/NotificationKpis";
 import { DeliveryBanner } from "../components/notifications/DeliveryBanner";
@@ -83,6 +84,7 @@ function formatUpdatedAgo(sec: number): string {
 export default function NotificationsPage() {
   const { request } = useApi();
   const { subscribe } = useSSE();
+  const { prefs: userPrefs } = useFormat();
 
   const [channels, setChannels] = useState<ApiChannel[]>([]);
   const [stats, setStats] = useState<ApiNotificationStats | null>(null);
@@ -251,8 +253,8 @@ export default function NotificationsPage() {
     [channels, byChannelStats, p95ByChannel],
   );
   const chartBuckets = useMemo(
-    () => bucketLog(recentLog, RANGE_MS[timeRange], RANGE_BUCKETS[timeRange]),
-    [recentLog, timeRange],
+    () => bucketLog(recentLog, RANGE_MS[timeRange], RANGE_BUCKETS[timeRange], userPrefs),
+    [recentLog, timeRange, userPrefs],
   );
 
   const lastUpdatedLabel = formatUpdatedAgo(
@@ -407,14 +409,6 @@ export default function NotificationsPage() {
       />
 
       <div className="h-6" />
-
-      {/* quiet hours hint at the bottom if configured */}
-      {prefs?.globalQuietHours && (
-        <div className="sr-only">
-          Quiet hours configured: {prefs.globalQuietHours.start} –{" "}
-          {prefs.globalQuietHours.end} ({prefs.globalQuietHours.tz})
-        </div>
-      )}
     </div>
   );
 }

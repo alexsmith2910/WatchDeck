@@ -157,11 +157,9 @@ export interface ApiNotificationMute {
 
 export interface ApiNotificationPreferences {
   _id: 'global'
-  globalQuietHours?: QuietHours | null
   globalMuteUntil?: string | null
   defaultSeverityFilter: SeverityFilter
   defaultEventFilters: EventFilters
-  digestMode?: { enabled: boolean; intervalMinutes: number } | null
   lastEditedBy?: string
   updatedAt: string
 }

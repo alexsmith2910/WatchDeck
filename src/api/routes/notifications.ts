@@ -147,17 +147,6 @@ const endpointMuteSchema = {
 const updatePreferencesSchema = {
   type: 'object',
   properties: {
-    globalQuietHours: {
-      type: 'object',
-      properties: {
-        start: { type: 'string' },
-        end: { type: 'string' },
-        tz: { type: 'string' },
-      },
-      required: ['start', 'end', 'tz'],
-      additionalProperties: false,
-      nullable: true,
-    },
     globalMuteUntil: { type: 'string', nullable: true },
     defaultSeverityFilter: { type: 'string', enum: ['info+', 'warning+', 'critical'] },
     defaultEventFilters: {
@@ -167,15 +156,6 @@ const updatePreferencesSchema = {
         sendResolved: { type: 'boolean' },
         sendEscalation: { type: 'boolean' },
       },
-      additionalProperties: false,
-    },
-    digestMode: {
-      type: 'object',
-      properties: {
-        enabled: { type: 'boolean' },
-        intervalMinutes: { type: 'integer', minimum: 1, maximum: 1440 },
-      },
-      required: ['enabled', 'intervalMinutes'],
       additionalProperties: false,
     },
     lastEditedBy: { type: 'string' },
@@ -305,6 +285,11 @@ export function notificationsRoutes(ctx: AppContext) {
         const gate = moduleGate(ctx, type, body)
         if (!gate.ok) return reply.code(409).send(gate.response)
 
+        // New channels inherit the dashboard-configured severity/event filters
+        // unless the request explicitly overrides them. Lets users set the
+        // policy once in Settings → Notifications instead of per-channel.
+        const prefs = await ctx.adapter.getNotificationPreferences()
+
         const provider = ctx.notifications?.channels.getProvider(type)
         const draft = {
           type,
@@ -312,12 +297,11 @@ export function notificationsRoutes(ctx: AppContext) {
           deliveryPriority: (body.deliveryPriority as 'standard' | 'critical') ?? 'standard',
           enabled: body.enabled !== false,
           severityFilter:
-            (body.severityFilter as NotificationChannelDoc['severityFilter']) ?? 'warning+',
+            (body.severityFilter as NotificationChannelDoc['severityFilter']) ??
+            prefs.defaultSeverityFilter,
           eventFilters:
             (body.eventFilters as NotificationChannelDoc['eventFilters']) ?? {
-              sendOpen: true,
-              sendResolved: true,
-              sendEscalation: true,
+              ...prefs.defaultEventFilters,
             },
           quietHours: body.quietHours as NotificationChannelDoc['quietHours'],
           rateLimit: body.rateLimit as NotificationChannelDoc['rateLimit'],
