@@ -87,6 +87,11 @@ class MinHeap {
     return true
   }
 
+  /** Drop every entry without re-heapifying. */
+  clear(): void {
+    this.items = []
+  }
+
   // ── Private heap operations ─────────────────────────────────────────────
 
   /** Returns the final index of the element after it has risen. */
@@ -153,6 +158,13 @@ export class CheckScheduler {
   private runningPeakFrozen = 0
   private peakWindowSec = Math.floor(Date.now() / 1000)
 
+  /**
+   * Handles returned by `eventBus.subscribe()` — tracked so that `reset()`
+   * can detach before a fresh `init()` re-subscribes, avoiding duplicate
+   * listener fan-out on hard reset.
+   */
+  private unsubscribes: Array<() => void> = []
+
   constructor(
     private readonly adapter: StorageAdapter,
     private readonly config: WatchDeckConfig,
@@ -192,6 +204,29 @@ export class CheckScheduler {
       clearInterval(this.tickInterval)
       this.tickInterval = null
     }
+    for (const off of this.unsubscribes) off()
+    this.unsubscribes = []
+  }
+
+  /**
+   * Hard-reset hook — called by POST /admin/reset after the DB is wiped.
+   * Stops the tick loop, detaches every event subscription, clears all
+   * in-memory state (heap, consecutive-failure map, drift ring), then runs
+   * `init()` again so subscriptions are re-established and the (now empty)
+   * endpoint list is reloaded.
+   */
+  async reset(): Promise<void> {
+    this.stop()
+    this.heap.clear()
+    this.consecutiveFailures.clear()
+    this.lastHostCheckTime.clear()
+    this.driftRing = []
+    this.expectedNextTick = null
+    this.activeChecks = 0
+    this.runningPeakCurrent = 0
+    this.runningPeakFrozen = 0
+    this.peakWindowSec = Math.floor(Date.now() / 1000)
+    await this.init()
   }
 
   /**
@@ -240,44 +275,51 @@ export class CheckScheduler {
   // ---------------------------------------------------------------------------
 
   private subscribeToEndpointEvents(): void {
-    eventBus.subscribe(
-      'endpoint:created',
-      ({ endpoint }) => {
-        if (endpoint.status === 'archived' || !endpoint.enabled) return
-        const id = endpoint._id.toString()
-        this.consecutiveFailures.set(id, endpoint.consecutiveFailures)
-        this.insertSafe({ endpointId: id, nextDue: Date.now(), endpoint })
-      },
-      'critical',
+    this.unsubscribes.push(
+      eventBus.subscribe(
+        'endpoint:created',
+        ({ endpoint }) => {
+          if (endpoint.status === 'archived' || !endpoint.enabled) return
+          const id = endpoint._id.toString()
+          this.consecutiveFailures.set(id, endpoint.consecutiveFailures)
+          this.insertSafe({ endpointId: id, nextDue: Date.now(), endpoint })
+        },
+        'critical',
+      ),
     )
 
-    eventBus.subscribe(
-      'endpoint:updated',
-      ({ endpointId, changes }) => {
-        if (changes.status === 'archived') {
+    this.unsubscribes.push(
+      eventBus.subscribe(
+        'endpoint:updated',
+        ({ endpointId, changes }) => {
+          if (changes.status === 'archived') {
+            this.heap.remove(endpointId)
+            return
+          }
+          this.heap.update(endpointId, (entry) => ({
+            ...entry,
+            endpoint: { ...entry.endpoint, ...changes } as EndpointDoc,
+          }))
+        },
+        'critical',
+      ),
+    )
+
+    this.unsubscribes.push(
+      eventBus.subscribe(
+        'endpoint:deleted',
+        ({ endpointId }) => {
           this.heap.remove(endpointId)
-          return
-        }
-        this.heap.update(endpointId, (entry) => ({
-          ...entry,
-          endpoint: { ...entry.endpoint, ...changes } as EndpointDoc,
-        }))
-      },
-      'critical',
-    )
-
-    eventBus.subscribe(
-      'endpoint:deleted',
-      ({ endpointId }) => {
-        this.heap.remove(endpointId)
-        this.consecutiveFailures.delete(endpointId)
-      },
-      'critical',
+          this.consecutiveFailures.delete(endpointId)
+        },
+        'critical',
+      ),
     )
   }
 
   private subscribeToCheckComplete(): void {
-    eventBus.subscribe(
+    this.unsubscribes.push(
+      eventBus.subscribe(
       'check:complete',
       ({ endpointId, status, timestamp, responseTime, statusCode, errorMessage, sslIssuer, bodyBytes, bodyBytesTruncated }) => {
         // Update in-memory consecutive failures.
@@ -315,6 +357,7 @@ export class CheckScheduler {
         )
       },
       'standard',
+      ),
     )
   }
 

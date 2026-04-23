@@ -509,13 +509,12 @@ export interface NotificationMuteDoc {
 
 export interface NotificationPreferencesDoc {
   _id: 'global'
-  globalQuietHours?: NotificationQuietHours
   /** If set and in the future, all dispatches are suppressed until this time. */
   globalMuteUntil?: Date
+  /** Applied to new channels at creation time unless the request overrides it. */
   defaultSeverityFilter: NotificationSeverityFilter
+  /** Applied to new channels at creation time unless the request overrides it. */
   defaultEventFilters: NotificationEventFilters
-  /** Preview-only in V1; full batching lands in V1.5. */
-  digestMode?: { enabled: boolean; intervalMinutes: number }
   lastEditedBy?: string
   updatedAt: Date
 }
@@ -524,9 +523,39 @@ export interface NotificationPreferencesDoc {
 // mx_settings  (single document, _id = "global")
 // ---------------------------------------------------------------------------
 
+/**
+ * Runtime overrides for fields that live in `watchdeck.config.js`. When set,
+ * these take precedence over `ctx.config.defaults.*` / `ctx.config.slo.*` for
+ * any consumer that reads through `adapter.getEffectiveDefaults()` / `...Slo()`.
+ *
+ * Only the ergonomic, per-endpoint-inherited fields and the SLO knobs are
+ * editable at runtime — the notification sub-tree under `defaults.notifications`
+ * keeps its own dedicated surface (`mx_notification_preferences`).
+ */
+export interface SettingsDefaultsOverride {
+  checkInterval?: number
+  timeout?: number
+  expectedStatusCodes?: number[]
+  latencyThreshold?: number
+  sslWarningDays?: number
+  failureThreshold?: number
+  alertCooldown?: number
+  recoveryAlert?: boolean
+  escalationDelay?: number
+}
+
+export interface SettingsSloOverride {
+  target?: number
+  windowDays?: number
+}
+
 export interface SettingsDoc {
   _id: 'global'
-  /** Any runtime-adjustable settings stored as key-value pairs */
+  /** Runtime override for the per-endpoint defaults. */
+  defaults?: SettingsDefaultsOverride
+  /** Runtime override for the global SLO. */
+  slo?: SettingsSloOverride
+  /** Any additional runtime-adjustable settings. */
   [key: string]: unknown
 }
 

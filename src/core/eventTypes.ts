@@ -72,6 +72,12 @@ export interface EventMap {
     suggestedFix: string
   }
   'system:warning': { timestamp: Date; module: string; message: string }
+  /**
+   * Emitted by POST /admin/reset after the database + in-memory state have
+   * been wiped. Connected dashboards hard-reload on receipt so no stale
+   * references survive.
+   */
+  'system:reset': { timestamp: Date; cleared: Record<string, number> }
 
   // -------------------------------------------------------------------------
   // Health / maintenance / replay

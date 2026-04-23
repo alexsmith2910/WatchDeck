@@ -1,3 +1,4 @@
+import type { WatchDeckConfig } from '../config/types.js'
 import type {
   CheckDoc,
   CheckWritePayload,
@@ -17,9 +18,40 @@ import type {
   NotificationMuteDoc,
   NotificationPreferencesDoc,
   NotificationSeverity,
+  SettingsDefaultsOverride,
   SettingsDoc,
+  SettingsSloOverride,
   SystemEventDoc,
 } from './types.js'
+
+// ---------------------------------------------------------------------------
+// Effective-config shapes (config + mx_settings override merge results)
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-endpoint defaults that new endpoints inherit at creation time, after
+ * the runtime override stored in `mx_settings.defaults` is layered on top of
+ * `ctx.config.defaults`.
+ *
+ * The `notifications` sub-tree is deliberately excluded — that gets its own
+ * edit surface via `mx_notification_preferences` / the Notifications panel.
+ */
+export interface EffectiveDefaults {
+  checkInterval: number
+  timeout: number
+  expectedStatusCodes: number[]
+  latencyThreshold: number
+  sslWarningDays: number
+  failureThreshold: number
+  alertCooldown: number
+  recoveryAlert: boolean
+  escalationDelay: number
+}
+
+export interface EffectiveSlo {
+  target: number
+  windowDays: number
+}
 
 // ---------------------------------------------------------------------------
 // Notification query/stat shapes (used by several adapter methods)
@@ -495,6 +527,48 @@ export abstract class StorageAdapter {
   abstract getSettings(): Promise<SettingsDoc>
 
   abstract updateSettings(changes: Record<string, unknown>): Promise<SettingsDoc>
+
+  /**
+   * Wipe every mx_-prefixed collection (deleteMany — keeps indexes intact).
+   * Callers are responsible for pausing the scheduler / dispatcher first so
+   * no writes race the delete. Returns per-collection counts for UI display.
+   */
+  abstract hardReset(): Promise<Record<string, number>>
+
+  /**
+   * Merge `mx_settings.defaults` over `config.defaults` and return the effective
+   * per-endpoint defaults. Undefined override keys fall through to the config
+   * value; present keys replace it. Concrete (non-abstract) so every backend
+   * shares the same precedence.
+   */
+  async getEffectiveDefaults(config: WatchDeckConfig): Promise<EffectiveDefaults> {
+    const doc = await this.getSettings()
+    const override: SettingsDefaultsOverride = doc.defaults ?? {}
+    const base = config.defaults
+    return {
+      checkInterval: override.checkInterval ?? base.checkInterval,
+      timeout: override.timeout ?? base.timeout,
+      expectedStatusCodes: override.expectedStatusCodes ?? base.expectedStatusCodes,
+      latencyThreshold: override.latencyThreshold ?? base.latencyThreshold,
+      sslWarningDays: override.sslWarningDays ?? base.sslWarningDays,
+      failureThreshold: override.failureThreshold ?? base.failureThreshold,
+      alertCooldown: override.alertCooldown ?? base.alertCooldown,
+      recoveryAlert: override.recoveryAlert ?? base.recoveryAlert,
+      escalationDelay: override.escalationDelay ?? base.escalationDelay,
+    }
+  }
+
+  /**
+   * Merge `mx_settings.slo` over `config.slo` and return the effective SLO.
+   */
+  async getEffectiveSlo(config: WatchDeckConfig): Promise<EffectiveSlo> {
+    const doc = await this.getSettings()
+    const override: SettingsSloOverride = doc.slo ?? {}
+    return {
+      target: override.target ?? config.slo.target,
+      windowDays: override.windowDays ?? config.slo.windowDays,
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // System Health persistence

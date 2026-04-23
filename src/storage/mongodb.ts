@@ -1370,6 +1370,36 @@ export class MongoDBAdapter extends StorageAdapter {
     return result ?? { _id: 'global', ...safe }
   }
 
+  async hardReset(): Promise<Record<string, number>> {
+    const db = this.getDb()
+    // Short, stable suffix list — matches what migrations.ts creates. Using a
+    // fixed list (rather than listCollections) keeps the wipe predictable and
+    // avoids accidentally deleting collections that share the prefix but were
+    // created outside WatchDeck.
+    const suffixes = [
+      'endpoints',
+      'checks',
+      'hourly_summaries',
+      'daily_summaries',
+      'incidents',
+      'notification_channels',
+      'notification_log',
+      'notification_mutes',
+      'notification_preferences',
+      'settings',
+      'system_events',
+      'health_state',
+      'internal_incidents',
+    ] as const
+
+    const counts: Record<string, number> = {}
+    for (const suffix of suffixes) {
+      const res = await db.collection(`${this.dbPrefix}${suffix}`).deleteMany({})
+      counts[suffix] = res.deletedCount ?? 0
+    }
+    return counts
+  }
+
   // ---------------------------------------------------------------------------
   // System Health persistence
   // ---------------------------------------------------------------------------

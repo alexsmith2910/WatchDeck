@@ -52,6 +52,13 @@ class CircularBuffer {
       this.push(record)
     }
   }
+
+  /** Drop every entry; keeps the current capacity. */
+  clear(): void {
+    this.buffer = new Array<HistoryRecord>(this.capacity)
+    this.head = 0
+    this._size = 0
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +176,11 @@ class TypedEventBus extends EventEmitter {
   /** Resize the history buffer (called from initEventBus). */
   resizeHistory(capacity: number): void {
     this.history.resize(capacity)
+  }
+
+  /** Empty the history buffer. Used by POST /admin/reset. */
+  clearHistory(): void {
+    this.history.clear()
   }
 
   /** Number of records currently held in the in-memory event history buffer. */

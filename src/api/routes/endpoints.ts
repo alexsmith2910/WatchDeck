@@ -289,7 +289,7 @@ export function endpointsRoutes(ctx: AppContext) {
         )
       }
 
-      const cfg = ctx.config.defaults
+      const cfg = await ctx.adapter.getEffectiveDefaults(ctx.config)
       const now = new Date()
 
       const endpointData: Omit<EndpointDoc, '_id' | 'createdAt' | 'updatedAt'> = {
