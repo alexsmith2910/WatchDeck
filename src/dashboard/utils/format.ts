@@ -1,24 +1,25 @@
 // Shared formatting and display helpers used across dashboard pages.
 //
-// Timezone policy: every stored timestamp is UTC. These helpers render in the
-// browser's local TZ via `toLocaleString` without an explicit `timeZone`
-// option. If you need UTC output instead (e.g. for a chart axis that should
-// match backend log timestamps), build a separate helper — do NOT add
-// `timeZone: 'UTC'` ad-hoc at call sites.
+// Timestamp policy: every stored timestamp is UTC. Rendering goes through
+// `utils/time.ts`, which applies the user's configured timezone + time format.
+// Callers inside React components should prefer `useFormat()` for an ergonomic,
+// already-bound API; pure helpers can import from `utils/time.ts` directly.
+//
+// This module re-exports the preference-aware date/time formatters under
+// their historical names so the existing call sites keep working. The
+// non-date helpers (duration, latency tint, incident range detection) live
+// here because they don't depend on preferences.
 
-export function timeAgo(date: Date | string | null): string {
-  if (!date) return 'Never'
-  const d = typeof date === 'string' ? new Date(date) : date
-  const seconds = Math.floor((Date.now() - d.getTime()) / 1000)
-  if (seconds < 5) return 'Just now'
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
+export {
+  formatDate,
+  formatDateShort,
+  formatHour,
+  formatRelative as timeAgo,
+  formatSmart,
+  formatTime,
+  formatTs as formatDateTime,
+  formatTsShort,
+} from './time'
 
 export function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
@@ -42,42 +43,6 @@ export function formatRuntime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
   const h = Math.floor((seconds % 86400) / 3600)
   return h > 0 ? `${d}d ${h}h` : `${d}d`
-}
-
-export function formatHour(dateStr: string): string {
-  return new Date(dateStr).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-}
-
-export function formatTime(date: Date | null): string {
-  if (!date) return '—'
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-}
-
-export function formatDateTime(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-}
-
-export function formatDate(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date
-  return d.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
 }
 
 /**

@@ -468,3 +468,24 @@ svg {
   background: var(--wd-border) !important;
   margin: 4px 6px !important;
 }
+
+/* ---------------------------------------------------------------------------
+ * Density — driven by the Preferences "density" setting via a data-density
+ * attribute on <html>. Compact shaves padding + vertical gaps on big surfaces
+ * (page containers, rounded-xl panels, form rows) while leaving tokens like
+ * text size and borders alone so the layout reads the same.
+ * ------------------------------------------------------------------------ */
+html[data-density="compact"] .p-6 { padding: 1rem !important; }
+html[data-density="compact"] .p-5 { padding: 0.875rem !important; }
+html[data-density="compact"] .p-4 { padding: 0.625rem !important; }
+html[data-density="compact"] .gap-6 { gap: 0.75rem !important; }
+html[data-density="compact"] .gap-5 { gap: 0.625rem !important; }
+html[data-density="compact"] .gap-4 { gap: 0.5rem !important; }
+html[data-density="compact"] .gap-3 { gap: 0.375rem !important; }
+html[data-density="compact"] .space-y-6 > * + * { margin-top: 0.75rem !important; }
+html[data-density="compact"] .space-y-5 > * + * { margin-top: 0.625rem !important; }
+html[data-density="compact"] .space-y-4 > * + * { margin-top: 0.5rem !important; }
+html[data-density="compact"] .py-4 { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
+html[data-density="compact"] .py-3 { padding-top: 0.375rem !important; padding-bottom: 0.375rem !important; }
+html[data-density="compact"] .h-9 { height: 2rem !important; }
+html[data-density="compact"] .h-8 { height: 1.75rem !important; }

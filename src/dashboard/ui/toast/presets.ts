@@ -6,6 +6,7 @@
  */
 import { toast } from './toast.js'
 import type { ToastOptions } from './types.js'
+import { formatTime } from '../../utils/time'
 
 export interface NotificationFailedPayload {
   channelName?: string
@@ -80,7 +81,7 @@ export const toastPresets = {
 
   maintenanceStarted(endpointName?: string, endsAt?: Date): string {
     const desc = endsAt
-      ? `Ends ${endsAt.toLocaleTimeString()}`
+      ? `Ends ${formatTime(endsAt)}`
       : undefined
     return toast.info(`Maintenance started${endpointName ? ` — ${endpointName}` : ''}`, {
       description: desc,
