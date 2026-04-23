@@ -241,11 +241,7 @@ export default function EndpointsPage() {
   const [dailyMap, setDailyMap] = useState<Map<string, DailySummary[]>>(new Map())
   const [aggLoading, setAggLoading] = useState(true)
 
-  // Single-row delete confirm
-  const [confirmDelete, setConfirmDelete] = useState<Endpoint | null>(null)
-  const [deletingOne, setDeletingOne] = useState(false)
-
-  // Derived: 30d uptime bar history, rolling 30d uptime %, and avg response per endpoint
+// Derived: 30d uptime bar history, rolling 30d uptime %, and avg response per endpoint
   const historyMap = useMemo(() => {
     const map = new Map<string, DailyBucket[]>()
     for (const [id, dailies] of dailyMap) map.set(id, buildHistory(dailies))
@@ -474,9 +470,6 @@ export default function EndpointsPage() {
             ...(c.checkInterval !== undefined && { checkInterval: c.checkInterval }),
             ...(c.latencyThreshold !== undefined && { latencyThreshold: c.latencyThreshold }),
           }
-        }).filter((ep) => {
-          if (ep.id === evt.endpointId && evt.changes.status === 'archived') return false
-          return true
         }),
       )
     })
@@ -526,17 +519,6 @@ export default function EndpointsPage() {
     },
     [request],
   )
-
-  const handleConfirmDeleteOne = useCallback(async () => {
-    if (!confirmDelete || deletingOne) return
-    setDeletingOne(true)
-    try {
-      await request(`/endpoints/${confirmDelete.id}`, { method: 'DELETE' })
-      setConfirmDelete(null)
-    } finally {
-      setDeletingOne(false)
-    }
-  }, [confirmDelete, deletingOne, request])
 
   const handleClone = useCallback(
     async (id: string) => {
@@ -1462,64 +1444,6 @@ export default function EndpointsPage() {
         </div>
       </div>
 
-      {/* ── Delete confirm modal ─────────────────────────────────────── */}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => !deletingOne && setConfirmDelete(null)}
-          />
-          <div className="relative bg-wd-surface border border-wd-border rounded-xl p-6 w-full max-w-md shadow-xl">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="rounded-full bg-wd-danger/10 p-2">
-                <Icon
-                  icon="solar:trash-bin-minimalistic-linear"
-                  width={24}
-                  className="text-wd-danger"
-                />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-foreground">Delete Endpoint</h3>
-                <p className="text-xs text-wd-muted">This action cannot be undone</p>
-              </div>
-            </div>
-            <p className="text-sm text-wd-muted mb-1">
-              Are you sure you want to archive{' '}
-              <span className="font-medium text-foreground">{confirmDelete.name}</span>?
-            </p>
-            <p className="text-xs text-wd-muted/60 mb-6">
-              The endpoint will be moved to the archived list. Check history and incident data will
-              be preserved.
-            </p>
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                size="sm"
-                variant="bordered"
-                className="!text-xs"
-                isDisabled={deletingOne}
-                onPress={() => setConfirmDelete(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                className="!text-xs !bg-wd-danger !text-white"
-                onPress={handleConfirmDeleteOne}
-                isDisabled={deletingOne}
-              >
-                {deletingOne ? (
-                  <Spinner size="sm" />
-                ) : (
-                  <>
-                    <Icon icon="solar:trash-bin-minimalistic-linear" width={16} />
-                    Archive Endpoint
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

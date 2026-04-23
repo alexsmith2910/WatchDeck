@@ -2,12 +2,11 @@
  * Endpoint routes (auth required).
  *
  * GET    /endpoints            — list active + paused
- * GET    /endpoints/archived   — list archived
  * GET    /endpoints/:id        — single endpoint with latest check
  * POST   /endpoints            — create
  * POST   /endpoints/:id/clone  — duplicate as a paused "Copy of ..."
  * PUT    /endpoints/:id        — update
- * DELETE /endpoints/:id        — archive (default) or hard delete (?mode=hard)
+ * DELETE /endpoints/:id        — permanent hard delete
  * POST   /endpoints/:id/recheck — trigger immediate check
  * PATCH  /endpoints/:id/toggle  — active ↔ paused
  */
@@ -217,16 +216,7 @@ function validatePortValue(port: unknown): ValidationError | null {
 export function endpointsRoutes(ctx: AppContext) {
   return async (fastify: FastifyInstance): Promise<void> => {
 
-    // ── GET /endpoints/archived ─────────────────────────────────────────────
-    // Must be registered before /:id to avoid 'archived' being treated as an id.
-    fastify.get('/endpoints/archived', async (request, reply) => {
-      const query = request.query as { cursor?: string; limit?: string }
-      const pagination = parsePagination(query)
-      const page = await ctx.adapter.listEndpoints({ ...pagination, status: 'archived' })
-      return reply.send(toEnvelope(page, pagination.limit ?? 20))
-    })
-
-    // ── GET /endpoints ───────────────────────────────────────────────────────
+// ── GET /endpoints ───────────────────────────────────────────────────────
     fastify.get('/endpoints', async (request, reply) => {
       const query = request.query as {
         cursor?: string
@@ -445,11 +435,13 @@ export function endpointsRoutes(ctx: AppContext) {
     })
 
     // ── DELETE /endpoints/:id ────────────────────────────────────────────────
+    // Permanent removal in V1. Historical checks and incidents stay in the DB
+    // for aggregation and post-mortem, but the endpoint document itself is
+    // hard-deleted. Archiving was removed because the two-path behaviour (soft
+    // by default, hard via `?mode=hard`) surprised users; V2 will add a
+    // distinct Archive action with its own UI. See V2 backlog item 7.
     fastify.delete('/endpoints/:id', async (request, reply) => {
       const { id } = request.params as { id: string }
-      const query = request.query as { mode?: string }
-      const mode = query.mode === 'hard' ? 'hard' : 'archive'
-
       if (!ObjectId.isValid(id)) {
         return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
       }
@@ -459,21 +451,12 @@ export function endpointsRoutes(ctx: AppContext) {
         return reply.code(404).send(formatError('NOT_FOUND', `Endpoint ${id} not found`))
       }
 
-      if (mode === 'hard') {
-        await ctx.adapter.deleteEndpoint(id)
-        eventBus.emit('endpoint:deleted', {
-          timestamp: new Date(),
-          endpointId: id,
-          name: existing.name,
-        })
-      } else {
-        await ctx.adapter.updateEndpoint(id, { status: 'archived', enabled: false })
-        eventBus.emit('endpoint:updated', {
-          timestamp: new Date(),
-          endpointId: id,
-          changes: { status: 'archived', enabled: false },
-        })
-      }
+      await ctx.adapter.deleteEndpoint(id)
+      eventBus.emit('endpoint:deleted', {
+        timestamp: new Date(),
+        endpointId: id,
+        name: existing.name,
+      })
 
       return reply.code(204).send()
     })

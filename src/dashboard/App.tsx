@@ -5,7 +5,6 @@ import OverviewPage from './pages/OverviewPage'
 import EndpointsPage from './pages/EndpointsPage'
 import AddEndpointPage from './pages/AddEndpointPage'
 import EndpointDetailPage from './pages/EndpointDetailPage'
-import ArchivedPage from './pages/ArchivedPage'
 import IncidentsPage from './pages/IncidentsPage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
 import NotificationsPage from './pages/NotificationsPage'
@@ -21,7 +20,6 @@ export default function App() {
         <Route path="/" element={<OverviewPage />} />
         <Route path="/endpoints" element={<EndpointsPage />} />
         <Route path="/endpoints/add" element={<AddEndpointPage />} />
-        <Route path="/endpoints/archived" element={<ArchivedPage />} />
         <Route path="/endpoints/:id" element={<EndpointDetailPage />} />
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
