@@ -1,497 +1,440 @@
 /**
- * Delivery log — table of every dispatch attempt with filters.
+ * Delivery log — every dispatch attempt, across every endpoint, in an
+ * accordion table. Rows render through the shared `LogRow` so the layout
+ * matches the per-endpoint Notifications tab exactly; the only differences on
+ * the page version are an extra "Endpoint" filter, the page-only suppressed
+ * reason chip wired up by `SuppressionPanel`, and Load-older pagination.
  *
- * Layout cribs from the design: a single header row with search + status
- * toggle pills + channel/severity selects, then a dense table of rows. Rows
- * expose retry for failed dispatches; clicking opens the detail drawer.
- *
- * Pagination is cursor-based, filter changes reset the cursor.
+ * Filter state is owned by `NotificationsPage` so cross-wires from the
+ * channels grid (`onFilterByChannel`) and suppression panel (`onFilterReason`)
+ * keep working.
  */
-import { useEffect, useMemo, useState } from 'react'
-import {
-  Button,
-  Dropdown,
-  SearchField,
-  Spinner,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-  cn,
-} from '@heroui/react'
-import type { Selection } from '@heroui/react'
-import { Icon } from '@iconify/react'
-import { Link } from 'react-router-dom'
-import { useApi } from '../../hooks/useApi'
-import { timeAgo } from '../../utils/format'
-import { toast } from '../../ui/toast'
+import { useEffect, useMemo, useState } from "react";
+import { Spinner, cn } from "@heroui/react";
+import { Icon } from "@iconify/react";
+import type { DateValue, RangeValue } from "react-aria-components";
+import { getLocalTimeZone } from "@internationalized/date";
+import { useApi } from "../../hooks/useApi";
+import type { ApiEndpoint, ApiPagination } from "../../types/api";
 import type {
   ApiChannel,
   ApiNotificationLogRow,
   DeliveryStatus,
   NotificationKind,
   NotificationSeverity,
-} from '../../types/notifications'
+} from "../../types/notifications";
 import {
-  CHANNEL_TYPE_ICON,
-  KIND_COLOR,
-  KIND_LABEL,
-  SEVERITY_STYLE,
-  STATUS_STYLE,
-} from '../../types/notifications'
-import { readableReason } from './notificationHelpers'
-import { Segmented } from '../endpoint-detail/primitives'
+  DateRangeFilter,
+  FilterDropdown,
+  FilterSearch,
+  Segmented,
+} from "../endpoint-detail/primitives";
+import { LOG_ROW_GRID, LogRow } from "./LogAccordionRow";
+import { readableReason } from "./notificationHelpers";
 
 export interface LogFilters {
-  channelId?: string
-  severity?: NotificationSeverity
-  kind?: NotificationKind
-  status?: DeliveryStatus
-  from?: string
-  to?: string
-  search?: string
-  suppressedReason?: string
+  channelId?: string;
+  endpointId?: string;
+  severity?: NotificationSeverity;
+  kind?: NotificationKind;
+  status?: DeliveryStatus;
+  customRange?: RangeValue<DateValue> | null;
+  search?: string;
+  suppressedReason?: string;
 }
 
 interface Props {
-  channels: ApiChannel[]
-  filters: LogFilters
-  onFilterChange: (patch: Partial<LogFilters>) => void
-  onOpenRow: (row: ApiNotificationLogRow) => void
-  refreshKey: number
-  endpointNameById: Map<string, string>
+  channels: ApiChannel[];
+  endpoints: ApiEndpoint[];
+  filters: LogFilters;
+  onFilterChange: (patch: Partial<LogFilters>) => void;
+  refreshKey: number;
 }
 
 interface Envelope {
-  data: ApiNotificationLogRow[]
-  pagination: { limit: number; hasMore: boolean; nextCursor: string | null; prevCursor: string | null; total: number }
+  data: ApiNotificationLogRow[];
+  pagination: ApiPagination;
 }
 
-const STATUS_PILLS: Array<{ key: DeliveryStatus | 'all'; label: string }> = [
-  { key: 'all',        label: 'All' },
-  { key: 'sent',       label: 'Sent' },
-  { key: 'failed',     label: 'Failed' },
-  { key: 'suppressed', label: 'Suppressed' },
-  { key: 'pending',    label: 'Pending' },
-]
+type StatusFilter = DeliveryStatus | "all";
 
-export function DeliveryLog({ channels, filters, onFilterChange, onOpenRow, refreshKey, endpointNameById }: Props) {
-  const { request } = useApi()
-  const [rows, setRows] = useState<ApiNotificationLogRow[]>([])
-  const [pagination, setPagination] = useState<Envelope['pagination'] | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [retrying, setRetrying] = useState<string | null>(null)
+const STATUS_OPTIONS: { key: StatusFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "sent", label: "Sent" },
+  { key: "failed", label: "Failed" },
+  { key: "suppressed", label: "Suppressed" },
+  { key: "pending", label: "Pending" },
+];
 
-  const channelName = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const c of channels) m.set(c._id, c.name)
-    return m
-  }, [channels])
+const SEVERITY_OPTIONS: {
+  id: NotificationSeverity | "all";
+  label: string;
+  dot?: string;
+}[] = [
+  { id: "all", label: "All severities" },
+  { id: "critical", label: "Critical", dot: "var(--wd-danger)" },
+  { id: "warning", label: "Warning", dot: "var(--wd-warning)" },
+  { id: "info", label: "Info", dot: "var(--wd-primary)" },
+  { id: "success", label: "Success", dot: "var(--wd-success)" },
+];
 
+const KIND_OPTIONS: { id: NotificationKind | "all"; label: string }[] = [
+  { id: "all", label: "All event types" },
+  { id: "incident_opened", label: "Opened" },
+  { id: "incident_resolved", label: "Resolved" },
+  { id: "incident_escalated", label: "Escalation" },
+  { id: "channel_test", label: "Test" },
+  { id: "custom", label: "Custom" },
+];
+
+export function DeliveryLog({
+  channels,
+  endpoints,
+  filters,
+  onFilterChange,
+  refreshKey,
+}: Props) {
+  const { request } = useApi();
+  const [rows, setRows] = useState<ApiNotificationLogRow[]>([]);
+  const [pagination, setPagination] = useState<ApiPagination | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const channelById = useMemo(() => {
+    const m = new Map<string, ApiChannel>();
+    for (const c of channels) m.set(c._id, c);
+    return m;
+  }, [channels]);
+
+  const endpointOptions = useMemo<{ id: string; label: string }[]>(() => {
+    const opts: { id: string; label: string }[] = [
+      { id: "all", label: "All endpoints" },
+    ];
+    for (const e of endpoints) opts.push({ id: e._id, label: e.name });
+    return opts;
+  }, [endpoints]);
+
+  const channelOptions = useMemo<{ id: string; label: string }[]>(() => {
+    const opts: { id: string; label: string }[] = [
+      { id: "all", label: "All channels" },
+    ];
+    for (const c of channels) opts.push({ id: c._id, label: c.name });
+    return opts;
+  }, [channels]);
+
+  const buildParams = (cursor?: string | null): URLSearchParams => {
+    const params = new URLSearchParams();
+    params.set("limit", "50");
+    if (filters.channelId) params.set("channelId", filters.channelId);
+    if (filters.endpointId) params.set("endpointId", filters.endpointId);
+    if (filters.severity) params.set("severity", filters.severity);
+    if (filters.kind) params.set("kind", filters.kind);
+    if (filters.status) params.set("status", filters.status);
+    if (filters.search) params.set("search", filters.search);
+    if (filters.customRange) {
+      const tz = getLocalTimeZone();
+      params.set("from", filters.customRange.start.toDate(tz).toISOString());
+      params.set("to", filters.customRange.end.toDate(tz).toISOString());
+    }
+    if (cursor) params.set("cursor", cursor);
+    return params;
+  };
+
+  // Reset list whenever filters change.
   useEffect(() => {
-    setLoading(true)
-    const params = new URLSearchParams()
-    if (cursor) params.set('cursor', cursor)
-    params.set('limit', '25')
-    if (filters.channelId) params.set('channelId', filters.channelId)
-    if (filters.severity) params.set('severity', filters.severity)
-    if (filters.kind) params.set('kind', filters.kind)
-    if (filters.status) params.set('status', filters.status)
-    if (filters.from) params.set('from', filters.from)
-    if (filters.to) params.set('to', filters.to)
-    if (filters.search) params.set('search', filters.search)
-
-    request<Envelope>(`/notifications/log?${params.toString()}`)
+    let cancelled = false;
+    setLoading(true);
+    setExpandedId(null);
+    request<Envelope>(`/notifications/log?${buildParams().toString()}`)
       .then((res) => {
-        setRows(res.data?.data ?? [])
-        setPagination(res.data?.pagination ?? null)
+        if (cancelled) return;
+        setRows(res.data?.data ?? []);
+        setPagination(res.data?.pagination ?? null);
       })
       .catch(() => {
-        setRows([])
-        setPagination(null)
+        if (cancelled) return;
+        setRows([]);
+        setPagination(null);
       })
-      .finally(() => setLoading(false))
-  }, [request, filters, cursor, refreshKey])
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    request,
+    refreshKey,
+    filters.channelId,
+    filters.endpointId,
+    filters.severity,
+    filters.kind,
+    filters.status,
+    filters.search,
+    filters.customRange,
+  ]);
 
-  useEffect(() => { setCursor(null) }, [
-    filters.channelId, filters.severity, filters.kind, filters.status,
-    filters.from, filters.to, filters.search,
-  ])
-
-  // Client-side reason filter — the API doesn't expose a dedicated param for
-  // this, so we narrow the fetched page after the fact. Suppression volume is
-  // low in practice, so this is fine for the target user base.
-  const visibleRows = useMemo(() => {
-    if (!filters.suppressedReason) return rows
-    return rows.filter((r) => r.suppressedReason === filters.suppressedReason)
-  }, [rows, filters.suppressedReason])
-
-  const counts = useMemo(() => ({
-    all: rows.length,
-    sent: rows.filter((r) => r.deliveryStatus === 'sent').length,
-    failed: rows.filter((r) => r.deliveryStatus === 'failed').length,
-    suppressed: rows.filter((r) => r.deliveryStatus === 'suppressed').length,
-    pending: rows.filter((r) => r.deliveryStatus === 'pending').length,
-  }), [rows])
-
-  const retry = async (row: ApiNotificationLogRow) => {
-    setRetrying(row._id)
+  const loadMore = async () => {
+    if (loadingMore || !pagination?.hasMore || !pagination.nextCursor) return;
+    setLoadingMore(true);
     try {
-      const res = await request<{ data: unknown }>(`/notifications/log/${row._id}/retry`, { method: 'POST' })
-      if (res.status >= 400) {
-        toast.error('Retry failed', { description: `HTTP ${res.status}` })
-      } else {
-        toast.success('Retry dispatched', { description: row.messageSummary })
-      }
+      const res = await request<Envelope>(
+        `/notifications/log?${buildParams(pagination.nextCursor).toString()}`,
+      );
+      const next = res.data?.data ?? [];
+      setRows((prev) => {
+        const seen = new Set(prev.map((r) => r._id));
+        return [...prev, ...next.filter((r) => !seen.has(r._id))];
+      });
+      setPagination(res.data?.pagination ?? null);
     } finally {
-      setRetrying(null)
+      setLoadingMore(false);
     }
-  }
+  };
 
-  const activeStatus = filters.status ?? 'all'
+  // Suppressed-reason chip is page-local: the API doesn't have a dedicated
+  // param so we narrow the fetched page client-side. Fine for the small dispatch
+  // volumes this tool targets.
+  const visibleRows = useMemo(() => {
+    if (!filters.suppressedReason) return rows;
+    return rows.filter((r) => r.suppressedReason === filters.suppressedReason);
+  }, [rows, filters.suppressedReason]);
+
+  // Endpoint filter is also page-local: notifications/log doesn't accept an
+  // `endpointId` query, so we filter the fetched page after the fact too.
+  const finalRows = useMemo(() => {
+    if (!filters.endpointId) return visibleRows;
+    return visibleRows.filter((r) => r.endpointId === filters.endpointId);
+  }, [visibleRows, filters.endpointId]);
+
+  // Annotate the message summary with endpoint name in the row's expansion?
+  // Not needed — the row's Trigger/Reproduce already exposes endpoint context.
+
+  const counts = useMemo(
+    () => ({
+      sent: rows.filter((r) => r.deliveryStatus === "sent").length,
+      failed: rows.filter((r) => r.deliveryStatus === "failed").length,
+      suppressed: rows.filter((r) => r.deliveryStatus === "suppressed").length,
+      pending: rows.filter((r) => r.deliveryStatus === "pending").length,
+    }),
+    [rows],
+  );
+
+  const activeStatus: StatusFilter = filters.status ?? "all";
+  const activeSeverity = filters.severity ?? "all";
+  const activeKind = filters.kind ?? "all";
+  const activeChannel = filters.channelId ?? "all";
+  const activeEndpoint = filters.endpointId ?? "all";
+
+  const hasAnyFilter = !!(
+    filters.channelId ||
+    filters.endpointId ||
+    filters.severity ||
+    filters.kind ||
+    filters.status ||
+    filters.search ||
+    filters.customRange ||
+    filters.suppressedReason
+  );
 
   return (
-    <div className="rounded-xl border border-wd-border/50 bg-wd-surface flex flex-col min-w-0">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-wd-border/50 flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-2.5">
-          <div className="h-7 w-7 rounded-lg bg-wd-primary/15 text-wd-primary flex items-center justify-center shrink-0">
-            <Icon icon="solar:clipboard-text-outline" width={16} />
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-foreground leading-tight">Delivery Log</div>
-            <div className="text-[11px] text-wd-muted mt-0.5">
-              Every dispatch — click any row to open its full payload.
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 text-[11px] text-wd-muted font-mono">
-          <span className="text-wd-success">{counts.sent} sent</span>
-          <span className="text-wd-danger">{counts.failed} failed</span>
-          <span className="text-wd-warning">{counts.suppressed} suppressed</span>
-          {counts.pending > 0 && <span>{counts.pending} pending</span>}
-        </div>
-      </div>
-
+    <div className="flex flex-col gap-3 min-w-0">
       {/* Filters */}
-      <div className="px-4 py-3 border-b border-wd-border/50 flex items-center gap-2 flex-wrap">
-        <SearchField
-          aria-label="Search log"
-          value={filters.search ?? ''}
-          onChange={(v) => onFilterChange({ search: v || undefined })}
-          className="!w-64"
-        >
-          <SearchField.Group className="!bg-wd-surface !border !border-wd-border/50 !rounded-lg !h-8">
-            <SearchField.SearchIcon>
-              <Icon icon="solar:magnifer-outline" width={16} className="text-wd-muted" />
-            </SearchField.SearchIcon>
-            <SearchField.Input placeholder="Search summary, endpoint…" className="!text-xs" />
-            <SearchField.ClearButton>
-              <Icon icon="solar:close-circle-outline" width={16} className="text-wd-muted" />
-            </SearchField.ClearButton>
-          </SearchField.Group>
-        </SearchField>
-
-        <Segmented<DeliveryStatus | 'all'>
+      <div className="flex flex-wrap items-center gap-2 min-w-0">
+        <Segmented<StatusFilter>
           ariaLabel="Delivery status"
-          options={STATUS_PILLS}
+          options={STATUS_OPTIONS}
           value={activeStatus}
-          onChange={(sel) =>
-            onFilterChange({ status: sel === 'all' ? undefined : sel })
-          }
+          onChange={(v) => {
+            onFilterChange({ status: v === "all" ? undefined : v });
+          }}
         />
-
-        <SelectDropdown
-          label="channel"
-          value={filters.channelId ?? '__all__'}
-          options={[
-            { id: '__all__', label: 'All Channels' },
-            ...channels.map((c) => ({ id: c._id, label: c.name })),
-          ]}
-          onChange={(id) =>
-            onFilterChange({ channelId: id !== '__all__' ? id : undefined })
-          }
+        <FilterDropdown<NotificationSeverity | "all">
+          ariaLabel="Notification severity"
+          value={activeSeverity}
+          options={SEVERITY_OPTIONS}
+          onChange={(v) => {
+            onFilterChange({ severity: v === "all" ? undefined : v });
+          }}
         />
-
-        <SelectDropdown
-          label="severity"
-          value={filters.severity ?? '__any__'}
-          options={[
-            { id: '__any__', label: 'Any Severity' },
-            { id: 'critical', label: 'Critical', dot: 'var(--wd-danger)' },
-            { id: 'warning', label: 'Warning', dot: 'var(--wd-warning)' },
-            { id: 'info', label: 'Info', dot: 'var(--wd-primary)' },
-            { id: 'success', label: 'Success', dot: 'var(--wd-success)' },
-          ]}
-          onChange={(id) =>
-            onFilterChange({ severity: id !== '__any__' ? (id as NotificationSeverity) : undefined })
-          }
+        <FilterDropdown<NotificationKind | "all">
+          ariaLabel="Notification event type"
+          value={activeKind}
+          options={KIND_OPTIONS}
+          onChange={(v) => {
+            onFilterChange({ kind: v === "all" ? undefined : v });
+          }}
         />
-
-        <SelectDropdown
-          label="type"
-          value={filters.kind ?? '__all__'}
-          options={[
-            { id: '__all__', label: 'All Types' },
-            { id: 'incident_opened', label: 'Opened' },
-            { id: 'incident_resolved', label: 'Resolved' },
-            { id: 'incident_escalated', label: 'Escalation' },
-            { id: 'channel_test', label: 'Test' },
-            { id: 'custom', label: 'Custom' },
-          ]}
-          onChange={(id) =>
-            onFilterChange({ kind: id !== '__all__' ? (id as NotificationKind) : undefined })
-          }
+        <DateRangeFilter
+          ariaLabel="Delivery date range"
+          value={filters.customRange ?? null}
+          onChange={(customRange) => {
+            onFilterChange({ customRange });
+          }}
         />
-
-        {(filters.channelId || filters.severity || filters.kind || filters.status || filters.search || filters.suppressedReason) && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="!text-[11px] !h-8 !min-h-0 !px-2 ml-auto !text-wd-muted"
-            onPress={() => onFilterChange({
-              channelId: undefined,
-              severity: undefined,
-              kind: undefined,
-              status: undefined,
-              search: undefined,
-              suppressedReason: undefined,
-            })}
-          >
-            <Icon icon="solar:close-circle-linear" width={16} />
-            Clear Filters
-          </Button>
-        )}
+        <FilterDropdown
+          ariaLabel="Notifications channel"
+          value={activeChannel}
+          options={channelOptions}
+          onChange={(v) => {
+            onFilterChange({ channelId: v === "all" ? undefined : v });
+          }}
+        />
+        <FilterDropdown
+          ariaLabel="Endpoint"
+          value={activeEndpoint}
+          options={endpointOptions}
+          onChange={(v) => {
+            onFilterChange({ endpointId: v === "all" ? undefined : v });
+          }}
+        />
+        <div className="ml-auto">
+          <FilterSearch
+            ariaLabel="Search notifications"
+            value={filters.search ?? ""}
+            onChange={(v) => {
+              onFilterChange({ search: v || undefined });
+            }}
+            placeholder="Summary, target…"
+          />
+        </div>
       </div>
 
       {filters.suppressedReason && (
-        <div className="px-4 py-2 border-b border-wd-border/40 flex items-center gap-2 text-[11px] text-wd-muted">
+        <div className="flex items-center gap-2 text-[11px] text-wd-muted">
           Filtering suppressions by:
           <span className="inline-flex items-center gap-1 bg-wd-warning/10 text-wd-warning border border-wd-warning/20 rounded-full px-2 py-0.5 capitalize">
             {readableReason(filters.suppressedReason)}
             <button
               type="button"
-              onClick={() => onFilterChange({ suppressedReason: undefined })}
+              onClick={() => {
+                onFilterChange({ suppressedReason: undefined });
+              }}
               className="hover:text-foreground"
               aria-label="Remove reason filter"
             >
-              <Icon icon="solar:close-circle-linear" width={16} />
+              <Icon icon="solar:close-circle-linear" width={14} />
             </button>
           </span>
         </div>
       )}
 
       {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="bg-wd-surface-hover/30 text-wd-muted">
-            <tr>
-              <th className="text-left font-medium px-3 py-2 w-[140px]">When</th>
-              <th className="text-left font-medium px-3 py-2 w-[140px]">Channel</th>
-              <th className="text-left font-medium px-3 py-2">Event</th>
-              <th className="text-left font-medium px-3 py-2 w-[110px]">Status</th>
-              <th className="text-right font-medium px-3 py-2 w-[90px]">Latency</th>
-              <th className="text-right font-medium px-3 py-2 w-[70px]"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && visibleRows.length === 0 ? (
-              <tr><td colSpan={6} className="px-3 py-10 text-center text-wd-muted"><Spinner size="sm" /></td></tr>
-            ) : visibleRows.length === 0 ? (
-              <tr><td colSpan={6} className="px-3 py-10 text-center text-wd-muted">No dispatches match the current filters.</td></tr>
-            ) : visibleRows.map((r) => {
-              const st = STATUS_STYLE[r.deliveryStatus]
-              return (
-                <tr
-                  key={r._id}
-                  onClick={() => onOpenRow(r)}
-                  className={cn(
-                    'border-t border-wd-border/40 hover:bg-wd-surface-hover/30 cursor-pointer',
-                    r.deliveryStatus === 'failed' && 'bg-wd-danger/[0.03]',
-                  )}
-                >
-                  <td className="px-3 py-2 text-wd-muted">
-                    <div className="inline-flex items-center gap-1.5">
-                      <span className={cn('inline-block h-2 w-2 rounded-full shrink-0', SEVERITY_STYLE[r.severity])} aria-label={r.severity} />
-                      <Tooltip delay={200} closeDelay={0}>
-                        <TooltipTrigger>
-                          <span className="font-mono">{timeAgo(r.sentAt)}</span>
-                        </TooltipTrigger>
-                        <TooltipContent className="text-[11px] px-2 py-1">{new Date(r.sentAt).toLocaleString()}</TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className="inline-flex items-center gap-1.5 text-wd-muted truncate max-w-[140px]">
-                      <Icon icon={CHANNEL_TYPE_ICON[r.channelType]} width={16} />
-                      <span className="truncate">{channelName.get(r.channelId) ?? r.channelTarget}</span>
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 min-w-0">
-                    <div className="text-foreground truncate max-w-[420px]">{r.messageSummary}</div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0 text-[10.5px] text-wd-muted">
-                      <span className={cn('uppercase tracking-wider font-semibold', KIND_COLOR[r.kind])}>
-                        {KIND_LABEL[r.kind]}
-                      </span>
-                      {r.endpointId && (
-                        <>
-                          <span className="text-wd-muted/50">·</span>
-                          <Link
-                            to={`/endpoints/${r.endpointId}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-wd-primary hover:underline truncate max-w-[160px]"
-                          >
-                            {endpointNameById.get(r.endpointId) ?? r.endpointId.slice(0, 6)}
-                          </Link>
-                        </>
-                      )}
-                      {r.deliveryStatus === 'failed' && r.failureReason && (
-                        <>
-                          <span className="text-wd-muted/50">·</span>
-                          <span className="text-wd-danger truncate max-w-[240px]">{r.failureReason}</span>
-                        </>
-                      )}
-                      {r.deliveryStatus === 'suppressed' && r.suppressedReason && (
-                        <>
-                          <span className="text-wd-muted/50">·</span>
-                          <span className="text-wd-warning capitalize">{readableReason(r.suppressedReason)}</span>
-                        </>
-                      )}
-                      {(r.coalescedCount ?? 0) > 1 && (
-                        <>
-                          <span className="text-wd-muted/50">·</span>
-                          <span>{r.coalescedCount} coalesced</span>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={cn('inline-flex items-center gap-1 text-[10px] font-medium rounded px-1.5 py-0.5', st.className)}>
-                      <Icon
-                        icon={
-                          r.deliveryStatus === 'sent' ? 'solar:check-circle-bold'
-                          : r.deliveryStatus === 'failed' ? 'solar:close-circle-bold'
-                          : r.deliveryStatus === 'suppressed' ? 'solar:minus-circle-outline'
-                          : 'solar:clock-circle-outline'
-                        }
-                        width={16}
-                      />
-                      {st.label}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-wd-muted">
-                    {r.deliveryStatus === 'suppressed' || r.deliveryStatus === 'pending' || typeof r.latencyMs !== 'number'
-                      ? '—'
-                      : `${r.latencyMs}ms`}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {r.deliveryStatus === 'failed' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="!text-[11px] !h-6 !min-h-0 !px-2 !text-wd-primary"
-                        onPress={() => void retry(r)}
-                        isDisabled={retrying === r._id}
-                      >
-                        {retrying === r._id ? <Spinner size="sm" /> : 'Retry'}
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {pagination && (pagination.hasMore || cursor) && (
-        <div className="px-4 py-2 border-t border-wd-border/50 flex items-center justify-between text-[11px] text-wd-muted">
-          <span><span className="font-mono">{pagination.total.toLocaleString()}</span> total</span>
-          <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="!text-[11px] !h-6 !min-h-0 !px-2"
-              onPress={() => setCursor(null)}
-              isDisabled={!cursor}
-            >
-              First
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="!text-[11px] !h-6 !min-h-0 !px-2"
-              onPress={() => pagination.nextCursor && setCursor(pagination.nextCursor)}
-              isDisabled={!pagination.hasMore || !pagination.nextCursor}
-            >
-              Next
-              <Icon icon="solar:alt-arrow-right-linear" width={16} />
-            </Button>
+      <div className="rounded-xl border border-wd-border/50 bg-wd-surface overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-wd-border/50">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="text-[13px] font-semibold text-foreground">
+              Delivery log
+            </div>
+            <span className="text-[11px] text-wd-muted font-mono">
+              <span className="text-wd-success">{counts.sent}</span> sent ·{" "}
+              <span className="text-wd-danger">{counts.failed}</span> failed ·{" "}
+              <span className="text-wd-warning">{counts.suppressed}</span>{" "}
+              suppressed
+              {counts.pending > 0 ? ` · ${counts.pending} pending` : ""}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            {hasAnyFilter && (
+              <button
+                type="button"
+                onClick={() => {
+                  onFilterChange({
+                    channelId: undefined,
+                    endpointId: undefined,
+                    severity: undefined,
+                    kind: undefined,
+                    status: undefined,
+                    search: undefined,
+                    customRange: null,
+                    suppressedReason: undefined,
+                  });
+                }}
+                className="inline-flex items-center gap-1 text-[11px] text-wd-muted hover:text-foreground cursor-pointer"
+              >
+                <Icon icon="solar:close-circle-linear" width={14} />
+                Clear filters
+              </button>
+            )}
+            <span className="text-[11px] text-wd-muted">
+              Click a row to inspect
+            </span>
           </div>
         </div>
-      )}
-    </div>
-  )
-}
 
-function SelectDropdown({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string
-  value: string
-  options: Array<{ id: string; label: string; dot?: string }>
-  onChange: (id: string) => void
-}) {
-  const current = options.find((o) => o.id === value) ?? options[0]
-  return (
-    <Dropdown>
-      <Dropdown.Trigger>
         <div
-          aria-label={`Filter by ${label}`}
           className={cn(
-            'inline-flex items-center justify-between gap-2 h-8 px-2.5 rounded-lg text-xs cursor-pointer min-w-[140px]',
-            'bg-wd-surface border border-wd-border/50 hover:bg-wd-surface-hover transition-colors',
+            LOG_ROW_GRID,
+            "px-4 py-2.5 text-[10px] uppercase tracking-[0.08em] text-wd-muted border-b border-wd-border/50 bg-wd-surface-hover/30 font-semibold",
           )}
         >
-          <span className="inline-flex items-center gap-1.5 min-w-0">
-            {current?.dot && (
-              <span
-                aria-hidden="true"
-                className="inline-block w-2 h-2 rounded-full shrink-0"
-                style={{ background: current.dot }}
-              />
-            )}
-            <span className="text-foreground truncate">{current?.label ?? '—'}</span>
-          </span>
-          <Icon icon="solar:alt-arrow-down-linear" width={16} className="text-wd-muted shrink-0" />
+          <span />
+          <span>When</span>
+          <span>Channel</span>
+          <span>Event</span>
+          <span>Type</span>
+          <span>Status</span>
+          <span className="text-right">Latency</span>
+          <span />
         </div>
-      </Dropdown.Trigger>
-      <Dropdown.Popover placement="bottom start" className="!min-w-[180px]">
-        <Dropdown.Menu
-          selectionMode="single"
-          selectedKeys={new Set([value])}
-          onSelectionChange={(keys: Selection) => {
-            const sel = [...keys][0]
-            if (sel != null) onChange(String(sel))
-          }}
-        >
-          {options.map((opt) => (
-            <Dropdown.Item key={opt.id} id={opt.id} className="!text-xs">
-              {opt.dot && (
-                <span
-                  aria-hidden="true"
-                  className="inline-block w-2 h-2 rounded-full mr-2 shrink-0"
-                  style={{ background: opt.dot }}
-                />
+
+        <div className="min-h-[520px] flex flex-col">
+          {loading ? (
+            <div className="flex-1 flex items-center justify-center">
+              <Spinner size="lg" />
+            </div>
+          ) : finalRows.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center">
+              <Icon
+                icon="solar:bell-off-linear"
+                width={28}
+                className="text-wd-muted mb-3"
+              />
+              <div className="text-[13px] text-foreground font-medium">
+                No deliveries match these filters.
+              </div>
+              <div className="text-[11px] text-wd-muted mt-1">
+                Try a broader status, date range, or clear search.
+              </div>
+            </div>
+          ) : (
+            <ul className="divide-y divide-wd-border/40">
+              {finalRows.map((r) => {
+                const rowChannel = channelById.get(r.channelId) ?? null;
+                return (
+                  <LogRow
+                    key={r._id}
+                    row={r}
+                    channel={rowChannel}
+                    expanded={expandedId === r._id}
+                    onToggle={() => {
+                      setExpandedId((prev) => (prev === r._id ? null : r._id));
+                    }}
+                  />
+                );
+              })}
+              {pagination?.hasMore && (
+                <li className="flex justify-center py-3">
+                  <button
+                    onClick={() => void loadMore()}
+                    disabled={loadingMore}
+                    className="inline-flex items-center gap-1.5 text-[12px] text-wd-primary hover:underline disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    {loadingMore ? (
+                      <Spinner size="sm" />
+                    ) : (
+                      <Icon icon="solar:arrow-down-linear" width={14} />
+                    )}
+                    Load older
+                  </button>
+                </li>
               )}
-              {opt.label}
-            </Dropdown.Item>
-          ))}
-        </Dropdown.Menu>
-      </Dropdown.Popover>
-    </Dropdown>
-  )
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
