@@ -1,795 +1,1141 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Button, Spinner } from '@heroui/react'
-import { Icon } from '@iconify/react'
-import { useApi } from '../hooks/useApi'
-import { useSSE } from '../hooks/useSSE'
-import KpiCard from '../components/KpiCard'
-import OverviewChart from '../components/OverviewChart'
-import { Segmented } from '../components/endpoint-detail/primitives'
-import { getIncidentRanges } from '../utils/format'
-import { useFormat } from '../hooks/useFormat'
-import { formatDateShort, formatHour, formatTime } from '../utils/time'
-import type { Preferences } from '../context/PreferencesContext'
-
-// ---------------------------------------------------------------------------
-// API types
-// ---------------------------------------------------------------------------
-
-interface ApiEndpoint {
-  _id: string
-  name: string
-  lastStatus?: 'healthy' | 'degraded' | 'down'
-  enabled: boolean
-  status: 'active' | 'paused' | 'archived'
-}
-
-interface ApiPagination {
-  total: number
-}
-
-interface ApiIncident {
-  _id: string
-  endpointId: string
-  status: 'active' | 'resolved'
-  cause: string
-  startedAt: string
-}
-
-interface UptimeStats {
-  '24h': number | null
-  '7d': number | null
-  '30d': number | null
-  '90d': number | null
-}
-
-interface HourlySummary {
-  hour: string
-  avgResponseTime: number
-  p95ResponseTime: number
-  minResponseTime: number
-  maxResponseTime: number
-  uptimePercent: number
-  totalChecks: number
-  successCount: number
-  failCount: number
-  degradedCount: number
-}
-
-interface DailySummary {
-  date: string
-  avgResponseTime: number
-  p95ResponseTime: number
-  minResponseTime: number
-  maxResponseTime: number
-  uptimePercent: number
-  totalChecks: number
-  incidentCount: number
-}
-
-interface RawCheck {
-  timestamp: string
-  responseTime: number
-  status: 'healthy' | 'degraded' | 'down'
-  statusCode?: number
-}
-
-// ---------------------------------------------------------------------------
-// Time range
-// ---------------------------------------------------------------------------
-
-type TimeRange = '1h' | '24h' | '7d' | '30d'
-
-const TIME_RANGES: { key: TimeRange; label: string; hoursNeeded: number }[] = [
-  { key: '1h', label: '1h', hoursNeeded: 1 },
-  { key: '24h', label: '24h', hoursNeeded: 24 },
-  { key: '7d', label: '7d', hoursNeeded: 168 },
-  { key: '30d', label: '30d', hoursNeeded: 720 },
-]
+/**
+ * Fleet-wide Overview page.
+ *
+ * Data flow:
+ *   • fetchCore() loads endpoints + incident history + per-endpoint 30d uptime
+ *     once on mount. SSE events update endpoints/incidents state in place.
+ *   • A separate "chart fetch" effect loads hourly or daily summaries for the
+ *     current scope + range. Its dep key is `effectiveIdKey` (a sorted, comma-
+ *     joined id string) — so SSE updates that mutate `endpoints` without
+ *     adding/removing rows do NOT trigger a refetch.
+ *   • Derived datasets (fleet buckets, heatmap rows, rankings, per-endpoint
+ *     comparison) are computed via useMemo from the raw hourly/daily maps so
+ *     the user-visible numbers stay live without thrashing the network.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Button, Spinner } from "@heroui/react";
+import { Icon } from "@iconify/react";
+import { useApi } from "../hooks/useApi";
+import { useSSE } from "../hooks/useSSE";
+import { useFormat } from "../hooks/useFormat";
+import { useSlo } from "../hooks/useSlo";
+import KpiCard from "../components/KpiCard";
+import OverviewChart from "../components/OverviewChart";
+import { FleetHero } from "../components/overview/FleetHero";
+import { OverviewFilterBar } from "../components/overview/OverviewFilterBar";
+import { StatusBarChart } from "../components/overview/StatusBarChart";
+import { EndpointHeatmap } from "../components/overview/EndpointHeatmap";
+import { ActiveIncidentsList } from "../components/overview/ActiveIncidentsList";
+import { LiveActivityFeed } from "../components/overview/LiveActivityFeed";
+import {
+  SLOCompliance,
+  type SLOItem,
+} from "../components/overview/SLOCompliance";
+import { RankCard } from "../components/overview/RankCards";
+import {
+  RANGE_CONFIG,
+  aggregateDailies,
+  aggregateHourlies,
+  buildEndpointScores,
+  buildHeatmapRows,
+  buildPerEndpointSeries,
+  canonicalBucketKeys,
+  type FleetRange,
+} from "../components/overview/fleetData";
+import type {
+  ApiEndpoint,
+  ApiIncident,
+  ApiPagination,
+  DailySummary,
+  HourlySummary,
+  UptimeStats,
+} from "../types/api";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatHourLabel(iso: string, prefs: Preferences): string {
-  return formatHour(iso, prefs)
-}
+const RANGE_LABEL: Record<FleetRange, string> = {
+  "24h": "24h",
+  "7d": "7d",
+  "30d": "30d",
+  "90d": "90d",
+};
 
-function formatDay(iso: string, prefs: Preferences): string {
-  return formatDateShort(iso, prefs)
-}
-
-function formatMinute(iso: string, prefs: Preferences): string {
-  return formatTime(iso, prefs)
-}
-
-/** Human-friendly duration for the data warning */
-function humanDuration(hours: number): string {
-  if (hours < 1) return `${Math.round(hours * 60)} minutes`
-  if (hours < 24) return `${Math.round(hours)} hour${Math.round(hours) === 1 ? '' : 's'}`
-  const days = Math.round(hours / 24)
-  return `${days} day${days === 1 ? '' : 's'}`
-}
-
-// ---------------------------------------------------------------------------
-// OverviewPage
-// ---------------------------------------------------------------------------
+const PER_ENDPOINT_PALETTE = [
+  "var(--wd-primary)",
+  "var(--wd-warning)",
+  "var(--wd-success)",
+  "var(--wd-danger)",
+  "var(--wd-info)",
+  "#b18df0",
+  "#e8a252",
+  "#6ea8d8",
+  "#5ac08a",
+  "#d76ea8",
+];
 
 export default function OverviewPage() {
-  const navigate = useNavigate()
-  const { request } = useApi()
-  const { subscribe } = useSSE()
-  const { prefs } = useFormat()
+  const navigate = useNavigate();
+  const { request } = useApi();
+  const { subscribe } = useSSE();
+  const fmt = useFormat();
+  const { slo } = useSlo();
 
-  const [endpoints, setEndpoints] = useState<ApiEndpoint[]>([])
-  const [activeIncidents, setActiveIncidents] = useState<ApiIncident[]>([])
-  const [loading, setLoading] = useState(true)
-  const [timeRange, setTimeRange] = useState<TimeRange>('1h')
+  // Core data (refreshed on manual refresh; kept live via SSE)
+  const [endpoints, setEndpoints] = useState<ApiEndpoint[]>([]);
+  const [activeIncidents, setActiveIncidents] = useState<ApiIncident[]>([]);
+  const [recentIncidents, setRecentIncidents] = useState<ApiIncident[]>([]);
+  const [uptimeByEp, setUptimeByEp] = useState<Map<string, number | null>>(
+    new Map(),
+  );
+  const [loading, setLoading] = useState(true);
 
-  // Track latest response times from SSE for a live average
-  const [responseTimes, setResponseTimes] = useState<Map<string, number>>(new Map())
+  // Scope + range
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [range, setRange] = useState<FleetRange>("24h");
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Aggregation data
-  const [chartData, setChartData] = useState<Record<string, string | number>[]>([])
-  const [availabilityData, setAvailabilityData] = useState<Record<string, string | number>[]>([])
-  const [chartLoading, setChartLoading] = useState(false)
-  const [dataHours, setDataHours] = useState<number | null>(null) // actual data span in hours
+  // Live response-time from SSE
+  const [responseTimes, setResponseTimes] = useState<Map<string, number>>(
+    new Map(),
+  );
 
-  // KPI sparkline data (from latest hourly summaries across all endpoints)
-  const [kpiResponseData, setKpiResponseData] = useState<{ label: string; value: number }[]>([])
-  const [kpiUptimeData, setKpiUptimeData] = useState<{ label: string; value: number }[]>([])
+  // Raw time-series data per endpoint; derived data (buckets, heatmap,
+  // rankings, per-endpoint comparison) is computed from these via useMemo.
+  const [rawHourlyByEp, setRawHourlyByEp] = useState<
+    Map<string, HourlySummary[]>
+  >(new Map());
+  const [rawDailyByEp, setRawDailyByEp] = useState<Map<string, DailySummary[]>>(
+    new Map(),
+  );
+  const [chartLoading, setChartLoading] = useState(false);
 
-  // Uptime stats (24h) across all endpoints — for KPI card + delta
-  const [uptimeAvg24h, setUptimeAvg24h] = useState<number | null>(null)
+  // ---------------------------------------------------------------------------
+  // Effective scope + stable id key
+  // ---------------------------------------------------------------------------
 
-  // Previous-period response time (for delta comparison)
-  const [prevAvgResponse, setPrevAvgResponse] = useState<number | null>(null)
+  const effective = useMemo(() => {
+    if (selectedIds.length === 0) return endpoints;
+    const s = new Set(selectedIds);
+    return endpoints.filter((ep) => s.has(ep._id));
+  }, [endpoints, selectedIds]);
 
-  // Fetch data on mount
-  const fetchData = useCallback(async () => {
-    setLoading(true)
+  // Stable key that only changes when the SET of effective endpoint ids
+  // changes (add/remove/scope change) — NOT when SSE mutates status/response
+  // time on an existing endpoint. This is what keeps the chart-fetch effect
+  // from re-running on every live check result.
+  const effectiveIdKey = useMemo(
+    () =>
+      effective
+        .map((e) => e._id)
+        .sort()
+        .join(","),
+    [effective],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Core fetch (endpoints + incidents + uptime)
+  // ---------------------------------------------------------------------------
+
+  const fetchCore = useCallback(async () => {
+    setLoading(true);
     try {
-      const [epRes, incRes] = await Promise.all([
-        request<{ data: ApiEndpoint[]; pagination: ApiPagination }>('/endpoints?limit=100'),
-        request<{ data: ApiIncident[]; pagination: ApiPagination }>('/incidents?status=active&limit=5'),
-      ])
-      setEndpoints(epRes.data.data)
-      setActiveIncidents(incRes.data.data ?? [])
+      const [epRes, activeRes, historyRes] = await Promise.all([
+        request<{ data: ApiEndpoint[]; pagination: ApiPagination }>(
+          "/endpoints?limit=200",
+        ),
+        request<{ data: ApiIncident[] }>("/incidents/active"),
+        request<{ data: ApiIncident[]; pagination: ApiPagination }>(
+          "/incidents?limit=30",
+        ),
+      ]);
 
-      // Fetch uptime stats for all endpoints
-      const ids = epRes.data.data.map((ep: ApiEndpoint) => ep._id)
-      if (ids.length > 0) {
+      const eps = epRes.data.data;
+      setEndpoints(eps);
+      setActiveIncidents(activeRes.data.data);
+      setRecentIncidents(historyRes.data.data);
+
+      if (eps.length > 0) {
         const uptimeResults = await Promise.allSettled(
-          ids.map((id: string) => request<{ data: UptimeStats }>(`/endpoints/${id}/uptime`).then((r) => r.data.data)),
-        )
-        const uptimes: number[] = []
-        for (const r of uptimeResults) {
-          if (r.status === 'fulfilled' && r.value['24h'] != null) {
-            uptimes.push(r.value['24h'])
+          eps.map((ep) =>
+            request<{ data: UptimeStats }>(`/endpoints/${ep._id}/uptime`).then(
+              (r) => r.data.data,
+            ),
+          ),
+        );
+        const map = new Map<string, number | null>();
+        for (let i = 0; i < eps.length; i++) {
+          const ep = eps[i];
+          const r = uptimeResults[i];
+          if (r.status === "fulfilled") {
+            const s = r.value;
+            map.set(ep._id, s["30d"] ?? s["7d"] ?? s["24h"] ?? null);
+          } else {
+            map.set(ep._id, null);
           }
         }
-        if (uptimes.length > 0) {
-          setUptimeAvg24h(Math.round(uptimes.reduce((s, v) => s + v, 0) / uptimes.length * 100) / 100)
-        } else {
-          setUptimeAvg24h(null)
-        }
+        setUptimeByEp(map);
       }
     } catch {
-      // Leave as empty/zero on failure
+      // Leave at defaults on failure; empty state handles the zero-endpoints case
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [request])
+  }, [request]);
 
   useEffect(() => {
-    fetchData()
-  }, [fetchData])
+    void fetchCore();
+  }, [fetchCore]);
 
-  // Fetch chart data when time range or endpoints change
+  // ---------------------------------------------------------------------------
+  // Chart fetch — stable deps so SSE updates don't trigger refetches
+  // ---------------------------------------------------------------------------
+
+  const fetchTick = useRef(0);
+
   useEffect(() => {
-    if (endpoints.length === 0) {
-      setChartData([])
-      setAvailabilityData([])
-      setDataHours(null)
-      return
+    if (!effectiveIdKey) {
+      setRawHourlyByEp(new Map());
+      setRawDailyByEp(new Map());
+      return;
     }
-    let cancelled = false
+    const tick = ++fetchTick.current;
+    let cancelled = false;
 
-    const fetchCharts = async () => {
-      setChartLoading(true)
+    async function run() {
+      setChartLoading(true);
       try {
-        const ids = endpoints.map((ep) => ep._id)
+        const cfg = RANGE_CONFIG[range];
+        const ids = effectiveIdKey.split(",");
 
-        if (timeRange === '1h') {
-          // Use raw checks from the last hour
-          const from = new Date(Date.now() - 3_600_000).toISOString()
+        if (cfg.hourly) {
           const results = await Promise.allSettled(
             ids.map((id) =>
-              request<{ data: RawCheck[]; pagination: ApiPagination }>(
-                `/endpoints/${id}/checks?from=${from}&limit=100`,
+              request<{ data: HourlySummary[] }>(
+                `/endpoints/${id}/hourly?limit=${cfg.limit}`,
               ).then((r) => r.data.data),
             ),
-          )
-          if (cancelled) return
-
-          // Merge all checks into time buckets (1-minute resolution)
-          const allChecks: RawCheck[] = []
-          for (const r of results) {
-            if (r.status === 'fulfilled') allChecks.push(...r.value)
+          );
+          if (cancelled || tick !== fetchTick.current) return;
+          const map = new Map<string, HourlySummary[]>();
+          for (let i = 0; i < ids.length; i++) {
+            const id = ids[i];
+            const r = results[i];
+            map.set(id, r.status === "fulfilled" ? r.value : []);
           }
-          allChecks.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-
-          // Bucket by minute
-          const buckets = new Map<string, { rts: number[]; healthy: number; degraded: number; down: number; total: number }>()
-          for (const c of allChecks) {
-            const d = new Date(c.timestamp)
-            d.setSeconds(0, 0)
-            const key = d.toISOString()
-            const b = buckets.get(key) ?? { rts: [], healthy: 0, degraded: 0, down: 0, total: 0 }
-            b.rts.push(c.responseTime)
-            b.total++
-            if (c.status === 'healthy') b.healthy++
-            else if (c.status === 'degraded') b.degraded++
-            else b.down++
-            buckets.set(key, b)
-          }
-
-          const rtData: Record<string, string | number>[] = []
-          const avData: Record<string, string | number>[] = []
-          for (const [key, b] of buckets) {
-            const avg = Math.round(b.rts.reduce((s, v) => s + v, 0) / b.rts.length)
-            const min = Math.min(...b.rts)
-            const max = Math.max(...b.rts)
-            const fails = b.down
-            const degraded = b.degraded
-            rtData.push({ label: formatMinute(key, prefs), avg, min, max, fails, degraded })
-            const uptimeVal = b.total > 0 ? Math.round((b.healthy / b.total) * 10000) / 100 : 100
-            const downPctVal = b.total > 0 ? Math.round((b.down / b.total) * 10000) / 100 : 0
-            avData.push({
-              label: formatMinute(key, prefs),
-              uptime: uptimeVal,
-              downPercent: downPctVal,
-              fails,
-              degraded,
-              incidents: 0,
-            })
-          }
-
-          if (!cancelled) {
-            setChartData(rtData)
-            setAvailabilityData(avData)
-            // Compute actual data span
-            if (allChecks.length >= 2) {
-              const span = (new Date(allChecks[allChecks.length - 1]!.timestamp).getTime() - new Date(allChecks[0]!.timestamp).getTime()) / 3_600_000
-              setDataHours(span)
-            } else {
-              setDataHours(allChecks.length > 0 ? 0.01 : null)
-            }
-          }
-        } else if (timeRange === '24h') {
-          // Use hourly summaries (last 24)
+          setRawHourlyByEp(map);
+          setRawDailyByEp(new Map());
+        } else {
           const results = await Promise.allSettled(
             ids.map((id) =>
-              request<{ data: HourlySummary[] }>(`/endpoints/${id}/hourly?limit=24`).then((r) => r.data.data),
+              request<{ data: DailySummary[] }>(
+                `/endpoints/${id}/daily?limit=${cfg.limit}`,
+              ).then((r) => r.data.data),
             ),
-          )
-          if (cancelled) return
-          buildFromHourlies(results, cancelled)
-        } else if (timeRange === '7d') {
-          // Use daily summaries (last 7) — fall back to hourly if no daily data yet
-          const dailyResults = await Promise.allSettled(
-            ids.map((id) =>
-              request<{ data: DailySummary[] }>(`/endpoints/${id}/daily?limit=7`).then((r) => r.data.data),
-            ),
-          )
-          if (cancelled) return
-
-          const hasDailyData = dailyResults.some(
-            (r) => r.status === 'fulfilled' && r.value.length > 0,
-          )
-
-          if (hasDailyData) {
-            buildFromDailies(dailyResults, cancelled)
-          } else {
-            // No daily summaries yet — fall back to hourly
-            const hourlyResults = await Promise.allSettled(
-              ids.map((id) =>
-                request<{ data: HourlySummary[] }>(`/endpoints/${id}/hourly?limit=168`).then((r) => r.data.data),
-              ),
-            )
-            if (cancelled) return
-            buildFromHourlies(hourlyResults, cancelled)
+          );
+          if (cancelled || tick !== fetchTick.current) return;
+          const map = new Map<string, DailySummary[]>();
+          for (let i = 0; i < ids.length; i++) {
+            const id = ids[i];
+            const r = results[i];
+            map.set(id, r.status === "fulfilled" ? r.value : []);
           }
-        } else {
-          // 30d — try daily summaries first, fall back to hourly if none exist yet
-          const dailyResults = await Promise.allSettled(
-            ids.map((id) =>
-              request<{ data: DailySummary[] }>(`/endpoints/${id}/daily?limit=30`).then((r) => r.data.data),
-            ),
-          )
-          if (cancelled) return
-
-          // Check if we got any daily data at all
-          const hasDailyData = dailyResults.some(
-            (r) => r.status === 'fulfilled' && r.value.length > 0,
-          )
-
-          if (hasDailyData) {
-            buildFromDailies(dailyResults, cancelled)
-          } else {
-            // No daily summaries yet — fall back to hourly (up to 720 hours)
-            const hourlyResults = await Promise.allSettled(
-              ids.map((id) =>
-                request<{ data: HourlySummary[] }>(`/endpoints/${id}/hourly?limit=720`).then((r) => r.data.data),
-              ),
-            )
-            if (cancelled) return
-            buildFromHourlies(hourlyResults, cancelled)
-          }
+          setRawDailyByEp(map);
+          setRawHourlyByEp(new Map());
         }
-      } catch {
-        // Leave charts empty on error
       } finally {
-        if (!cancelled) setChartLoading(false)
+        if (!cancelled && tick === fetchTick.current) setChartLoading(false);
       }
     }
 
-    const buildFromHourlies = (results: PromiseSettledResult<HourlySummary[]>[], isCancelled: boolean) => {
-      // Merge hourly summaries across endpoints by hour
-      const byHour = new Map<string, { rts: number[]; p95s: number[]; mins: number[]; maxs: number[]; uptimes: number[]; healthy: number; degraded: number; down: number }>()
-      for (const r of results) {
-        if (r.status !== 'fulfilled') continue
-        for (const h of r.value) {
-          const key = h.hour
-          const b = byHour.get(key) ?? { rts: [], p95s: [], mins: [], maxs: [], uptimes: [], healthy: 0, degraded: 0, down: 0 }
-          b.rts.push(h.avgResponseTime)
-          b.p95s.push(h.p95ResponseTime)
-          b.mins.push(h.minResponseTime)
-          b.maxs.push(h.maxResponseTime)
-          b.uptimes.push(h.uptimePercent)
-          b.healthy += h.successCount
-          b.degraded += h.degradedCount
-          b.down += h.failCount
-          byHour.set(key, b)
-        }
-      }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveIdKey, range, request]);
 
-      const sorted = [...byHour.entries()].sort(([a], [b]) => a.localeCompare(b))
-      const rtData: Record<string, string | number>[] = []
-      const avData: Record<string, string | number>[] = []
-      const labelFn = sorted.length > 48 ? formatDay : formatHourLabel
-      for (const [key, b] of sorted) {
-        const avg = Math.round(b.rts.reduce((s, v) => s + v, 0) / b.rts.length)
-        const p95 = Math.round(Math.max(...b.p95s))
-        const min = Math.min(...b.mins)
-        const max = Math.max(...b.maxs)
-        const uptime = Math.round(b.uptimes.reduce((s, v) => s + v, 0) / b.uptimes.length * 100) / 100
-        const total = b.healthy + b.degraded + b.down
-        const downPct = total > 0 ? Math.round((b.down / total) * 10000) / 100 : 0
-        rtData.push({ label: labelFn(key, prefs), avg, p95, min, max, fails: b.down, degraded: b.degraded })
-        avData.push({ label: labelFn(key, prefs), uptime, downPercent: downPct, fails: b.down, degraded: b.degraded, incidents: 0 })
-      }
+  // ---------------------------------------------------------------------------
+  // SSE subscriptions (live status updates, don't trigger refetches)
+  // ---------------------------------------------------------------------------
 
-      if (!isCancelled) {
-        setChartData(rtData)
-        setAvailabilityData(avData)
-        if (sorted.length >= 2) {
-          const span = (new Date(sorted[sorted.length - 1]![0]).getTime() - new Date(sorted[0]![0]).getTime()) / 3_600_000
-          setDataHours(span)
-        } else {
-          setDataHours(sorted.length > 0 ? 1 : null)
-        }
-      }
-    }
-
-    const buildFromDailies = (results: PromiseSettledResult<DailySummary[]>[], isCancelled: boolean) => {
-      const byDate = new Map<string, { rts: number[]; p95s: number[]; mins: number[]; maxs: number[]; uptimes: number[]; incidents: number }>()
-      for (const r of results) {
-        if (r.status !== 'fulfilled') continue
-        for (const d of r.value) {
-          const key = d.date
-          const b = byDate.get(key) ?? { rts: [], p95s: [], mins: [], maxs: [], uptimes: [], incidents: 0 }
-          b.rts.push(d.avgResponseTime)
-          b.p95s.push(d.p95ResponseTime)
-          b.mins.push(d.minResponseTime)
-          b.maxs.push(d.maxResponseTime)
-          b.uptimes.push(d.uptimePercent)
-          b.incidents += d.incidentCount ?? 0
-          byDate.set(key, b)
-        }
-      }
-
-      const sorted = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b))
-      const rtData: Record<string, string | number>[] = []
-      const avData: Record<string, string | number>[] = []
-      for (const [key, b] of sorted) {
-        const avg = Math.round(b.rts.reduce((s, v) => s + v, 0) / b.rts.length)
-        const p95 = Math.round(Math.max(...b.p95s))
-        const min = Math.min(...b.mins)
-        const max = Math.max(...b.maxs)
-        const uptime = Math.round(b.uptimes.reduce((s, v) => s + v, 0) / b.uptimes.length * 100) / 100
-        const downPct = uptime < 100 ? Math.round((100 - uptime) * 100) / 100 : 0
-        const fails = b.incidents
-        rtData.push({ label: formatDay(key, prefs), avg, p95, min, max, fails })
-        avData.push({ label: formatDay(key, prefs), uptime, downPercent: downPct, fails, incidents: 0 })
-      }
-
-      if (!isCancelled) {
-        setChartData(rtData)
-        setAvailabilityData(avData)
-        if (sorted.length >= 2) {
-          const span = (new Date(sorted[sorted.length - 1]![0]).getTime() - new Date(sorted[0]![0]).getTime()) / 3_600_000
-          setDataHours(span)
-        } else {
-          setDataHours(sorted.length > 0 ? 24 : null)
-        }
-      }
-    }
-
-    fetchCharts()
-    return () => { cancelled = true }
-  }, [endpoints.length, timeRange, request])
-
-  // Build KPI sparkline data + compute response time delta from chart data
   useEffect(() => {
-    if (chartData.length > 0) {
-      setKpiResponseData(chartData.map((d) => ({ label: String(d.label), value: Number(d.avg ?? 0) })))
-      // Compute delta: compare first half avg vs second half avg
-      const mid = Math.floor(chartData.length / 2)
-      if (mid > 0) {
-        const firstHalf = chartData.slice(0, mid)
-        const secondHalf = chartData.slice(mid)
-        const avgFirst = firstHalf.reduce((s, d) => s + Number(d.avg ?? 0), 0) / firstHalf.length
-        const avgSecond = secondHalf.reduce((s, d) => s + Number(d.avg ?? 0), 0) / secondHalf.length
-        setPrevAvgResponse(Math.round(avgFirst))
-        // avgResponseTime (from SSE) is live; avgSecond is the recent half for reference
-        void avgSecond // we use avgFirst as "prior period"
-      }
-    } else {
-      setKpiResponseData([])
-      setPrevAvgResponse(null)
-    }
-    if (availabilityData.length > 0) {
-      setKpiUptimeData(availabilityData.map((d) => ({ label: String(d.label), value: Number(d.uptime ?? 100) })))
-    } else {
-      setKpiUptimeData([])
-    }
-  }, [chartData, availabilityData])
-
-  // SSE: track live check results
-  useEffect(() => {
-    return subscribe('check:complete', (raw) => {
-      const evt = raw as { endpointId: string; status: string; responseTime: number }
+    return subscribe("check:complete", (raw) => {
+      const evt = raw as {
+        endpointId: string;
+        status: string;
+        responseTime: number;
+      };
       setEndpoints((prev) =>
         prev.map((ep) =>
           ep._id === evt.endpointId
-            ? { ...ep, lastStatus: evt.status as ApiEndpoint['lastStatus'] }
+            ? {
+                ...ep,
+                lastStatus: evt.status as ApiEndpoint["lastStatus"],
+                lastResponseTime: evt.responseTime,
+              }
             : ep,
         ),
-      )
+      );
       setResponseTimes((prev) => {
-        const next = new Map(prev)
-        next.set(evt.endpointId, evt.responseTime)
-        return next
-      })
-    })
-  }, [subscribe])
-
-  // SSE: track endpoint changes
-  useEffect(() => {
-    return subscribe('endpoint:created', (raw) => {
-      const evt = raw as { endpoint: ApiEndpoint }
-      setEndpoints((prev) => [...prev, evt.endpoint])
-    })
-  }, [subscribe])
+        const next = new Map(prev);
+        next.set(evt.endpointId, evt.responseTime);
+        return next;
+      });
+    });
+  }, [subscribe]);
 
   useEffect(() => {
-    return subscribe('endpoint:deleted', (raw) => {
-      const evt = raw as { endpointId: string }
-      setEndpoints((prev) => prev.filter((ep) => ep._id !== evt.endpointId))
-    })
-  }, [subscribe])
-
-  // SSE: track incident changes
-  useEffect(() => {
-    return subscribe('incident:opened', (raw) => {
-      const evt = raw as { incident: ApiIncident }
-      if (evt.incident) {
-        setActiveIncidents((prev) => [evt.incident, ...prev])
-      }
-    })
-  }, [subscribe])
+    return subscribe("endpoint:created", (raw) => {
+      const evt = raw as { endpoint: ApiEndpoint };
+      setEndpoints((prev) => [...prev, evt.endpoint]);
+    });
+  }, [subscribe]);
 
   useEffect(() => {
-    return subscribe('incident:resolved', (raw) => {
-      const evt = raw as { incidentId: string }
-      setActiveIncidents((prev) => prev.filter((i) => i._id !== evt.incidentId))
-    })
-  }, [subscribe])
+    return subscribe("endpoint:deleted", (raw) => {
+      const evt = raw as { endpointId: string };
+      setEndpoints((prev) => prev.filter((ep) => ep._id !== evt.endpointId));
+    });
+  }, [subscribe]);
 
-  // Computed values
-  const statusCounts = useMemo(() => {
-    const counts = { healthy: 0, degraded: 0, down: 0, pending: 0 }
-    for (const ep of endpoints) {
-      if (ep.lastStatus) counts[ep.lastStatus]++
-      else counts.pending++
+  useEffect(() => {
+    return subscribe("incident:opened", (raw) => {
+      const evt = raw as { incident?: ApiIncident };
+      const inc = evt.incident;
+      if (inc) setActiveIncidents((prev) => [inc, ...prev]);
+    });
+  }, [subscribe]);
+
+  useEffect(() => {
+    return subscribe("incident:resolved", (raw) => {
+      const evt = raw as { incidentId: string };
+      setActiveIncidents((prev) =>
+        prev.filter((i) => i._id !== evt.incidentId),
+      );
+    });
+  }, [subscribe]);
+
+  // ---------------------------------------------------------------------------
+  // Derived datasets
+  // ---------------------------------------------------------------------------
+
+  const bucketKeys = useMemo(() => canonicalBucketKeys(range), [range]);
+
+  const labelFor = useCallback(
+    (iso: string): string => {
+      const cfg = RANGE_CONFIG[range];
+      if (cfg.hourly) return fmt.hour(iso);
+      return fmt.dateShort(iso);
+    },
+    [range, fmt],
+  );
+
+  const buckets = useMemo(() => {
+    const cfg = RANGE_CONFIG[range];
+    return cfg.hourly
+      ? aggregateHourlies(rawHourlyByEp, bucketKeys, labelFor)
+      : aggregateDailies(rawDailyByEp, bucketKeys, labelFor);
+  }, [rawHourlyByEp, rawDailyByEp, bucketKeys, labelFor, range]);
+
+  const heatmap = useMemo(
+    () =>
+      buildHeatmapRows(
+        effective,
+        rawHourlyByEp,
+        rawDailyByEp,
+        uptimeByEp,
+        range,
+        bucketKeys,
+        labelFor,
+      ),
+    [
+      effective,
+      rawHourlyByEp,
+      rawDailyByEp,
+      uptimeByEp,
+      range,
+      bucketKeys,
+      labelFor,
+    ],
+  );
+
+  const rankings = useMemo(() => {
+    const incidentCountByEp = new Map<string, number>();
+    for (const inc of recentIncidents) {
+      incidentCountByEp.set(
+        inc.endpointId,
+        (incidentCountByEp.get(inc.endpointId) ?? 0) + 1,
+      );
     }
-    return counts
-  }, [endpoints])
+    return buildEndpointScores(
+      effective,
+      rawHourlyByEp,
+      rawDailyByEp,
+      incidentCountByEp,
+      range,
+    );
+  }, [effective, rawHourlyByEp, rawDailyByEp, recentIncidents, range]);
+
+  const perEndpoint = useMemo(
+    () =>
+      buildPerEndpointSeries(
+        effective,
+        rawHourlyByEp,
+        rawDailyByEp,
+        range,
+        bucketKeys,
+        labelFor,
+      ),
+    [effective, rawHourlyByEp, rawDailyByEp, range, bucketKeys, labelFor],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Derived summaries
+  // ---------------------------------------------------------------------------
+
+  const statusCounts = useMemo(() => {
+    let healthy = 0;
+    let degraded = 0;
+    let down = 0;
+    let paused = 0;
+    for (const ep of effective) {
+      if (ep.status === "paused") paused++;
+      else if (ep.lastStatus === "down") down++;
+      else if (ep.lastStatus === "degraded") degraded++;
+      else if (ep.lastStatus === "healthy") healthy++;
+    }
+    return { healthy, degraded, down, paused, total: effective.length };
+  }, [effective]);
 
   const avgResponseTime = useMemo(() => {
-    if (responseTimes.size === 0) return null
-    const values = [...responseTimes.values()]
-    const sum = values.reduce((a, b) => a + b, 0)
-    return Math.round(sum / values.length)
-  }, [responseTimes])
+    if (responseTimes.size === 0) return null;
+    const values: number[] = [];
+    for (const ep of effective) {
+      const v = responseTimes.get(ep._id);
+      if (v != null) values.push(v);
+    }
+    if (values.length === 0) return null;
+    return Math.round(values.reduce((s, v) => s + v, 0) / values.length);
+  }, [responseTimes, effective]);
 
-  // Data warning
-  const selectedRange = TIME_RANGES.find((r) => r.key === timeRange)!
-  const dataInsufficient = dataHours != null && dataHours < selectedRange.hoursNeeded * 0.5
+  const fleetUptime = useMemo(() => {
+    const vals: number[] = [];
+    for (const ep of effective) {
+      const v = uptimeByEp.get(ep._id);
+      if (v != null) vals.push(v);
+    }
+    if (vals.length === 0) return null;
+    return (
+      Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 100) / 100
+    );
+  }, [uptimeByEp, effective]);
 
-  const totalEndpoints = endpoints.length
-  const upCount = statusCounts.healthy + statusCounts.degraded
-  const downCount = statusCounts.down
-  const incidentCount = activeIncidents.length
+  const avgP95 = useMemo(() => {
+    const vals = buckets
+      .map((b) => b.p95)
+      .filter((v): v is number => v != null);
+    if (vals.length === 0) return null;
+    return Math.round(vals.reduce((s, v) => s + v, 0) / vals.length);
+  }, [buckets]);
 
-  // Incident KPI: find the endpoint name for the most recent active incident
-  const topIncident = activeIncidents.length > 0 ? activeIncidents[0] : null
-  const topIncidentEndpoint = topIncident
-    ? endpoints.find((ep) => ep._id === topIncident.endpointId)?.name ?? null
-    : null
+  const avgErrRate = useMemo(() => {
+    const vals = buckets
+      .map((b) => b.errRate)
+      .filter((v): v is number => v != null);
+    if (vals.length === 0) return null;
+    return (
+      Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 100) / 100
+    );
+  }, [buckets]);
 
-  // Response time delta (vs prior half of chart period)
-  const responseDelta = useMemo(() => {
-    if (avgResponseTime == null || prevAvgResponse == null || prevAvgResponse === 0) return null
-    const diff = avgResponseTime - prevAvgResponse
-    const pct = Math.round((diff / prevAvgResponse) * 100)
-    return { diff, pct }
-  }, [avgResponseTime, prevAvgResponse])
+  const totalChecks = useMemo(
+    () => buckets.reduce((s, b) => s + b.throughput, 0),
+    [buckets],
+  );
+  const totalChecksDisplay = useMemo(() => {
+    if (totalChecks >= 1_000_000)
+      return `${(totalChecks / 1_000_000).toFixed(1)}M`;
+    if (totalChecks >= 1_000) return `${(totalChecks / 1_000).toFixed(1)}k`;
+    return `${totalChecks}`;
+  }, [totalChecks]);
 
-  // Uptime delta: compare 24h uptime vs chart-period average
-  const uptimeDelta = useMemo(() => {
-    if (uptimeAvg24h == null || availabilityData.length < 1) return null
-    const chartAvg = availabilityData.reduce((s, d) => s + Number(d.uptime ?? 100), 0) / availabilityData.length
-    const diff = Math.round((uptimeAvg24h - chartAvg) * 100) / 100
-    return diff
-  }, [uptimeAvg24h, availabilityData])
+  const budgetRemaining = useMemo(() => {
+    if (fleetUptime == null) return null;
+    const allowedDown = 100 - slo.target;
+    const actualDown = 100 - fleetUptime;
+    if (allowedDown <= 0) return null;
+    return Math.max(
+      0,
+      Math.round(((allowedDown - actualDown) / allowedDown) * 1000) / 10,
+    );
+  }, [fleetUptime, slo.target]);
 
-  // Compute incident/degraded ranges for chart shading
-  // Compute incident ranges from both datasets — availability for the uptime chart, chartData for response time
-  const chartHighlightRanges = useMemo(() => getIncidentRanges(availabilityData), [availabilityData])
-  const rtHighlightRanges = useMemo(() => getIncidentRanges(chartData), [chartData])
+  // ---------------------------------------------------------------------------
+  // Derived datasets for charts
+  // ---------------------------------------------------------------------------
 
-  // --- Early returns (after all hooks) ---
+  const percentileData = useMemo(
+    () =>
+      buckets.map((b) => ({
+        label: b.label,
+        p50: b.p50,
+        p95: b.p95,
+        p99: b.p99,
+      })),
+    [buckets],
+  );
+
+  const uptimeData = useMemo(
+    () =>
+      buckets.map((b) => ({
+        label: b.label,
+        uptime: b.uptime,
+        downPercent: b.uptime == null ? null : Math.max(0, 100 - b.uptime),
+        fails: b.down,
+      })),
+    [buckets],
+  );
+
+  const errorData = useMemo(
+    () =>
+      buckets.map((b) => ({
+        label: b.label,
+        err: b.errRate,
+        fails: b.down,
+        degraded: b.degraded,
+      })),
+    [buckets],
+  );
+
+  const statusBarData = useMemo(
+    () =>
+      buckets.map((b) => ({
+        label: b.label,
+        healthy: b.healthy,
+        degraded: b.degraded,
+        down: b.down,
+      })),
+    [buckets],
+  );
+
+  const perEndpointSeriesConfig = useMemo(
+    () =>
+      perEndpoint.series.map((s, i) => ({
+        key: `rt-${s.id}`,
+        label: s.name,
+        color:
+          PER_ENDPOINT_PALETTE[i % PER_ENDPOINT_PALETTE.length] ??
+          "var(--wd-primary)",
+        icon: "solar:server-square-outline",
+        value: "",
+        change: "",
+        changeType: "neutral" as const,
+      })),
+    [perEndpoint.series],
+  );
+
+  const sloItems = useMemo<SLOItem[]>(
+    () =>
+      effective.map((ep) => ({
+        id: ep._id,
+        name: ep.name,
+        current: uptimeByEp.get(ep._id) ?? null,
+        sampleSize: 1,
+      })),
+    [effective, uptimeByEp],
+  );
+
+  const topSlow = useMemo(
+    () =>
+      [...rankings]
+        .filter((r) => r.p95 > 0)
+        .sort((a, b) => b.p95 - a.p95)
+        .slice(0, 5),
+    [rankings],
+  );
+  const topFlaky = useMemo(
+    () =>
+      [...rankings]
+        .filter((r) => r.flaps > 0)
+        .sort((a, b) => b.flaps - a.flaps)
+        .slice(0, 5),
+    [rankings],
+  );
+  const topErr = useMemo(
+    () =>
+      [...rankings]
+        .filter((r) => r.errRate > 0)
+        .sort((a, b) => b.errRate - a.errRate)
+        .slice(0, 5),
+    [rankings],
+  );
+
+  // Keep the lookup stable across SSE ticks — otherwise LiveActivityFeed's
+  // `seeded` memo invalidates every time `endpoints` mutates (which happens
+  // on every `check:complete` event), resetting the feed and thrashing GC.
+  const endpointsRef = useRef(endpoints);
+  endpointsRef.current = endpoints;
+  const endpointName = useCallback(
+    (id: string): string =>
+      endpointsRef.current.find((e) => e._id === id)?.name ?? "endpoint",
+    [],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Early returns
+  // ---------------------------------------------------------------------------
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="lg" />
-          <p className="text-sm text-wd-muted">Loading overview...</p>
+          <p className="text-sm text-wd-muted">Loading overview…</p>
         </div>
       </div>
-    )
+    );
   }
 
-  if (totalEndpoints === 0) {
+  if (endpoints.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="flex flex-col items-center gap-4 max-w-sm text-center">
           <div className="rounded-full bg-wd-primary/10 p-4">
-            <Icon icon="solar:server-square-outline" width={40} className="text-wd-primary" />
+            <Icon
+              icon="solar:server-square-outline"
+              width={40}
+              className="text-wd-primary"
+            />
           </div>
-          <h2 className="text-lg font-semibold text-foreground">No endpoints yet</h2>
+          <h2 className="text-lg font-semibold text-foreground">
+            No endpoints yet
+          </h2>
           <p className="text-sm text-wd-muted">
-            Add your first endpoint to start monitoring. WatchDeck will track uptime,
-            response times, and alert you when things go wrong.
+            Add your first endpoint to start monitoring. WatchDeck will track
+            uptime, response times, and alert you when things go wrong.
           </p>
           <Button
             className="!bg-wd-primary !text-wd-primary-foreground !rounded-lg !font-medium"
-            onPress={() => navigate('/endpoints/add')}
+            onPress={() => navigate("/endpoints/add")}
           >
             <Icon icon="solar:add-circle-outline" width={20} />
             Add Endpoint
           </Button>
         </div>
       </div>
-    )
+    );
   }
 
-  // Chart series configs — check which keys actually have data
-  const hasP95 = chartData.some((d) => d.p95 != null && Number(d.p95) > 0)
-  const hasMin = chartData.some((d) => d.min != null && Number(d.min) > 0)
-  const hasMax = chartData.some((d) => d.max != null && Number(d.max) > 0)
-  const responseTimeSeries = [
-    { key: 'avg', label: 'Avg', color: 'var(--wd-primary)', icon: 'solar:graph-outline', value: avgResponseTime != null ? `${avgResponseTime}ms` : '\u2014', change: '', changeType: 'neutral' as const },
-    { key: 'p95', label: 'P95', color: 'var(--wd-warning)', icon: 'solar:arrow-right-up-linear', value: hasP95 ? `${chartData[chartData.length - 1]?.p95 ?? '\u2014'}ms` : '\u2014', change: '', changeType: 'neutral' as const },
-    { key: 'min', label: 'Min', color: 'var(--wd-success)', icon: 'solar:arrow-right-down-linear', value: hasMin ? `${Math.min(...chartData.map((d) => Number(d.min ?? 0)))}ms` : '\u2014', change: '', changeType: 'neutral' as const },
-    { key: 'max', label: 'Max', color: 'var(--wd-danger)', icon: 'solar:arrow-right-up-linear', value: hasMax ? `${Math.max(...chartData.map((d) => Number(d.max ?? 0)))}ms` : '\u2014', change: '', changeType: 'neutral' as const },
-  ]
-  const rtDefaultHidden = [
-    ...(!hasP95 ? ['p95'] : []),
-    ...(!hasMin ? ['min'] : []),
-    ...(!hasMax ? ['max'] : []),
-  ]
+  // ---------------------------------------------------------------------------
+  // Chart series configs
+  // ---------------------------------------------------------------------------
 
-  // Availability: compute summary stats
-  const avgUptime = availabilityData.length > 0
-    ? Math.round(availabilityData.reduce((s, d) => s + Number(d.uptime ?? 100), 0) / availabilityData.length * 100) / 100
-    : null
-  const hasDownPercent = availabilityData.some((d) => Number(d.downPercent ?? 0) > 0)
+  const percentileSeriesConfig = [
+    {
+      key: "p99",
+      label: "P99",
+      color: "var(--wd-danger)",
+      icon: "solar:arrow-right-up-linear",
+      value: "",
+      change: "",
+      changeType: "neutral" as const,
+    },
+    {
+      key: "p95",
+      label: "P95",
+      color: "var(--wd-warning)",
+      icon: "solar:graph-outline",
+      value: "",
+      change: "",
+      changeType: "neutral" as const,
+    },
+    {
+      key: "p50",
+      label: "P50",
+      color: "var(--wd-primary)",
+      icon: "solar:minus-circle-outline",
+      value: "",
+      change: "",
+      changeType: "neutral" as const,
+    },
+  ];
 
-  const availabilitySeries = [
-    { key: 'uptime', label: 'Uptime', color: 'var(--wd-success)', icon: 'solar:shield-check-outline', value: avgUptime != null ? `${avgUptime}%` : '\u2014', change: '', changeType: 'neutral' as const },
-    { key: 'downPercent', label: 'Downtime', color: 'var(--wd-danger)', icon: 'solar:close-circle-outline', value: avgUptime != null ? `${Math.round((100 - avgUptime) * 100) / 100}%` : '\u2014', change: '', changeType: 'neutral' as const },
-    { key: 'incidents', label: 'Incidents', color: 'var(--wd-warning)', icon: 'solar:danger-triangle-outline', value: String(incidentCount), change: '', changeType: 'neutral' as const },
-  ]
-  const avDefaultHidden = [
-    ...(!hasDownPercent ? ['downPercent'] : []),
-    ...(incidentCount === 0 ? ['incidents'] : []),
-  ]
+  const uptimeSeriesConfig = [
+    {
+      key: "uptime",
+      label: "Uptime",
+      color: "var(--wd-success)",
+      icon: "solar:shield-check-outline",
+      value: fleetUptime != null ? `${fleetUptime}%` : "—",
+      change: "",
+      changeType: "neutral" as const,
+    },
+    {
+      key: "downPercent",
+      label: "Downtime",
+      color: "var(--wd-danger)",
+      icon: "solar:close-circle-outline",
+      value: fleetUptime != null ? `${(100 - fleetUptime).toFixed(2)}%` : "—",
+      change: "",
+      changeType: "neutral" as const,
+    },
+  ];
+
+  const errorSeriesConfig = [
+    {
+      key: "err",
+      label: "Error Rate",
+      color: "var(--wd-danger)",
+      icon: "solar:danger-triangle-outline",
+      value: avgErrRate != null ? `${avgErrRate}%` : "—",
+      change: "",
+      changeType: "neutral" as const,
+    },
+  ];
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-foreground">Overview</h1>
-        <div className="flex items-center gap-3">
-          <Segmented<TimeRange>
-            ariaLabel="Time range"
-            options={TIME_RANGES.map((r) => ({ key: r.key, label: r.label }))}
-            value={timeRange}
-            onChange={setTimeRange}
-            mono
+    <div className="p-6 flex flex-col gap-4 max-w-[1440px] mx-auto">
+      {/* Page head */}
+      <div className="flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-[20px] font-semibold tracking-tight text-foreground">
+            Overview
+          </h1>
+          <div className="text-[12.5px] text-wd-muted mt-1 flex flex-wrap items-center gap-x-2">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-wd-success animate-pulse" />
+              Live
+            </span>
+            <span className="opacity-40">·</span>
+            <span>
+              {effective.length} of {endpoints.length} endpoints in scope
+            </span>
+            <span className="opacity-40">·</span>
+            <span>Showing {RANGE_LABEL[range]} rolling window</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="!rounded-lg"
+            onPress={() => navigate("/incidents")}
+          >
+            <Icon icon="solar:clipboard-list-outline" width={16} />
+            Incidents
+          </Button>
+          <Button
+            size="sm"
+            className="!bg-wd-primary !text-wd-primary-foreground !rounded-lg !font-medium"
+            onPress={() => navigate("/endpoints/add")}
+          >
+            <Icon icon="solar:add-circle-outline" width={16} />
+            Add Endpoint
+          </Button>
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <OverviewFilterBar
+        endpoints={endpoints}
+        selectedIds={selectedIds}
+        onSelChange={setSelectedIds}
+        range={range}
+        onRangeChange={setRange}
+        refreshing={refreshing}
+        onRefresh={() => {
+          setRefreshing(true);
+          void fetchCore().finally(() => {
+            setRefreshing(false);
+          });
+        }}
+      />
+
+      {/* Waiting-for-data banner */}
+      {!chartLoading &&
+        effective.length > 0 &&
+        buckets.every((b) => b.throughput === 0) && (
+          <div className="flex items-center gap-2 rounded-lg border border-wd-border/30 bg-wd-surface-hover/30 px-3 py-2">
+            <Icon
+              icon="solar:clock-circle-outline"
+              width={18}
+              className="text-wd-muted shrink-0"
+            />
+            <span className="text-xs text-wd-muted">
+              Waiting for aggregated data — charts populate after the first
+              {RANGE_CONFIG[range].hourly ? " hourly" : " daily"} rollup
+            </span>
+          </div>
+        )}
+
+      {/* Hero + KPI rail */}
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] gap-3">
+        <FleetHero
+          counts={statusCounts}
+          activeIncidents={activeIncidents.length}
+        />
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <KpiCard
+            index={0}
+            title="Fleet Uptime"
+            value={fleetUptime != null ? String(fleetUptime) : "—"}
+            change={fleetUptime != null ? `Target ${slo.target}%` : undefined}
+            changeColor={
+              fleetUptime != null
+                ? fleetUptime >= slo.target
+                  ? "success"
+                  : "danger"
+                : undefined
+            }
+            trend={
+              fleetUptime != null
+                ? fleetUptime >= slo.target
+                  ? "up"
+                  : "down"
+                : undefined
+            }
+            icon="solar:heart-pulse-outline"
+            color={
+              fleetUptime == null
+                ? "primary"
+                : fleetUptime >= slo.target
+                  ? "success"
+                  : fleetUptime >= 99
+                    ? "warning"
+                    : "danger"
+            }
+            chartData={buckets.flatMap((b) =>
+              b.uptime != null ? [{ label: b.label, value: b.uptime }] : [],
+            )}
+            unit="%"
+            onClick={() => navigate("/endpoints")}
+          />
+          <KpiCard
+            index={1}
+            title="Global P95"
+            value={avgP95 != null ? `${avgP95}` : "—"}
+            change={avgP95 != null ? "Latency P95" : undefined}
+            changeColor={
+              avgP95 != null
+                ? avgP95 < 200
+                  ? "success"
+                  : avgP95 < 500
+                    ? "warning"
+                    : "danger"
+                : undefined
+            }
+            icon="solar:graph-outline"
+            color={
+              avgP95 == null
+                ? "primary"
+                : avgP95 < 200
+                  ? "success"
+                  : avgP95 < 500
+                    ? "warning"
+                    : "danger"
+            }
+            chartData={buckets.flatMap((b) =>
+              b.p95 != null ? [{ label: b.label, value: b.p95 }] : [],
+            )}
+            unit="ms"
+          />
+          <KpiCard
+            index={2}
+            title="Error Rate"
+            value={avgErrRate != null ? `${avgErrRate}` : "—"}
+            change={
+              avgErrRate != null
+                ? avgErrRate > 1
+                  ? "Over Threshold"
+                  : "Within Target"
+                : undefined
+            }
+            changeColor={
+              avgErrRate != null
+                ? avgErrRate > 1
+                  ? "danger"
+                  : "success"
+                : undefined
+            }
+            icon="solar:danger-triangle-outline"
+            color={
+              avgErrRate == null
+                ? "primary"
+                : avgErrRate > 1
+                  ? "danger"
+                  : avgErrRate > 0.5
+                    ? "warning"
+                    : "success"
+            }
+            chartData={buckets.flatMap((b) =>
+              b.errRate != null ? [{ label: b.label, value: b.errRate }] : [],
+            )}
+            unit="%"
+          />
+          <KpiCard
+            index={3}
+            title="Live Avg Response"
+            value={avgResponseTime != null ? `${avgResponseTime}` : "—"}
+            change="Realtime Mean"
+            changeColor="primary"
+            icon="solar:pulse-2-outline"
+            color="primary"
+            chartData={buckets.flatMap((b) =>
+              b.avg != null ? [{ label: b.label, value: b.avg }] : [],
+            )}
+            unit="ms"
+          />
+          <KpiCard
+            index={4}
+            title="Checks Ran"
+            value={totalChecksDisplay}
+            changeSegments={[
+              { text: `${effective.length} Endpoints`, color: "primary" },
+              { text: RANGE_LABEL[range], color: "primary" },
+            ]}
+            icon="solar:plug-circle-outline"
+            color="primary"
+            chartData={buckets.map((b) => ({
+              label: b.label,
+              value: b.throughput,
+            }))}
+          />
+          <KpiCard
+            index={5}
+            title="Active Incidents"
+            value={String(activeIncidents.length)}
+            changeSegments={
+              activeIncidents.length > 0
+                ? [
+                    {
+                      text: `${activeIncidents.length} Open`,
+                      color: "danger",
+                    },
+                  ]
+                : [{ text: "All Clear", color: "success" }]
+            }
+            icon="solar:bell-bing-outline"
+            color={activeIncidents.length > 0 ? "danger" : "success"}
+            chartData={buckets.map((b) => ({
+              label: b.label,
+              value: b.down,
+            }))}
+            onClick={() => navigate("/incidents")}
           />
         </div>
       </div>
 
-      {/* Data warning */}
-      {dataInsufficient && (
-        <div className="flex items-center gap-2 rounded-lg border border-wd-warning/30 bg-wd-warning/5 px-3 py-2">
-          <Icon icon="solar:info-circle-outline" width={20} className="text-wd-warning shrink-0" />
-          <span className="text-xs text-wd-warning">
-            Only <span className="font-mono">{humanDuration(dataHours!)}</span> of data available for the selected <span className="font-mono">{selectedRange.label}</span> range
-          </span>
-        </div>
-      )}
-      {dataHours === null && !chartLoading && endpoints.length > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-wd-border/30 bg-wd-surface-hover/30 px-3 py-2">
-          <Icon icon="solar:clock-circle-outline" width={20} className="text-wd-muted shrink-0" />
-          <span className="text-xs text-wd-muted">
-            Waiting for aggregated data &mdash; charts will populate after the first hourly rollup
-          </span>
+      {/* SLO budget banner */}
+      {budgetRemaining != null && (
+        <div className="rounded-xl border border-wd-border/50 bg-wd-surface px-4 py-3 grid grid-cols-1 md:grid-cols-[auto_1fr_auto] items-center gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-wd-primary/15 text-wd-primary">
+              <Icon icon="solar:shield-check-outline" width={16} />
+            </div>
+            <div>
+              <div className="text-[12.5px] font-semibold text-foreground">
+                Error Budget Remaining
+              </div>
+              <div className="text-[11px] text-wd-muted">
+                Rolling {slo.windowDays}d · Target {slo.target}%
+              </div>
+            </div>
+          </div>
+          <div className="h-2 rounded-full bg-wd-surface-hover overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-wd-danger via-wd-warning to-wd-success rounded-full"
+              style={{ width: `${budgetRemaining}%` }}
+            />
+          </div>
+          <div className="text-right font-mono text-[13px] font-semibold tabular-nums text-foreground">
+            {budgetRemaining}%{" "}
+            <span className="text-wd-muted text-[11px] font-normal">
+              remaining
+            </span>
+          </div>
         </div>
       )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          index={0}
-          title="Endpoints"
-          value={String(totalEndpoints)}
-          changeSegments={[
-            { text: `${upCount} up`, color: 'success' },
-            ...(statusCounts.degraded > 0 ? [{ text: `${statusCounts.degraded} degraded`, color: 'warning' as const }] : []),
-            { text: `${downCount} down`, color: downCount > 0 ? 'danger' : 'success' },
-          ]}
-          icon="solar:server-square-outline"
-          color="primary"
-          chartData={[]}
-          onClick={() => navigate('/endpoints')}
-        />
-        <KpiCard
-          index={1}
-          title="Uptime (24h)"
-          value={uptimeAvg24h != null ? `${uptimeAvg24h}%` : '\u2014'}
-          change={uptimeDelta != null ? `${uptimeDelta > 0 ? '+' : ''}${uptimeDelta}%` : undefined}
-          changeColor={uptimeDelta != null ? (uptimeDelta >= 0 ? 'success' : 'danger') : undefined}
-          changeLabel={uptimeDelta != null ? 'vs period avg' : undefined}
-          trend={uptimeDelta != null ? (uptimeDelta > 0 ? 'up' : uptimeDelta < 0 ? 'down' : 'flat') : undefined}
-          icon="solar:shield-check-outline"
-          color={
-            uptimeAvg24h == null
-              ? 'primary'
-              : uptimeAvg24h >= 99.9
-                ? 'success'
-                : uptimeAvg24h >= 99
-                  ? 'warning'
-                  : 'danger'
-          }
-          chartData={kpiUptimeData}
-          unit="%"
-          onClick={() => navigate('/endpoints')}
-        />
-        <KpiCard
-          index={2}
-          title="Avg Response"
-          value={avgResponseTime != null ? `${avgResponseTime}ms` : '\u2014'}
-          change={responseDelta != null ? `${responseDelta.pct > 0 ? '+' : ''}${responseDelta.pct}%` : undefined}
-          changeColor={responseDelta != null ? (responseDelta.diff <= 0 ? 'success' : responseDelta.diff < 50 ? 'warning' : 'danger') : undefined}
-          changeLabel={responseDelta != null ? 'vs prior' : undefined}
-          trend={responseDelta != null ? (responseDelta.diff > 5 ? 'up' : responseDelta.diff < -5 ? 'down' : 'flat') : undefined}
-          icon="solar:graph-outline"
-          color={
-            avgResponseTime == null
-              ? 'primary'
-              : avgResponseTime < 200
-                ? 'success'
-                : avgResponseTime < 500
-                  ? 'warning'
-                  : 'danger'
-          }
-          chartData={kpiResponseData}
-          unit="ms"
-          onClick={() => navigate('/endpoints')}
-        />
-        <KpiCard
-          index={3}
-          title="Active Incidents"
-          value={String(incidentCount)}
-          changeSegments={
-            topIncidentEndpoint
-              ? [{ text: topIncidentEndpoint, color: 'danger' }]
-              : incidentCount === 0
-                ? [{ text: 'All clear', color: 'success' }]
-                : undefined
-          }
-          icon="solar:danger-triangle-outline"
-          color={incidentCount > 0 ? 'danger' : 'success'}
-          chartData={[]}
-          onClick={() => navigate('/incidents')}
-        />
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      {/* Section: Fleet performance */}
+      <SectionHead
+        title="Fleet Performance"
+        hint="Hover charts for per-bucket breakdown"
+      />
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
         {chartLoading ? (
-          <>
-            <div className="border border-wd-border/30 rounded-xl p-8 flex items-center justify-center min-h-[380px]">
-              <Spinner size="md" />
-            </div>
-            <div className="border border-wd-border/30 rounded-xl p-8 flex items-center justify-center min-h-[380px]">
-              <Spinner size="md" />
-            </div>
-          </>
-        ) : chartData.length > 0 ? (
-          <>
-            <OverviewChart
-              title="Response Time"
-              icon="solar:graph-outline"
-              series={responseTimeSeries}
-              data={chartData}
-              unit="ms"
-              defaultHidden={rtDefaultHidden}
-              highlightRanges={rtHighlightRanges}
-            />
-            <OverviewChart
-              title="Availability"
-              icon="solar:shield-check-outline"
-              series={availabilitySeries}
-              data={availabilityData}
-              defaultHidden={avDefaultHidden}
-              highlightRanges={chartHighlightRanges}
-            />
-          </>
+          <ChartSkeleton />
         ) : (
-          <>
-            <div className="border border-wd-border/30 rounded-xl p-8 flex flex-col items-center justify-center gap-3 min-h-[380px]">
-              <Icon icon="solar:graph-outline" width={40} className="text-wd-muted/30" />
-              <p className="text-sm font-medium text-wd-muted">Response Time Chart</p>
-              <p className="text-xs text-wd-muted/60">
-                No data for this time range yet
-              </p>
-            </div>
-            <div className="border border-wd-border/30 rounded-xl p-8 flex flex-col items-center justify-center gap-3 min-h-[380px]">
-              <Icon icon="solar:shield-check-outline" width={40} className="text-wd-muted/30" />
-              <p className="text-sm font-medium text-wd-muted">Availability Chart</p>
-              <p className="text-xs text-wd-muted/60">
-                No data for this time range yet
-              </p>
-            </div>
-          </>
+          <OverviewChart
+            title="Response Time · Percentiles"
+            icon="solar:graph-outline"
+            series={percentileSeriesConfig}
+            data={percentileData}
+            unit="ms"
+          />
+        )}
+        {chartLoading ? (
+          <ChartSkeleton />
+        ) : (
+          <OverviewChart
+            title="Uptime % vs SLO"
+            icon="solar:shield-check-outline"
+            series={uptimeSeriesConfig}
+            data={uptimeData}
+            unit="%"
+            defaultHidden={["downPercent"]}
+          />
         )}
       </div>
+      <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-3">
+        {chartLoading ? (
+          <ChartSkeleton />
+        ) : (
+          <OverviewChart
+            title="Error Rate"
+            icon="solar:danger-triangle-outline"
+            series={errorSeriesConfig}
+            data={errorData}
+            unit="%"
+          />
+        )}
+        {chartLoading ? (
+          <ChartSkeleton />
+        ) : (
+          <StatusBarChart data={statusBarData} />
+        )}
+      </div>
+
+      {/* Per-endpoint comparison */}
+      <SectionHead
+        title="Per-Endpoint Comparison"
+        hint={
+          selectedIds.length > 0
+            ? `${selectedIds.length} selected`
+            : `${effective.length} endpoint${effective.length === 1 ? "" : "s"}`
+        }
+      />
+      {chartLoading ? (
+        <ChartSkeleton full />
+      ) : perEndpoint.rows.length > 0 ? (
+        <OverviewChart
+          title="Response Time · Per Endpoint"
+          icon="solar:server-square-outline"
+          series={perEndpointSeriesConfig}
+          data={perEndpoint.rows}
+          unit="ms"
+        />
+      ) : null}
+
+      {/* Heatmap */}
+      <EndpointHeatmap
+        rows={heatmap}
+        bucketCount={RANGE_CONFIG[range].limit}
+        xLabels={bucketKeys.map((k) => labelFor(k))}
+      />
+
+      {/* Incidents / feed / SLO */}
+      <SectionHead
+        title="Incidents & Compliance"
+        hint={
+          <button
+            type="button"
+            onClick={() => navigate("/incidents")}
+            className="text-wd-primary hover:underline"
+          >
+            Go to Incidents →
+          </button>
+        }
+      />
+      <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-3">
+        <ActiveIncidentsList
+          incidents={activeIncidents}
+          endpointName={endpointName}
+        />
+        <LiveActivityFeed
+          recentIncidents={recentIncidents}
+          endpointName={endpointName}
+        />
+      </div>
+      <SLOCompliance
+        items={sloItems}
+        target={slo.target}
+        windowLabel={`${slo.windowDays}d`}
+      />
+
+      {/* Rankings */}
+      <SectionHead
+        title="Problem Endpoints"
+        hint={`Sorted across the last ${RANGE_LABEL[range]}`}
+      />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <RankCard
+          title="Slowest (P95)"
+          subtitle="Top by tail latency"
+          icon="solar:clock-circle-outline"
+          accent="warning"
+          items={topSlow}
+          valueFor={(ep) => `${ep.p95}ms`}
+          valueAccent={() => "warning"}
+          sparkColor="var(--wd-warning)"
+        />
+        <RankCard
+          title="Flakiest (Incidents)"
+          subtitle="Recent incidents in window"
+          icon="solar:bolt-outline"
+          accent="danger"
+          items={topFlaky}
+          valueFor={(ep) => `${ep.flaps}×`}
+          valueAccent={(ep) => (ep.flaps > 3 ? "danger" : "muted")}
+          sparkColor="var(--wd-danger)"
+        />
+        <RankCard
+          title="Highest Error Rate"
+          subtitle="Weighted by checks"
+          icon="solar:bug-outline"
+          accent="danger"
+          items={topErr}
+          valueFor={(ep) => `${ep.errRate.toFixed(2)}%`}
+          valueAccent={() => "danger"}
+          sparkColor="var(--wd-primary)"
+        />
+      </div>
+
+      <div className="h-2" />
     </div>
-  )
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Local helpers
+// ---------------------------------------------------------------------------
+
+function SectionHead({
+  title,
+  hint,
+}: {
+  title: string;
+  hint?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between px-0.5 mt-1">
+      <h2 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-wd-muted/80">
+        {title}
+      </h2>
+      {hint && <span className="text-[11px] text-wd-muted/80">{hint}</span>}
+    </div>
+  );
+}
+
+function ChartSkeleton({ full }: { full?: boolean }) {
+  return (
+    <div
+      className={`border border-wd-border/30 rounded-xl p-8 flex items-center justify-center min-h-[300px] ${
+        full ? "col-span-full" : ""
+      }`}
+    >
+      <Spinner size="md" />
+    </div>
+  );
 }
