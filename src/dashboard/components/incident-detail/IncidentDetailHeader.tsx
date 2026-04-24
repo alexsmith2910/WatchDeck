@@ -183,7 +183,7 @@ function IncidentDetailHeaderBase({
             )}
             <span
               className={cn(
-                "rounded text-[10px] font-semibold font-mono uppercase tracking-[0.06em] px-1.5 py-[2px]",
+                "rounded text-[10.5px] font-semibold font-mono uppercase tracking-[0.08em] px-2 py-[2px]",
                 KIND_CHIP[meta.kind] ?? KIND_CHIP.other,
               )}
             >
