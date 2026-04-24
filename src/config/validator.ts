@@ -207,6 +207,16 @@ function validateDefaults(
     )
   }
 
+  if (!isInteger(d.recoveryThreshold) || d.recoveryThreshold < 1 || d.recoveryThreshold > 10) {
+    push(
+      errors,
+      'defaults.recoveryThreshold',
+      d.recoveryThreshold,
+      'integer between 1 and 10',
+      'Set defaults.recoveryThreshold to the number of consecutive healthy checks required to auto-resolve an incident',
+    )
+  }
+
   if (!isInteger(d.alertCooldown) || d.alertCooldown < 300 || d.alertCooldown > 7200) {
     push(
       errors,

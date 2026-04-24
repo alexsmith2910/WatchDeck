@@ -144,6 +144,9 @@ export class CheckScheduler {
   private readonly lastHostCheckTime = new Map<string, number>()
   /** Per-endpoint consecutive failure count — seeded from DB on boot. */
   private readonly consecutiveFailures = new Map<string, number>()
+  /** Per-endpoint consecutive healthy count — the recovery streak. Seeded
+   *  from DB on boot alongside the failure count. */
+  private readonly consecutiveHealthy = new Map<string, number>()
 
   /** Expected ms timestamp of the next tick — used to measure drift. */
   private expectedNextTick: number | null = null
@@ -184,8 +187,9 @@ export class CheckScheduler {
 
     for (const ep of endpoints) {
       if (ep.status === 'archived') continue
-      // Seed consecutive failure counts from persisted DB state.
+      // Seed consecutive failure + healthy counts from persisted DB state.
       this.consecutiveFailures.set(ep._id.toString(), ep.consecutiveFailures)
+      this.consecutiveHealthy.set(ep._id.toString(), ep.consecutiveHealthy)
       // Random jitter spreads initial checks across the first interval window.
       const jitter = Math.floor(Math.random() * ep.checkInterval * 1000)
       this.insertSafe({ endpointId: ep._id.toString(), nextDue: now + jitter, endpoint: ep })
@@ -219,6 +223,7 @@ export class CheckScheduler {
     this.stop()
     this.heap.clear()
     this.consecutiveFailures.clear()
+    this.consecutiveHealthy.clear()
     this.lastHostCheckTime.clear()
     this.driftRing = []
     this.expectedNextTick = null
@@ -282,6 +287,7 @@ export class CheckScheduler {
           if (endpoint.status === 'archived' || !endpoint.enabled) return
           const id = endpoint._id.toString()
           this.consecutiveFailures.set(id, endpoint.consecutiveFailures)
+          this.consecutiveHealthy.set(id, endpoint.consecutiveHealthy)
           this.insertSafe({ endpointId: id, nextDue: Date.now(), endpoint })
         },
         'critical',
@@ -311,6 +317,7 @@ export class CheckScheduler {
         ({ endpointId }) => {
           this.heap.remove(endpointId)
           this.consecutiveFailures.delete(endpointId)
+          this.consecutiveHealthy.delete(endpointId)
         },
         'critical',
       ),
@@ -322,10 +329,15 @@ export class CheckScheduler {
       eventBus.subscribe(
       'check:complete',
       ({ endpointId, status, timestamp, responseTime, statusCode, errorMessage, sslIssuer, bodyBytes, bodyBytesTruncated }) => {
-        // Update in-memory consecutive failures.
-        const prev = this.consecutiveFailures.get(endpointId) ?? 0
-        const failures = status === 'healthy' ? 0 : prev + 1
+        // Update in-memory consecutive failure + healthy streaks. A healthy
+        // check resets failures and extends the healthy streak; anything else
+        // does the opposite.
+        const prevFailures = this.consecutiveFailures.get(endpointId) ?? 0
+        const prevHealthy = this.consecutiveHealthy.get(endpointId) ?? 0
+        const failures = status === 'healthy' ? 0 : prevFailures + 1
+        const healthy = status === 'healthy' ? prevHealthy + 1 : 0
         this.consecutiveFailures.set(endpointId, failures)
+        this.consecutiveHealthy.set(endpointId, healthy)
 
         // Reflect latest state in the heap entry.
         this.heap.update(endpointId, (entry) => ({
@@ -338,12 +350,13 @@ export class CheckScheduler {
             lastStatusCode: statusCode,
             lastErrorMessage: errorMessage,
             consecutiveFailures: failures,
+            consecutiveHealthy: healthy,
           },
         }))
 
         // Persist state to DB (fire-and-forget — failures here are non-critical).
         this.adapter.updateEndpointAfterCheck(
-          endpointId, status, timestamp, failures, responseTime, statusCode, errorMessage, sslIssuer,
+          endpointId, status, timestamp, failures, healthy, responseTime, statusCode, errorMessage, sslIssuer,
         ).catch(
           (err: unknown) => {
             eventBus.emit('system:warning', {

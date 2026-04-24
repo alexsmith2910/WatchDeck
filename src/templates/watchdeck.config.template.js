@@ -19,6 +19,7 @@ export default {
     latencyThreshold: 5000,
     sslWarningDays: 14,
     failureThreshold: 3,
+    recoveryThreshold: 2,
     alertCooldown: 900,
     recoveryAlert: true,
     escalationDelay: 1800,

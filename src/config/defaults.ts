@@ -125,6 +125,15 @@ export const defaults = {
     failureThreshold: 3,
 
     /**
+     * Number of consecutive healthy checks required before an active incident
+     * is auto-resolved. Mirrors `failureThreshold` on the recovery side — a
+     * single healthy probe no longer closes an incident; the endpoint has to
+     * prove it's stable.
+     * Range: 1–10.
+     */
+    recoveryThreshold: 2,
+
+    /**
      * Minimum seconds between repeated alert notifications for the same incident.
      * Prevents notification spam during extended outages.
      * Range: 300–7200 seconds.

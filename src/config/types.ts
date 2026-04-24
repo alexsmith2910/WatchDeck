@@ -31,6 +31,7 @@ export interface WatchDeckConfig {
     latencyThreshold: number;
     sslWarningDays: number;
     failureThreshold: number;
+    recoveryThreshold: number;
     alertCooldown: number;
     recoveryAlert: boolean;
     escalationDelay: number;

@@ -42,7 +42,7 @@ function makeConfig(maxEventListeners: number, eventHistorySize: number): WatchD
     dashboardRoute: '/dashboard',
     dashboardMode: 'standalone',
     modules: { discord: false, slack: false, sslChecks: false, portChecks: false, bodyValidation: false },
-    defaults: { checkInterval: 60, timeout: 10000, expectedStatusCodes: [200], latencyThreshold: 5000, sslWarningDays: 14, failureThreshold: 3, alertCooldown: 900, recoveryAlert: true, escalationDelay: 1800 },
+    defaults: { checkInterval: 60, timeout: 10000, expectedStatusCodes: [200], latencyThreshold: 5000, sslWarningDays: 14, failureThreshold: 3, recoveryThreshold: 2, alertCooldown: 900, recoveryAlert: true, escalationDelay: 1800 },
     retention: { detailedDays: 30, hourlyDays: 90, daily: '1year', notificationLogDays: 60 },
     rateLimits: { minCheckInterval: 30, maxConcurrentChecks: 10, perHostMinGap: 2, dbReconnectAttempts: 30, dbPoolSize: 10, maxEventListeners },
     buffer: { memoryCapacity: 1000 },

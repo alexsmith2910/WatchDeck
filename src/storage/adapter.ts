@@ -43,6 +43,7 @@ export interface EffectiveDefaults {
   latencyThreshold: number
   sslWarningDays: number
   failureThreshold: number
+  recoveryThreshold: number
   alertCooldown: number
   recoveryAlert: boolean
   escalationDelay: number
@@ -263,6 +264,7 @@ export abstract class StorageAdapter {
     status: 'healthy' | 'degraded' | 'down',
     timestamp: Date,
     consecutiveFailures: number,
+    consecutiveHealthy: number,
     responseTime: number,
     statusCode: number | null,
     errorMessage: string | null,
@@ -552,6 +554,7 @@ export abstract class StorageAdapter {
       latencyThreshold: override.latencyThreshold ?? base.latencyThreshold,
       sslWarningDays: override.sslWarningDays ?? base.sslWarningDays,
       failureThreshold: override.failureThreshold ?? base.failureThreshold,
+      recoveryThreshold: override.recoveryThreshold ?? base.recoveryThreshold,
       alertCooldown: override.alertCooldown ?? base.alertCooldown,
       recoveryAlert: override.recoveryAlert ?? base.recoveryAlert,
       escalationDelay: override.escalationDelay ?? base.escalationDelay,

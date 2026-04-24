@@ -141,6 +141,7 @@ const baseConfig: Pick<WatchDeckConfig, 'defaults' | 'slo'> = {
     latencyThreshold: 5_000,
     sslWarningDays: 14,
     failureThreshold: 3,
+    recoveryThreshold: 2,
     alertCooldown: 900,
     recoveryAlert: true,
     escalationDelay: 1_800,

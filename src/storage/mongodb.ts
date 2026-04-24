@@ -405,6 +405,7 @@ export class MongoDBAdapter extends StorageAdapter {
     status: 'healthy' | 'degraded' | 'down',
     timestamp: Date,
     consecutiveFailures: number,
+    consecutiveHealthy: number,
     responseTime: number,
     statusCode: number | null,
     errorMessage: string | null,
@@ -418,6 +419,7 @@ export class MongoDBAdapter extends StorageAdapter {
       lastStatusCode: statusCode,
       lastErrorMessage: errorMessage,
       consecutiveFailures,
+      consecutiveHealthy,
       updatedAt: new Date(),
     }
     if (sslIssuer && (sslIssuer.o || sslIssuer.cn)) {

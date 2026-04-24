@@ -147,6 +147,7 @@ export interface EndpointDoc {
   latencyThreshold: number
   sslWarningDays: number
   failureThreshold: number
+  recoveryThreshold: number
   alertCooldown: number
   recoveryAlert: boolean
   escalationDelay: number
@@ -171,6 +172,9 @@ export interface EndpointDoc {
   lastSslIssuer?: { o?: string; cn?: string; capturedAt: Date }
   currentIncidentId?: ObjectId
   consecutiveFailures: number
+  /** Healthy streak since the most recent failure. Incident auto-resolves
+   *  when this reaches `recoveryThreshold`. Reset to 0 on any non-healthy check. */
+  consecutiveHealthy: number
 
   createdAt: Date
   updatedAt: Date
@@ -539,6 +543,7 @@ export interface SettingsDefaultsOverride {
   latencyThreshold?: number
   sslWarningDays?: number
   failureThreshold?: number
+  recoveryThreshold?: number
   alertCooldown?: number
   recoveryAlert?: boolean
   escalationDelay?: number

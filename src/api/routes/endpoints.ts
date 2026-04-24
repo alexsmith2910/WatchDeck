@@ -39,6 +39,7 @@ export const MONITORING_FIELD_RANGES = {
   latencyThreshold: { min: 100, max: 30_000 },
   sslWarningDays: { min: 0, max: 365 },
   failureThreshold: { min: 1, max: 10 },
+  recoveryThreshold: { min: 1, max: 10 },
   alertCooldown: { min: 0, max: 7_200 },
   escalationDelay: { min: 0, max: 86_400 },
 } as const
@@ -107,6 +108,11 @@ export const mutableFieldProps = {
     type: 'integer',
     minimum: MONITORING_FIELD_RANGES.failureThreshold.min,
     maximum: MONITORING_FIELD_RANGES.failureThreshold.max,
+  },
+  recoveryThreshold: {
+    type: 'integer',
+    minimum: MONITORING_FIELD_RANGES.recoveryThreshold.min,
+    maximum: MONITORING_FIELD_RANGES.recoveryThreshold.max,
   },
   alertCooldown: {
     type: 'integer',
@@ -303,6 +309,7 @@ export function endpointsRoutes(ctx: AppContext) {
         latencyThreshold: (body.latencyThreshold as number | undefined) ?? cfg.latencyThreshold,
         sslWarningDays: (body.sslWarningDays as number | undefined) ?? cfg.sslWarningDays,
         failureThreshold: (body.failureThreshold as number | undefined) ?? cfg.failureThreshold,
+        recoveryThreshold: (body.recoveryThreshold as number | undefined) ?? cfg.recoveryThreshold,
         alertCooldown: (body.alertCooldown as number | undefined) ?? cfg.alertCooldown,
         recoveryAlert: (body.recoveryAlert as boolean | undefined) ?? cfg.recoveryAlert,
         escalationDelay: (body.escalationDelay as number | undefined) ?? cfg.escalationDelay,
@@ -311,6 +318,7 @@ export function endpointsRoutes(ctx: AppContext) {
           .map((id) => new ObjectId(id)),
         maintenanceWindows: [],
         consecutiveFailures: 0,
+        consecutiveHealthy: 0,
       }
 
       if (type === 'http') {
@@ -528,6 +536,7 @@ export function endpointsRoutes(ctx: AppContext) {
         lastSslIssuer: _omit_lastSslIssuer,
         currentIncidentId: _omit_currentIncidentId,
         consecutiveFailures: _omit_consecutiveFailures,
+        consecutiveHealthy: _omit_consecutiveHealthy,
         ...configFields
       } = existing
 
@@ -536,6 +545,7 @@ export function endpointsRoutes(ctx: AppContext) {
         name: `Copy of ${existing.name}`,
         status: 'paused', // safer default — the user hasn't reviewed it yet
         consecutiveFailures: 0,
+        consecutiveHealthy: 0,
       }
 
       const clone = await ctx.adapter.createEndpoint(cloneData)

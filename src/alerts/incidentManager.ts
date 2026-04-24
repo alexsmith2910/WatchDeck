@@ -1,14 +1,17 @@
 /**
  * Incident Manager — listens to check:complete events and creates/resolves
- * incidents when an endpoint crosses its `failureThreshold` consecutive failures.
+ * incidents when an endpoint crosses its `failureThreshold` consecutive failures
+ * or its `recoveryThreshold` consecutive healthy checks.
  *
  * Flow:
  *   1. check:complete fires with status = 'down' or 'degraded'
  *   2. If no active incident exists AND consecutiveFailures >= failureThreshold
  *      → create one, emit incident:opened
  *   3. If an active incident already exists → append the check to the timeline
- *   4. When a previously-failing endpoint returns status = 'healthy'
- *      AND an active incident exists → resolve it, emit incident:resolved
+ *   4. When a previously-failing endpoint returns status = 'healthy',
+ *      we require `recoveryThreshold` consecutive healthy checks before
+ *      resolving. A single healthy probe logs a timeline entry but does not
+ *      close the incident unless the streak has met the threshold.
  *
  * Decision logic is purely in-memory (activeIncidents + endpointMeta maps) — no
  * DB reads needed to decide whether to open/resolve. Seeded from DB at init,
@@ -22,7 +25,9 @@ import type { IncidentDoc } from '../storage/types.js'
 
 interface EndpointMeta {
   failureThreshold: number
+  recoveryThreshold: number
   consecutiveFailures: number
+  consecutiveHealthy: number
 }
 
 export class IncidentManager {
@@ -52,7 +57,9 @@ export class IncidentManager {
     for (const ep of endpoints) {
       this.endpointMeta.set(ep._id.toString(), {
         failureThreshold: ep.failureThreshold,
+        recoveryThreshold: ep.recoveryThreshold,
         consecutiveFailures: ep.consecutiveFailures,
+        consecutiveHealthy: ep.consecutiveHealthy,
       })
     }
 
@@ -71,7 +78,9 @@ export class IncidentManager {
         if (endpoint.status === 'archived' || !endpoint.enabled) return
         this.endpointMeta.set(endpoint._id.toString(), {
           failureThreshold: endpoint.failureThreshold,
+          recoveryThreshold: endpoint.recoveryThreshold,
           consecutiveFailures: endpoint.consecutiveFailures,
+          consecutiveHealthy: endpoint.consecutiveHealthy,
         })
       },
       'critical',
@@ -84,6 +93,9 @@ export class IncidentManager {
         if (!existing) return
         if (typeof changes.failureThreshold === 'number') {
           existing.failureThreshold = changes.failureThreshold
+        }
+        if (typeof changes.recoveryThreshold === 'number') {
+          existing.recoveryThreshold = changes.recoveryThreshold
         }
       },
       'critical',
@@ -136,16 +148,32 @@ export class IncidentManager {
     if (!meta) return
 
     if (status === 'healthy') {
-      // Reset the failure streak regardless of incident state.
+      // Reset the failure streak and extend the healthy streak.
       meta.consecutiveFailures = 0
+      meta.consecutiveHealthy = meta.consecutiveHealthy + 1
+
       if (hasActiveIncident) {
-        await this.resolveIncident(endpointId, timestamp)
+        const incidentId = this.activeIncidents.get(endpointId)!
+        // Log every healthy probe while the incident is still open so the
+        // recovery progression is visible on the timeline.
+        const detail = `healthy — ${statusCode ?? 'no status code'} — ${responseTime}ms (${meta.consecutiveHealthy}/${meta.recoveryThreshold})`
+        await this.adapter.addIncidentTimelineEvent(incidentId, {
+          at: timestamp,
+          event: 'check',
+          detail,
+        })
+        // Gate on recoveryThreshold: only resolve once the healthy streak
+        // crosses the threshold.
+        if (meta.consecutiveHealthy >= meta.recoveryThreshold) {
+          await this.resolveIncident(endpointId, timestamp)
+        }
       }
       return
     }
 
     // ── Failure (down or degraded) ──
     meta.consecutiveFailures = meta.consecutiveFailures + 1
+    meta.consecutiveHealthy = 0
 
     if (hasActiveIncident) {
       // Already tracking — log this check to the incident timeline.
@@ -190,7 +218,9 @@ export class IncidentManager {
 
     const meta: EndpointMeta = {
       failureThreshold: ep.failureThreshold,
+      recoveryThreshold: ep.recoveryThreshold,
       consecutiveFailures: ep.consecutiveFailures,
+      consecutiveHealthy: ep.consecutiveHealthy,
     }
     this.endpointMeta.set(endpointId, meta)
     return meta

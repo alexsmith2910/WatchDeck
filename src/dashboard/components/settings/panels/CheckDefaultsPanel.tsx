@@ -21,6 +21,7 @@ import {
   LATENCY_PRESETS,
   SSL_WARNING_PRESETS,
   FAILURE_THRESHOLD_PRESETS,
+  RECOVERY_THRESHOLD_PRESETS,
   ALERT_COOLDOWN_PRESETS,
   ESCALATION_DELAY_PRESETS,
   withCustomOption,
@@ -42,6 +43,7 @@ interface EffectiveDefaults {
   latencyThreshold: number
   sslWarningDays: number
   failureThreshold: number
+  recoveryThreshold: number
   alertCooldown: number
   recoveryAlert: boolean
   escalationDelay: number
@@ -72,6 +74,7 @@ const FALLBACK_DEFAULTS: EffectiveDefaults = {
   latencyThreshold: 5_000,
   sslWarningDays: 14,
   failureThreshold: 3,
+  recoveryThreshold: 2,
   alertCooldown: 900,
   recoveryAlert: true,
   escalationDelay: 1_800,
@@ -136,6 +139,10 @@ export function CheckDefaultsPanel({ onDirtyChange }: Props) {
     () => withCustomOption(FAILURE_THRESHOLD_PRESETS, draft.failureThreshold, (n) => String(n)),
     [draft.failureThreshold],
   )
+  const recoveryOptions = useMemo(
+    () => withCustomOption(RECOVERY_THRESHOLD_PRESETS, draft.recoveryThreshold, (n) => String(n)),
+    [draft.recoveryThreshold],
+  )
   const alertCooldownOptions = useMemo(
     () => withCustomOption(ALERT_COOLDOWN_PRESETS, draft.alertCooldown, fmtSeconds),
     [draft.alertCooldown],
@@ -161,6 +168,7 @@ export function CheckDefaultsPanel({ onDirtyChange }: Props) {
       latencyThreshold: draft.latencyThreshold,
       sslWarningDays: draft.sslWarningDays,
       failureThreshold: draft.failureThreshold,
+      recoveryThreshold: draft.recoveryThreshold,
       alertCooldown: draft.alertCooldown,
       recoveryAlert: draft.recoveryAlert,
       escalationDelay: draft.escalationDelay,
@@ -246,6 +254,15 @@ export function CheckDefaultsPanel({ onDirtyChange }: Props) {
             options={failureOptions}
             onChange={(id) => setDraft((d) => ({ ...d, failureThreshold: Number(id) }))}
             ariaLabel="Failure threshold"
+            fullWidth
+          />
+        </Field>
+        <Field label="Recovery threshold" hint="Consecutive healthy checks required to auto-resolve.">
+          <FilterDropdown<string>
+            value={String(draft.recoveryThreshold)}
+            options={recoveryOptions}
+            onChange={(id) => setDraft((d) => ({ ...d, recoveryThreshold: Number(id) }))}
+            ariaLabel="Recovery threshold"
             fullWidth
           />
         </Field>
@@ -351,6 +368,7 @@ function defaultsEqual(a: EffectiveDefaults, b: EffectiveDefaults): boolean {
     a.latencyThreshold === b.latencyThreshold &&
     a.sslWarningDays === b.sslWarningDays &&
     a.failureThreshold === b.failureThreshold &&
+    a.recoveryThreshold === b.recoveryThreshold &&
     a.alertCooldown === b.alertCooldown &&
     a.recoveryAlert === b.recoveryAlert &&
     a.escalationDelay === b.escalationDelay

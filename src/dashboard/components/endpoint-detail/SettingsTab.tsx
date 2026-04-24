@@ -983,6 +983,14 @@ export const FAILURE_THRESHOLD_PRESETS: PresetOption[] = [
   { id: "10", label: "10" },
 ];
 
+export const RECOVERY_THRESHOLD_PRESETS: PresetOption[] = [
+  { id: "1", label: "1 (resolve on first healthy)" },
+  { id: "2", label: "2" },
+  { id: "3", label: "3" },
+  { id: "5", label: "5" },
+  { id: "10", label: "10" },
+];
+
 export const ALERT_COOLDOWN_PRESETS: PresetOption[] = [
   { id: "0", label: "None" },
   { id: "60", label: "1 minute" },
@@ -1108,6 +1116,9 @@ function MonitoringPanel({
   const [failureThreshold, setFailureThreshold] = useState(
     endpoint.failureThreshold,
   );
+  const [recoveryThreshold, setRecoveryThreshold] = useState(
+    endpoint.recoveryThreshold,
+  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1133,6 +1144,11 @@ function MonitoringPanel({
       withCustomOption(FAILURE_THRESHOLD_PRESETS, failureThreshold, (n) => String(n)),
     [failureThreshold],
   );
+  const recoveryOptions = useMemo(
+    () =>
+      withCustomOption(RECOVERY_THRESHOLD_PRESETS, recoveryThreshold, (n) => String(n)),
+    [recoveryThreshold],
+  );
 
   const dirty = useMemo(() => {
     return (
@@ -1140,7 +1156,8 @@ function MonitoringPanel({
       timeoutMs !== endpoint.timeout ||
       latencyThreshold !== endpoint.latencyThreshold ||
       sslWarningDays !== endpoint.sslWarningDays ||
-      failureThreshold !== endpoint.failureThreshold
+      failureThreshold !== endpoint.failureThreshold ||
+      recoveryThreshold !== endpoint.recoveryThreshold
     );
   }, [
     checkInterval,
@@ -1148,6 +1165,7 @@ function MonitoringPanel({
     latencyThreshold,
     sslWarningDays,
     failureThreshold,
+    recoveryThreshold,
     endpoint,
   ]);
 
@@ -1164,6 +1182,7 @@ function MonitoringPanel({
       latencyThreshold,
       sslWarningDays,
       failureThreshold,
+      recoveryThreshold,
     };
     const res = await request<{ data: ApiEndpoint }>(
       `/endpoints/${endpoint._id}/settings`,
@@ -1174,9 +1193,40 @@ function MonitoringPanel({
     );
     setSaving(false);
     if (res.status < 400 && res.data.data) {
-      onEndpointUpdated(res.data.data);
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 1500);
+      const saved = res.data.data;
+      // Detect the "silent field drop" case: save succeeds (200) but the
+      // server returns an endpoint without the field we sent. This
+      // historically hid bugs where the API's OVERRIDABLE_FIELDS list drifted
+      // behind a new schema field. We call out the specific fields so the
+      // user can see which key got dropped.
+      const dropped: string[] = [];
+      if (saved.checkInterval !== checkInterval) dropped.push("checkInterval");
+      if (saved.timeout !== timeoutMs) dropped.push("timeout");
+      if (saved.latencyThreshold !== latencyThreshold)
+        dropped.push("latencyThreshold");
+      if (saved.sslWarningDays !== sslWarningDays)
+        dropped.push("sslWarningDays");
+      if (saved.failureThreshold !== failureThreshold)
+        dropped.push("failureThreshold");
+      if (saved.recoveryThreshold !== recoveryThreshold)
+        dropped.push("recoveryThreshold");
+      // Re-sync local state to the server's view regardless — so the
+      // dropdown can't show a value that isn't actually persisted.
+      setCheckInterval(saved.checkInterval);
+      setTimeoutMs(saved.timeout);
+      setLatencyThreshold(saved.latencyThreshold);
+      setSslWarningDays(saved.sslWarningDays);
+      setFailureThreshold(saved.failureThreshold);
+      setRecoveryThreshold(saved.recoveryThreshold);
+      onEndpointUpdated(saved);
+      if (dropped.length > 0) {
+        setError(
+          `Server accepted the request but did not persist: ${dropped.join(", ")}. Restart the backend so the latest schema takes effect.`,
+        );
+      } else {
+        setSaved(true);
+        window.setTimeout(() => setSaved(false), 1500);
+      }
     } else {
       const e = res.data as unknown as { message?: string };
       setError(e.message ?? "Failed to save");
@@ -1187,6 +1237,7 @@ function MonitoringPanel({
     latencyThreshold,
     sslWarningDays,
     failureThreshold,
+    recoveryThreshold,
     endpoint._id,
     request,
     onEndpointUpdated,
@@ -1274,6 +1325,18 @@ function MonitoringPanel({
             options={failureOptions}
             onChange={(id) => setFailureThreshold(Number(id))}
             ariaLabel="Failure threshold"
+            fullWidth
+          />
+        </Field>
+        <Field
+          label="Recovery threshold"
+          hint="Consecutive healthy checks required to auto-resolve"
+        >
+          <FilterDropdown<string>
+            value={String(recoveryThreshold)}
+            options={recoveryOptions}
+            onChange={(id) => setRecoveryThreshold(Number(id))}
+            ariaLabel="Recovery threshold"
             fullWidth
           />
         </Field>

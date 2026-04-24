@@ -284,5 +284,28 @@ export async function runMigrations(
     await ensureIndexes(db, col.name, col.indexes)
   }
 
+  await backfillEndpointFields(db, prefix)
+
   return { collectionCount: collections.length }
+}
+
+/**
+ * Idempotent backfill for per-endpoint fields introduced after the initial
+ * release. Each step targets docs that lack the field so re-runs are no-ops.
+ *
+ *   - recoveryThreshold: consecutive healthy checks required to auto-resolve
+ *     an incident. Legacy docs default to 2 — the same value shipped in
+ *     config defaults.
+ *   - consecutiveHealthy: running healthy streak. Legacy docs start at 0.
+ */
+async function backfillEndpointFields(db: Db, prefix: string): Promise<void> {
+  const col = db.collection(`${prefix}endpoints`)
+  await col.updateMany(
+    { recoveryThreshold: { $exists: false } },
+    { $set: { recoveryThreshold: 2 } },
+  )
+  await col.updateMany(
+    { consecutiveHealthy: { $exists: false } },
+    { $set: { consecutiveHealthy: 0 } },
+  )
 }

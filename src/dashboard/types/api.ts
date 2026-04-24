@@ -19,6 +19,7 @@ export interface ApiEndpoint {
   latencyThreshold: number
   sslWarningDays: number
   failureThreshold: number
+  recoveryThreshold: number
   alertCooldown: number
   recoveryAlert: boolean
   escalationDelay: number
@@ -33,6 +34,7 @@ export interface ApiEndpoint {
   lastErrorMessage?: string | null
   lastSslIssuer?: { o?: string; cn?: string; capturedAt: string }
   consecutiveFailures: number
+  consecutiveHealthy: number
   createdAt: string
   updatedAt: string
 }

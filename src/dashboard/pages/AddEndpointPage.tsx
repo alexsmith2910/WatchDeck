@@ -28,6 +28,7 @@ import {
   EmptyAssertionsHint,
   ESCALATION_DELAY_PRESETS,
   FAILURE_THRESHOLD_PRESETS,
+  RECOVERY_THRESHOLD_PRESETS,
   Field,
   HeaderRows,
   LATENCY_PRESETS,
@@ -70,6 +71,7 @@ const DEFAULTS = {
   latencyThreshold: 5_000,
   sslWarningDays: 14,
   failureThreshold: 3,
+  recoveryThreshold: 2,
   alertCooldown: 900,
   escalationDelay: 1_800,
 } as const;
@@ -100,6 +102,7 @@ export default function AddEndpointPage() {
   const [latencyThreshold, setLatencyThreshold] = useState<number>(DEFAULTS.latencyThreshold);
   const [sslWarningDays, setSslWarningDays] = useState<number>(DEFAULTS.sslWarningDays);
   const [failureThreshold, setFailureThreshold] = useState<number>(DEFAULTS.failureThreshold);
+  const [recoveryThreshold, setRecoveryThreshold] = useState<number>(DEFAULTS.recoveryThreshold);
 
   // ── Assertions ──
   const [assertions, setAssertions] = useState<AssertionDraft[]>([]);
@@ -182,6 +185,7 @@ export default function AddEndpointPage() {
       latencyThreshold,
       sslWarningDays,
       failureThreshold,
+      recoveryThreshold,
       alertCooldown,
       recoveryAlert,
       escalationDelay,
@@ -232,6 +236,7 @@ export default function AddEndpointPage() {
     latencyThreshold,
     sslWarningDays,
     failureThreshold,
+    recoveryThreshold,
     assertions,
     alertCooldown,
     recoveryAlert,
@@ -338,6 +343,8 @@ export default function AddEndpointPage() {
               setSslWarningDays={setSslWarningDays}
               failureThreshold={failureThreshold}
               setFailureThreshold={setFailureThreshold}
+              recoveryThreshold={recoveryThreshold}
+              setRecoveryThreshold={setRecoveryThreshold}
               hasLatencyAssertion={assertions.some((a) => a.kind === "latency")}
               hasSslAssertion={assertions.some((a) => a.kind === "ssl")}
               onJumpToSection={setSection}
@@ -627,6 +634,8 @@ function MonitoringSection({
   setSslWarningDays,
   failureThreshold,
   setFailureThreshold,
+  recoveryThreshold,
+  setRecoveryThreshold,
   hasLatencyAssertion,
   hasSslAssertion,
   onJumpToSection,
@@ -641,6 +650,8 @@ function MonitoringSection({
   setSslWarningDays: (n: number) => void;
   failureThreshold: number;
   setFailureThreshold: (n: number) => void;
+  recoveryThreshold: number;
+  setRecoveryThreshold: (n: number) => void;
   hasLatencyAssertion: boolean;
   hasSslAssertion: boolean;
   onJumpToSection: (s: Section) => void;
@@ -667,6 +678,13 @@ function MonitoringSection({
         String(n),
       ),
     [failureThreshold],
+  );
+  const recoveryOptions = useMemo(
+    () =>
+      withCustomOption(RECOVERY_THRESHOLD_PRESETS, recoveryThreshold, (n) =>
+        String(n),
+      ),
+    [recoveryThreshold],
   );
 
   return (
@@ -751,6 +769,18 @@ function MonitoringSection({
             options={failureOptions}
             onChange={(id) => setFailureThreshold(Number(id))}
             ariaLabel="Failure threshold"
+            fullWidth
+          />
+        </Field>
+        <Field
+          label="Recovery threshold"
+          hint="Consecutive healthy checks required to auto-resolve"
+        >
+          <FilterDropdown<string>
+            value={String(recoveryThreshold)}
+            options={recoveryOptions}
+            onChange={(id) => setRecoveryThreshold(Number(id))}
+            ariaLabel="Recovery threshold"
             fullWidth
           />
         </Field>
