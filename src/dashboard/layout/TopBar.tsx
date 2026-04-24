@@ -6,6 +6,7 @@ import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
 import { toast } from '../ui/toast'
 import StatusPill from '../components/StatusPill'
+import { formatDuration } from '../utils/format'
 import type { ApiNotificationPreferences } from '../types/notifications'
 
 // ---------------------------------------------------------------------------
@@ -243,13 +244,9 @@ export default function TopBar({ isCompact, onToggleSidebar }: TopBarProps) {
     ? {
         name: topIncident.cause,
         detail: topIncident.causeDetail ?? '',
-        duration: (() => {
-          const s = Math.floor((Date.now() - new Date(topIncident.startedAt).getTime()) / 1000)
-          if (s < 60) return `${s}s`
-          const m = Math.floor(s / 60)
-          if (m < 60) return `${m}m`
-          return `${Math.floor(m / 60)}h ${m % 60}m`
-        })(),
+        duration: formatDuration(
+          Math.floor((Date.now() - new Date(topIncident.startedAt).getTime()) / 1000),
+        ),
       }
     : undefined
 

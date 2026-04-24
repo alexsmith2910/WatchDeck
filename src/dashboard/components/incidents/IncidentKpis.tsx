@@ -13,7 +13,7 @@ import { cn } from '@heroui/react'
 import type { ApiIncident, IncidentStats } from '../../types/api'
 import { WideSpark } from '../health/HealthCharts'
 import { metaFor, severityOf } from './incidentHelpers'
-import { formatDateShort } from '../../utils/format'
+import { formatDateShort, formatDuration } from '../../utils/format'
 
 type Tile = 'primary' | 'success' | 'warning' | 'danger'
 
@@ -140,13 +140,14 @@ export function IncidentKpis({ activeIncidents, stats }: Props) {
   // Today's flapping endpoint count — drives the tile value.
   const flappingToday = flapSpark[flapSpark.length - 1] ?? 0
 
-  // MTTR sparkline: per-day avg resolved duration in minutes.
+  // MTTR sparkline: per-day avg resolved duration in seconds. Kept in the
+  // same unit as avgMttrSec so tooltips can reuse formatDuration.
   const mttrSpark = useMemo(() => {
     if (!stats) return new Array<number>(last14.length).fill(0)
     const byDate = new Map(stats.resolvedDurationsByDay.map((r) => [r.date, r]))
     return last14.map((d) => {
       const m = byDate.get(d.date)
-      return m && m.count > 0 ? Math.round(m.avgSec / 60) : 0
+      return m && m.count > 0 ? Math.round(m.avgSec) : 0
     })
   }, [stats, last14])
 
@@ -172,15 +173,14 @@ export function IncidentKpis({ activeIncidents, stats }: Props) {
         icon="solar:stopwatch-linear"
         tile="primary"
         title="Mean Time to Resolve"
-        value={avgMttrSec > 0 ? Math.round(avgMttrSec / 60) : '—'}
-        unit={avgMttrSec > 0 ? 'm' : ''}
+        value={avgMttrSec > 0 ? formatDuration(avgMttrSec) : '—'}
         delta={avgMttrSec > 0 ? 'across 7d' : 'no resolved incidents'}
         deltaTone={avgMttrSec > 0 ? 'success' : 'muted'}
         deltaLabel=""
         spark={mttrSpark}
         sparkStroke="var(--wd-primary)"
         sparkLabels={sparkLabels}
-        sparkFormat={(n) => (n > 0 ? `${n} min avg` : 'no resolved')}
+        sparkFormat={(n) => (n > 0 ? `${formatDuration(n)} avg` : 'no resolved')}
       />
       <KpiCard
         icon="solar:check-circle-bold"

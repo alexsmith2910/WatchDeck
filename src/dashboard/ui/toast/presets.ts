@@ -7,6 +7,7 @@
 import { toast } from './toast.js'
 import type { ToastOptions } from './types.js'
 import { formatTime } from '../../utils/time'
+import { formatDuration } from '../../utils/format'
 
 export interface NotificationFailedPayload {
   channelName?: string
@@ -70,9 +71,11 @@ export const toastPresets = {
   },
 
   incidentResolved(p: IncidentPayload): string {
-    const mins = p.durationSeconds ? Math.max(1, Math.round(p.durationSeconds / 60)) : undefined
+    const desc = p.durationSeconds
+      ? `Down for ${formatDuration(Math.max(1, Math.round(p.durationSeconds)))}`
+      : undefined
     return toast.success(`Incident resolved — ${p.endpointName ?? 'endpoint'}`, {
-      description: mins ? `Down for ~${mins} min` : undefined,
+      description: desc,
       link: { label: 'View', href: `/incidents/${p.incidentId}` },
       group: `incident:${p.incidentId}`,
       timeout: 5000,

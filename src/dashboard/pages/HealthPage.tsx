@@ -101,7 +101,11 @@ function formatCadence(ms: number): string {
   if (ms === 0) return 'passive'
   if (ms < 1000) return `${ms}ms`
   if (ms < 60_000) return `${Math.round(ms / 1000)}s`
-  return `${Math.round(ms / 60_000)}m`
+  const totalMin = Math.round(ms / 60_000)
+  if (totalMin < 60) return `${totalMin}m`
+  const h = Math.floor(totalMin / 60)
+  const m = totalMin % 60
+  return m > 0 ? `${h}h ${m}m` : `${h}h`
 }
 
 function bucketLabel(ts: number, prefs: Preferences): string {
