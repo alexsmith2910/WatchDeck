@@ -6,7 +6,19 @@
  */
 import type { ApiChannel, ApiNotificationLogRow, ApiNotificationStats, ChannelType } from '../../types/notifications'
 import { DEFAULT_PREFERENCES, type Preferences } from '../../context/PreferencesContext'
-import { formatHour } from '../../utils/time'
+import { formatDateShort, formatHour, formatTsShort } from '../../utils/time'
+
+/**
+ * Pick an axis-label formatter based on the bucket width. Short windows
+ * (≤1h granularity) show time-only so ticks fit; wider buckets that span
+ * multiple days show "Apr 24 14:00" so the user can tell which day they're
+ * reading; daily buckets drop the time.
+ */
+function labelForBucket(tsMs: number, stepMs: number, prefs: Preferences): string {
+  if (stepMs >= 24 * 60 * 60 * 1000) return formatDateShort(tsMs, prefs)
+  if (stepMs >= 3 * 60 * 60 * 1000) return formatTsShort(tsMs, prefs)
+  return formatHour(tsMs, prefs)
+}
 
 export type OverallDeliveryState = 'operational' | 'degraded' | 'outage'
 export type ChannelUiStatus = 'healthy' | 'degraded' | 'failing' | 'paused'
@@ -205,7 +217,7 @@ export function bucketLog(
   for (let i = 0; i < bucketCount; i++) {
     const tsMs = windowStart + i * step
     buckets.push({
-      label: formatHour(tsMs, prefs),
+      label: labelForBucket(tsMs, step, prefs),
       tsMs,
       slack: 0,
       discord: 0,
