@@ -1,11 +1,9 @@
-import type { ObjectId } from 'mongodb'
-
 // ---------------------------------------------------------------------------
 // Pagination
 // ---------------------------------------------------------------------------
 
 export interface DbPaginationOpts {
-  /** ObjectId hex string — return items before (or after, depending on sort) this cursor. */
+  /** Opaque cursor — return items before (or after, depending on sort) this id. */
   cursor?: string
   /** Page size. Capped at 100 server-side. Defaults to 20. */
   limit?: number
@@ -16,7 +14,7 @@ export interface DbPage<T> {
   /** Total matching documents (without cursor filter). */
   total: number
   hasMore: boolean
-  /** Cursor for the next page (last item's _id), or null if no next page. */
+  /** Cursor for the next page (last item's id), or null if no next page. */
   nextCursor: string | null
   /** Cursor pointing at the first item in this page, or null if empty. */
   prevCursor: string | null
@@ -29,7 +27,7 @@ export interface DbPage<T> {
 /**
  * Shape stored in the check buffer and accepted by StorageAdapter.saveCheck().
  * timestamp is Date | string because disk-serialised entries arrive as strings
- * after JSON.parse — the adapter normalises it before writing to MongoDB.
+ * after JSON.parse — the adapter normalises it before writing.
  */
 export interface CheckWritePayload {
   timestamp: Date | string
@@ -103,13 +101,6 @@ export interface AssertionEvalResult {
   results: AssertionResult[]
 }
 
-export interface MaintenanceWindow {
-  _id: ObjectId
-  startTime: Date
-  endTime: Date
-  reason: string
-}
-
 export interface IncidentTimelineEvent {
   at: Date
   event: string
@@ -121,7 +112,7 @@ export interface IncidentTimelineEvent {
 // ---------------------------------------------------------------------------
 
 export interface EndpointDoc {
-  _id: ObjectId
+  id: string
   name: string
   /** Free-text notes. Shown on the General tab. Not used by any evaluator. */
   description?: string
@@ -151,16 +142,15 @@ export interface EndpointDoc {
   alertCooldown: number
   recoveryAlert: boolean
   escalationDelay: number
-  escalationChannelId?: ObjectId
-  notificationChannelIds: ObjectId[]
+  escalationChannelId?: string
+  notificationChannelIds: string[]
   /**
    * Subset of `notificationChannelIds` that this endpoint is temporarily not
    * dispatching to. The channel doc itself remains enabled and still serves
    * other endpoints — this is a per-endpoint pause, not a channel-wide mute.
    * Dispatcher skips these in fan-out; they're still listed in the Routes UI.
    */
-  pausedNotificationChannelIds?: ObjectId[]
-  maintenanceWindows: MaintenanceWindow[]
+  pausedNotificationChannelIds?: string[]
 
   // Runtime state
   lastCheckAt?: Date
@@ -170,7 +160,7 @@ export interface EndpointDoc {
   lastErrorMessage?: string | null
   /** Last-seen TLS issuer for this endpoint. Refreshed per-endpoint (not per-check). */
   lastSslIssuer?: { o?: string; cn?: string; capturedAt: Date }
-  currentIncidentId?: ObjectId
+  currentIncidentId?: string
   consecutiveFailures: number
   /** Healthy streak since the most recent failure. Incident auto-resolves
    *  when this reaches `recoveryThreshold`. Reset to 0 on any non-healthy check. */
@@ -185,8 +175,8 @@ export interface EndpointDoc {
 // ---------------------------------------------------------------------------
 
 export interface CheckDoc {
-  _id: ObjectId
-  endpointId: ObjectId
+  id: string
+  endpointId: string
   timestamp: Date
 
   // Always present — failed checks record actual elapsed time, never null
@@ -207,7 +197,6 @@ export interface CheckDoc {
   status: 'healthy' | 'degraded' | 'down'
   statusReason?: string
   errorMessage?: string
-  duringMaintenance: boolean
 
   createdAt: Date
 }
@@ -217,8 +206,8 @@ export interface CheckDoc {
 // ---------------------------------------------------------------------------
 
 export interface HourlySummaryDoc {
-  _id: ObjectId
-  endpointId: ObjectId
+  id: string
+  endpointId: string
   /** UTC hour bucket — truncated to the hour (e.g. 2024-01-15T14:00:00Z) */
   hour: Date
 
@@ -244,8 +233,8 @@ export interface HourlySummaryDoc {
 // ---------------------------------------------------------------------------
 
 export interface DailySummaryDoc {
-  _id: ObjectId
-  endpointId: ObjectId
+  id: string
+  endpointId: string
   /** UTC date bucket — truncated to midnight (e.g. 2024-01-15T00:00:00Z) */
   date: Date
 
@@ -267,8 +256,8 @@ export interface DailySummaryDoc {
 // ---------------------------------------------------------------------------
 
 export interface IncidentDoc {
-  _id: ObjectId
-  endpointId: ObjectId
+  id: string
+  endpointId: string
   status: 'active' | 'resolved'
   cause: string
   causeDetail?: string
@@ -296,17 +285,8 @@ export interface NotificationEventFilters {
   sendEscalation: boolean
 }
 
-export interface NotificationQuietHours {
-  /** "HH:MM" 24-hour local start time */
-  start: string
-  /** "HH:MM" 24-hour local end time (may cross midnight: e.g. "22:00"–"06:00") */
-  end: string
-  /** IANA timezone name, e.g. "Europe/London" */
-  tz: string
-}
-
 export interface NotificationChannelDoc {
-  _id: ObjectId
+  id: string
   type: NotificationChannelType
   name: string
   deliveryPriority: 'standard' | 'critical'
@@ -320,9 +300,6 @@ export interface NotificationChannelDoc {
   /** Which lifecycle events this channel should receive. */
   eventFilters: NotificationEventFilters
 
-  /** Optional quiet hours window that suppresses non-critical dispatches. */
-  quietHours?: NotificationQuietHours
-
   /** Per-channel rate limit override (otherwise the type default applies). */
   rateLimit?: { maxPerMinute: number }
 
@@ -332,27 +309,17 @@ export interface NotificationChannelDoc {
   /** Free-form channel metadata (color accent, routing tags, etc.). */
   metadata?: Record<string, unknown>
 
-  // Discord
-  /**
-   * Which Discord transport this channel uses. `webhook` is the default and
-   * only transport with an implementation today — `bot` is reserved for a
-   * future PR (see src/notifications/providers/discord/bot.ts).
-   */
-  discordTransport?: 'webhook' | 'bot'
+  // Discord — webhook only in V1.
   discordWebhookUrl?: string
-  discordChannelId?: string
-  discordGuildId?: string
   /** Optional override for the author name shown in Discord. */
   discordUsername?: string
   /** Optional override for the author avatar shown in Discord. */
   discordAvatarUrl?: string
 
-  // Slack
+  // Slack — webhook only in V1.
   slackWebhookUrl?: string
-  slackChannelId?: string
-  slackWorkspaceName?: string
 
-  // Email
+  // Email — SMTP URL + recipient list. The From display name uses channel.name.
   emailEndpoint?: string
   emailRecipients?: string[]
 
@@ -398,7 +365,6 @@ export type NotificationDeliveryStatus = 'sent' | 'failed' | 'pending' | 'suppre
 export type NotificationSuppressedReason =
   | 'cooldown'
   | 'quiet_hours'
-  | 'maintenance'
   | 'severity_filter'
   | 'event_filter'
   | 'rate_limit'
@@ -409,12 +375,12 @@ export type NotificationSuppressedReason =
   | 'channel_disabled'
 
 export interface NotificationLogDoc {
-  _id: ObjectId
+  id: string
   /** Optional — absent on global suppressions and channel tests. */
-  endpointId?: ObjectId
+  endpointId?: string
   /** Optional — absent on channel tests and coalescing-parent summaries. */
-  incidentId?: ObjectId
-  channelId: ObjectId
+  incidentId?: string
+  channelId: string
   /** Deprecated short label — use `kind` going forward. Kept for back-compat. */
   type: string
   channelType: NotificationChannelType
@@ -436,14 +402,14 @@ export interface NotificationLogDoc {
   /** Stable key used for dedup (incidentId + kind). */
   idempotencyKey?: string
   /** If set, this row is a retry attempt of the referenced log row. */
-  retryOf?: ObjectId
+  retryOf?: string
 
   /** Set on individual rows that were folded into a coalescing-parent summary. */
-  coalescedIntoLogId?: ObjectId
+  coalescedIntoLogId?: string
   /** Set on the coalescing-parent summary row: number of alerts it represents. */
   coalescedCount?: number
   /** Incident ids represented by a coalescing-parent summary row. */
-  coalescedIncidentIds?: ObjectId[]
+  coalescedIncidentIds?: string[]
 
   /**
    * Rendered NotificationMessage slice the provider was asked to format.
@@ -496,23 +462,23 @@ export interface NotificationLogResponse {
 // ---------------------------------------------------------------------------
 
 export interface NotificationMuteDoc {
-  _id: ObjectId
+  id: string
   scope: 'endpoint' | 'channel' | 'global'
   /** Required when scope is 'endpoint' or 'channel'. */
-  targetId?: ObjectId
+  targetId?: string
   mutedBy: string
   mutedAt: Date
-  /** TTL index on this field drops the doc once it's reached. */
+  /** TTL (Mongo) / retention-sweep (Postgres) drops the doc once reached. */
   expiresAt: Date
   reason?: string
 }
 
 // ---------------------------------------------------------------------------
-// mx_notification_preferences  — single document, _id = "global"
+// mx_notification_preferences  — single document, id = "global"
 // ---------------------------------------------------------------------------
 
 export interface NotificationPreferencesDoc {
-  _id: 'global'
+  id: 'global'
   /** If set and in the future, all dispatches are suppressed until this time. */
   globalMuteUntil?: Date
   /** Applied to new channels at creation time unless the request overrides it. */
@@ -524,7 +490,7 @@ export interface NotificationPreferencesDoc {
 }
 
 // ---------------------------------------------------------------------------
-// mx_settings  (single document, _id = "global")
+// mx_settings  (single document, id = "global")
 // ---------------------------------------------------------------------------
 
 /**
@@ -555,7 +521,7 @@ export interface SettingsSloOverride {
 }
 
 export interface SettingsDoc {
-  _id: 'global'
+  id: 'global'
   /** Runtime override for the per-endpoint defaults. */
   defaults?: SettingsDefaultsOverride
   /** Runtime override for the global SLO. */
@@ -575,7 +541,7 @@ export interface SystemEventTimelineEntry {
 }
 
 export interface SystemEventDoc {
-  _id: ObjectId
+  id: string
   type: 'db_outage'
   startedAt: Date
   resolvedAt?: Date
@@ -593,7 +559,7 @@ export interface SystemEventDoc {
 }
 
 // ---------------------------------------------------------------------------
-// mx_health_state  (single document, _id = "snapshot")
+// mx_health_state  (single document, id = "snapshot")
 //
 // Persisted by HealthPersistence every ~30s and on shutdown so the System
 // Health page can show 24h-of-context after a process restart instead of
@@ -619,7 +585,7 @@ export interface HealthHeatmapRowDoc {
 }
 
 export interface HealthStateDoc {
-  _id: 'snapshot'
+  id: 'snapshot'
   savedAt: Date
   /** Last ≤30 minutes of probe completions per subsystem. */
   probeHistory: Record<string, HealthHistoryEntryDoc[]>
@@ -630,9 +596,9 @@ export interface HealthStateDoc {
 // ---------------------------------------------------------------------------
 // mx_internal_incidents  — system-plane incident history.
 //
-// `_id` is the synthesized id from the in-memory tracker (e.g. "ii-7") so
+// `id` is the synthesized id from the in-memory tracker (e.g. "ii-7") so
 // upserts replace cleanly. `expiresAt` is set when an incident resolves;
-// a TTL index drops the doc 24h later.
+// the retention sweep drops the doc 24h later.
 // ---------------------------------------------------------------------------
 
 export interface InternalIncidentTimelineEntryDoc {
@@ -642,7 +608,7 @@ export interface InternalIncidentTimelineEntryDoc {
 }
 
 export interface InternalIncidentDoc {
-  _id: string
+  id: string
   subsystem: string
   severity: 'p1' | 'p2' | 'p3'
   status: 'active' | 'resolved'
@@ -653,6 +619,6 @@ export interface InternalIncidentDoc {
   durationSeconds?: number
   commits: number
   timeline: InternalIncidentTimelineEntryDoc[]
-  /** Set on resolve; TTL index drops the doc when reached. */
+  /** Set on resolve; retention sweep drops the doc when reached. */
   expiresAt?: Date
 }

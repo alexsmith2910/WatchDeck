@@ -21,20 +21,238 @@ import type {
   HealthStateDoc,
   HourlySummaryDoc,
   IncidentDoc,
+  IncidentTimelineEvent,
   InternalIncidentDoc,
-  MaintenanceWindow,
   NotificationChannelDoc,
   NotificationKind,
   NotificationLogDoc,
+  NotificationLogPayload,
+  NotificationLogRequest,
+  NotificationLogResponse,
   NotificationMuteDoc,
   NotificationPreferencesDoc,
   SettingsDoc,
   SystemEventDoc,
+  SystemEventTimelineEntry,
 } from './types.js'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
+
+// ---------------------------------------------------------------------------
+// Wire (BSON) doc shapes — mirror the contract types but with ObjectId where
+// the contract uses string. Every method in this adapter reads/writes wire
+// docs and maps at the boundary so no other file in the codebase ever sees
+// an ObjectId.
+// ---------------------------------------------------------------------------
+
+interface WireEndpointDoc {
+  _id: ObjectId
+  name: string
+  description?: string
+  type: 'http' | 'port'
+  url?: string
+  method?: EndpointDoc['method']
+  headers?: Record<string, string>
+  expectedStatusCodes?: number[]
+  assertions?: EndpointDoc['assertions']
+  host?: string
+  port?: number
+  checkInterval: number
+  timeout: number
+  enabled: boolean
+  status: 'active' | 'paused' | 'archived'
+  latencyThreshold: number
+  sslWarningDays: number
+  failureThreshold: number
+  recoveryThreshold: number
+  alertCooldown: number
+  recoveryAlert: boolean
+  escalationDelay: number
+  escalationChannelId?: ObjectId
+  notificationChannelIds: ObjectId[]
+  pausedNotificationChannelIds?: ObjectId[]
+  lastCheckAt?: Date
+  lastStatus?: EndpointDoc['lastStatus']
+  lastResponseTime?: number
+  lastStatusCode?: number | null
+  lastErrorMessage?: string | null
+  lastSslIssuer?: EndpointDoc['lastSslIssuer']
+  currentIncidentId?: ObjectId
+  consecutiveFailures: number
+  consecutiveHealthy: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+interface WireCheckDoc {
+  _id: ObjectId
+  endpointId: ObjectId
+  timestamp: Date
+  responseTime: number
+  statusCode?: number
+  sslDaysRemaining?: number
+  bodyBytes?: number
+  bodyBytesTruncated?: boolean
+  assertionResult?: CheckDoc['assertionResult']
+  portOpen?: boolean
+  status: 'healthy' | 'degraded' | 'down'
+  statusReason?: string
+  errorMessage?: string
+  createdAt: Date
+}
+
+interface WireHourlySummaryDoc {
+  _id: ObjectId
+  endpointId: ObjectId
+  hour: Date
+  totalChecks: number
+  successCount: number
+  failCount: number
+  degradedCount: number
+  uptimePercent: number
+  avgResponseTime: number
+  minResponseTime: number
+  maxResponseTime: number
+  p95ResponseTime: number
+  p99ResponseTime: number
+  errorTypes: Record<string, number>
+  hadActiveIncident: boolean
+  createdAt: Date
+}
+
+interface WireDailySummaryDoc {
+  _id: ObjectId
+  endpointId: ObjectId
+  date: Date
+  totalChecks: number
+  uptimePercent: number
+  avgResponseTime: number
+  minResponseTime: number
+  maxResponseTime: number
+  p95ResponseTime: number
+  p99ResponseTime: number
+  incidentCount: number
+  totalDowntimeMinutes: number
+  createdAt: Date
+}
+
+interface WireIncidentDoc {
+  _id: ObjectId
+  endpointId: ObjectId
+  status: 'active' | 'resolved'
+  cause: string
+  causeDetail?: string
+  startedAt: Date
+  resolvedAt?: Date
+  durationSeconds?: number
+  timeline: IncidentTimelineEvent[]
+  notificationsSent: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+interface WireNotificationChannelDoc extends Omit<NotificationChannelDoc, 'id'> {
+  _id: ObjectId
+}
+
+interface WireNotificationLogDoc {
+  _id: ObjectId
+  endpointId?: ObjectId
+  incidentId?: ObjectId
+  channelId: ObjectId
+  type: string
+  channelType: NotificationLogDoc['channelType']
+  channelTarget: string
+  messageSummary: string
+  severity: NotificationLogDoc['severity']
+  kind: NotificationKind
+  deliveryStatus: NotificationLogDoc['deliveryStatus']
+  failureReason?: string
+  suppressedReason?: NotificationLogDoc['suppressedReason']
+  latencyMs?: number
+  idempotencyKey?: string
+  retryOf?: ObjectId
+  coalescedIntoLogId?: ObjectId
+  coalescedCount?: number
+  coalescedIncidentIds?: ObjectId[]
+  payload?: NotificationLogPayload
+  request?: NotificationLogRequest
+  response?: NotificationLogResponse
+  sentAt: Date
+  createdAt: Date
+}
+
+interface WireNotificationMuteDoc {
+  _id: ObjectId
+  scope: 'endpoint' | 'channel' | 'global'
+  targetId?: ObjectId
+  mutedBy: string
+  mutedAt: Date
+  expiresAt: Date
+  reason?: string
+}
+
+interface WireNotificationPreferencesDoc {
+  _id: 'global'
+  globalMuteUntil?: Date
+  defaultSeverityFilter: NotificationPreferencesDoc['defaultSeverityFilter']
+  defaultEventFilters: NotificationPreferencesDoc['defaultEventFilters']
+  lastEditedBy?: string
+  updatedAt: Date
+}
+
+interface WireSettingsDoc {
+  _id: 'global'
+  defaults?: SettingsDoc['defaults']
+  slo?: SettingsDoc['slo']
+  [key: string]: unknown
+}
+
+interface WireSystemEventDoc {
+  _id: ObjectId
+  type: 'db_outage'
+  startedAt: Date
+  resolvedAt?: Date
+  durationSeconds?: number
+  reconnectAttempts: number
+  severity: SystemEventDoc['severity']
+  cause: string
+  causeDetail?: string
+  bufferedToMemory: number
+  bufferedToDisk: number
+  replayStatus: SystemEventDoc['replayStatus']
+  replayedCount: number
+  replayErrors: number
+  timeline: SystemEventTimelineEntry[]
+}
+
+interface WireHealthStateDoc {
+  _id: 'snapshot'
+  savedAt: Date
+  probeHistory: HealthStateDoc['probeHistory']
+  heatmap: HealthStateDoc['heatmap']
+}
+
+interface WireInternalIncidentDoc {
+  _id: string
+  subsystem: string
+  severity: InternalIncidentDoc['severity']
+  status: InternalIncidentDoc['status']
+  title: string
+  cause: string
+  startedAt: Date
+  resolvedAt?: Date
+  durationSeconds?: number
+  commits: number
+  timeline: InternalIncidentDoc['timeline']
+  expiresAt?: Date
+}
+
+// ---------------------------------------------------------------------------
+// ID validation + helpers
+// ---------------------------------------------------------------------------
 
 /**
  * List every yyyy-MM-dd string between `from` and `to` (inclusive) as seen
@@ -59,7 +277,6 @@ function enumerateDayKeys(from: Date, to: Date, tz: string): string[] {
       keys.push(key)
     }
   }
-  // Ensure the final day is included even if the step loop exited before it.
   if (!seen.has(toKey)) keys.push(toKey)
   return keys.filter((k) => k <= toKey).sort()
 }
@@ -82,14 +299,304 @@ function toObjectId(id: string, field: string): ObjectId {
   return new ObjectId(id)
 }
 
-function buildCheckDoc(payload: CheckWritePayload): CheckDoc {
-  const doc: CheckDoc = {
+/**
+ * Wire-side id → contract string. Legacy documents may have strings stored in
+ * what the current schema types as ObjectId (older route code that skipped
+ * the coercion). Handle both shapes so one stale row doesn't crash a read.
+ */
+function oidStr(oid: ObjectId | string): string {
+  if (typeof oid === 'string') return oid
+  return oid.toHexString()
+}
+
+function oidArrStr(oids: Array<ObjectId | string> | undefined): string[] {
+  return oids ? oids.map(oidStr) : []
+}
+
+// ---------------------------------------------------------------------------
+// Wire → contract mappers (one per doc type)
+// ---------------------------------------------------------------------------
+
+function endpointFromWire(w: WireEndpointDoc): EndpointDoc {
+  const out: EndpointDoc = {
+    id: oidStr(w._id),
+    name: w.name,
+    type: w.type,
+    checkInterval: w.checkInterval,
+    timeout: w.timeout,
+    enabled: w.enabled,
+    status: w.status,
+    latencyThreshold: w.latencyThreshold,
+    sslWarningDays: w.sslWarningDays,
+    failureThreshold: w.failureThreshold,
+    recoveryThreshold: w.recoveryThreshold,
+    alertCooldown: w.alertCooldown,
+    recoveryAlert: w.recoveryAlert,
+    escalationDelay: w.escalationDelay,
+    notificationChannelIds: oidArrStr(w.notificationChannelIds),
+    consecutiveFailures: w.consecutiveFailures,
+    consecutiveHealthy: w.consecutiveHealthy,
+    createdAt: w.createdAt,
+    updatedAt: w.updatedAt,
+  }
+  if (w.description !== undefined) out.description = w.description
+  if (w.url !== undefined) out.url = w.url
+  if (w.method !== undefined) out.method = w.method
+  if (w.headers !== undefined) out.headers = w.headers
+  if (w.expectedStatusCodes !== undefined) out.expectedStatusCodes = w.expectedStatusCodes
+  if (w.assertions !== undefined) out.assertions = w.assertions
+  if (w.host !== undefined) out.host = w.host
+  if (w.port !== undefined) out.port = w.port
+  if (w.escalationChannelId) out.escalationChannelId = oidStr(w.escalationChannelId)
+  if (w.pausedNotificationChannelIds) {
+    out.pausedNotificationChannelIds = oidArrStr(w.pausedNotificationChannelIds)
+  }
+  if (w.lastCheckAt !== undefined) out.lastCheckAt = w.lastCheckAt
+  if (w.lastStatus !== undefined) out.lastStatus = w.lastStatus
+  if (w.lastResponseTime !== undefined) out.lastResponseTime = w.lastResponseTime
+  if (w.lastStatusCode !== undefined) out.lastStatusCode = w.lastStatusCode
+  if (w.lastErrorMessage !== undefined) out.lastErrorMessage = w.lastErrorMessage
+  if (w.lastSslIssuer !== undefined) out.lastSslIssuer = w.lastSslIssuer
+  if (w.currentIncidentId) out.currentIncidentId = oidStr(w.currentIncidentId)
+  return out
+}
+
+/**
+ * Build a Mongo `$set` payload from a partial contract-shaped update.
+ * Strips immutable fields (`id`, `createdAt`) and converts string ID fields
+ * to ObjectIds.
+ */
+function endpointPatchToWire(changes: Partial<EndpointDoc>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...changes }
+  delete out.id
+  delete out.createdAt
+  if (changes.escalationChannelId !== undefined) {
+    out.escalationChannelId = changes.escalationChannelId
+      ? toObjectId(changes.escalationChannelId, 'escalationChannelId')
+      : undefined
+  }
+  if (changes.notificationChannelIds !== undefined) {
+    out.notificationChannelIds = changes.notificationChannelIds.map((id) =>
+      toObjectId(id, 'channelId'),
+    )
+  }
+  if (changes.pausedNotificationChannelIds !== undefined) {
+    out.pausedNotificationChannelIds = changes.pausedNotificationChannelIds.map((id) =>
+      toObjectId(id, 'channelId'),
+    )
+  }
+  if (changes.currentIncidentId !== undefined) {
+    out.currentIncidentId = changes.currentIncidentId
+      ? toObjectId(changes.currentIncidentId, 'incidentId')
+      : undefined
+  }
+  return out
+}
+
+function checkFromWire(w: WireCheckDoc): CheckDoc {
+  const out: CheckDoc = {
+    id: oidStr(w._id),
+    endpointId: oidStr(w.endpointId),
+    timestamp: w.timestamp,
+    responseTime: w.responseTime,
+    status: w.status,
+    createdAt: w.createdAt,
+  }
+  if (w.statusCode !== undefined) out.statusCode = w.statusCode
+  if (w.sslDaysRemaining !== undefined) out.sslDaysRemaining = w.sslDaysRemaining
+  if (w.bodyBytes !== undefined) out.bodyBytes = w.bodyBytes
+  if (w.bodyBytesTruncated !== undefined) out.bodyBytesTruncated = w.bodyBytesTruncated
+  if (w.assertionResult !== undefined) out.assertionResult = w.assertionResult
+  if (w.portOpen !== undefined) out.portOpen = w.portOpen
+  if (w.statusReason !== undefined) out.statusReason = w.statusReason
+  if (w.errorMessage !== undefined) out.errorMessage = w.errorMessage
+  return out
+}
+
+function hourlySummaryFromWire(w: WireHourlySummaryDoc): HourlySummaryDoc {
+  return {
+    id: oidStr(w._id),
+    endpointId: oidStr(w.endpointId),
+    hour: w.hour,
+    totalChecks: w.totalChecks,
+    successCount: w.successCount,
+    failCount: w.failCount,
+    degradedCount: w.degradedCount,
+    uptimePercent: w.uptimePercent,
+    avgResponseTime: w.avgResponseTime,
+    minResponseTime: w.minResponseTime,
+    maxResponseTime: w.maxResponseTime,
+    p95ResponseTime: w.p95ResponseTime,
+    p99ResponseTime: w.p99ResponseTime,
+    errorTypes: w.errorTypes,
+    hadActiveIncident: w.hadActiveIncident,
+    createdAt: w.createdAt,
+  }
+}
+
+function dailySummaryFromWire(w: WireDailySummaryDoc): DailySummaryDoc {
+  return {
+    id: oidStr(w._id),
+    endpointId: oidStr(w.endpointId),
+    date: w.date,
+    totalChecks: w.totalChecks,
+    uptimePercent: w.uptimePercent,
+    avgResponseTime: w.avgResponseTime,
+    minResponseTime: w.minResponseTime,
+    maxResponseTime: w.maxResponseTime,
+    p95ResponseTime: w.p95ResponseTime,
+    p99ResponseTime: w.p99ResponseTime,
+    incidentCount: w.incidentCount,
+    totalDowntimeMinutes: w.totalDowntimeMinutes,
+    createdAt: w.createdAt,
+  }
+}
+
+function incidentFromWire(w: WireIncidentDoc): IncidentDoc {
+  const out: IncidentDoc = {
+    id: oidStr(w._id),
+    endpointId: oidStr(w.endpointId),
+    status: w.status,
+    cause: w.cause,
+    startedAt: w.startedAt,
+    timeline: w.timeline,
+    notificationsSent: w.notificationsSent,
+    createdAt: w.createdAt,
+    updatedAt: w.updatedAt,
+  }
+  if (w.causeDetail !== undefined) out.causeDetail = w.causeDetail
+  if (w.resolvedAt !== undefined) out.resolvedAt = w.resolvedAt
+  if (w.durationSeconds !== undefined) out.durationSeconds = w.durationSeconds
+  return out
+}
+
+function notificationChannelFromWire(w: WireNotificationChannelDoc): NotificationChannelDoc {
+  const { _id, ...rest } = w
+  return { id: oidStr(_id), ...rest }
+}
+
+function notificationLogFromWire(w: WireNotificationLogDoc): NotificationLogDoc {
+  const out: NotificationLogDoc = {
+    id: oidStr(w._id),
+    channelId: oidStr(w.channelId),
+    type: w.type,
+    channelType: w.channelType,
+    channelTarget: w.channelTarget,
+    messageSummary: w.messageSummary,
+    severity: w.severity,
+    kind: w.kind,
+    deliveryStatus: w.deliveryStatus,
+    sentAt: w.sentAt,
+    createdAt: w.createdAt,
+  }
+  if (w.endpointId) out.endpointId = oidStr(w.endpointId)
+  if (w.incidentId) out.incidentId = oidStr(w.incidentId)
+  if (w.failureReason !== undefined) out.failureReason = w.failureReason
+  if (w.suppressedReason !== undefined) out.suppressedReason = w.suppressedReason
+  if (w.latencyMs !== undefined) out.latencyMs = w.latencyMs
+  if (w.idempotencyKey !== undefined) out.idempotencyKey = w.idempotencyKey
+  if (w.retryOf) out.retryOf = oidStr(w.retryOf)
+  if (w.coalescedIntoLogId) out.coalescedIntoLogId = oidStr(w.coalescedIntoLogId)
+  if (w.coalescedCount !== undefined) out.coalescedCount = w.coalescedCount
+  if (w.coalescedIncidentIds) out.coalescedIncidentIds = oidArrStr(w.coalescedIncidentIds)
+  if (w.payload !== undefined) out.payload = w.payload
+  if (w.request !== undefined) out.request = w.request
+  if (w.response !== undefined) out.response = w.response
+  return out
+}
+
+function notificationMuteFromWire(w: WireNotificationMuteDoc): NotificationMuteDoc {
+  const out: NotificationMuteDoc = {
+    id: oidStr(w._id),
+    scope: w.scope,
+    mutedBy: w.mutedBy,
+    mutedAt: w.mutedAt,
+    expiresAt: w.expiresAt,
+  }
+  if (w.targetId) out.targetId = oidStr(w.targetId)
+  if (w.reason !== undefined) out.reason = w.reason
+  return out
+}
+
+function notificationPreferencesFromWire(
+  w: WireNotificationPreferencesDoc,
+): NotificationPreferencesDoc {
+  const out: NotificationPreferencesDoc = {
+    id: 'global',
+    defaultSeverityFilter: w.defaultSeverityFilter,
+    defaultEventFilters: w.defaultEventFilters,
+    updatedAt: w.updatedAt,
+  }
+  if (w.globalMuteUntil !== undefined) out.globalMuteUntil = w.globalMuteUntil
+  if (w.lastEditedBy !== undefined) out.lastEditedBy = w.lastEditedBy
+  return out
+}
+
+function settingsFromWire(w: WireSettingsDoc): SettingsDoc {
+  const { _id, ...rest } = w
+  void _id
+  return { id: 'global', ...rest }
+}
+
+function systemEventFromWire(w: WireSystemEventDoc): SystemEventDoc {
+  const out: SystemEventDoc = {
+    id: oidStr(w._id),
+    type: w.type,
+    startedAt: w.startedAt,
+    reconnectAttempts: w.reconnectAttempts,
+    severity: w.severity,
+    cause: w.cause,
+    bufferedToMemory: w.bufferedToMemory,
+    bufferedToDisk: w.bufferedToDisk,
+    replayStatus: w.replayStatus,
+    replayedCount: w.replayedCount,
+    replayErrors: w.replayErrors,
+    timeline: w.timeline,
+  }
+  if (w.resolvedAt !== undefined) out.resolvedAt = w.resolvedAt
+  if (w.durationSeconds !== undefined) out.durationSeconds = w.durationSeconds
+  if (w.causeDetail !== undefined) out.causeDetail = w.causeDetail
+  return out
+}
+
+function healthStateFromWire(w: WireHealthStateDoc): HealthStateDoc {
+  return {
+    id: 'snapshot',
+    savedAt: w.savedAt,
+    probeHistory: w.probeHistory,
+    heatmap: w.heatmap,
+  }
+}
+
+function internalIncidentFromWire(w: WireInternalIncidentDoc): InternalIncidentDoc {
+  const out: InternalIncidentDoc = {
+    id: w._id,
+    subsystem: w.subsystem,
+    severity: w.severity,
+    status: w.status,
+    title: w.title,
+    cause: w.cause,
+    startedAt: w.startedAt,
+    commits: w.commits,
+    timeline: w.timeline,
+  }
+  if (w.resolvedAt !== undefined) out.resolvedAt = w.resolvedAt
+  if (w.durationSeconds !== undefined) out.durationSeconds = w.durationSeconds
+  if (w.expiresAt !== undefined) out.expiresAt = w.expiresAt
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Write builders
+// ---------------------------------------------------------------------------
+
+function buildCheckDoc(payload: CheckWritePayload): WireCheckDoc {
+  const doc: WireCheckDoc = {
     _id: new ObjectId(),
     endpointId: toObjectId(payload.endpointId, 'endpointId'),
     timestamp: payload.timestamp instanceof Date ? payload.timestamp : new Date(payload.timestamp),
     responseTime: payload.responseTime,
     status: payload.status,
-    duringMaintenance: false,
     createdAt: new Date(),
   }
   if (payload.statusCode !== null) doc.statusCode = payload.statusCode
@@ -118,7 +625,6 @@ export class MongoDBAdapter extends StorageAdapter {
   /** Set before an intentional close to prevent the topology handler from starting a reconnect loop. */
   private _intentionalDisconnect = false
   private disconnectedAt: number | null = null
-  /** Monotonic attempt counter for the active reconnect loop. Null when connected. */
   private reconnectAttemptCount: number | null = null
 
   constructor(
@@ -146,10 +652,6 @@ export class MongoDBAdapter extends StorageAdapter {
     return this.reconnectAttemptCount
   }
 
-  /**
-   * Boot connection — 3 attempts with 5-second gaps.
-   * Throws if all attempts fail so the process can exit.
-   */
   async connect(): Promise<void> {
     const BOOT_ATTEMPTS = 3
     const BOOT_GAP_MS = 5_000
@@ -212,11 +714,6 @@ export class MongoDBAdapter extends StorageAdapter {
   // Internal connection logic
   // ---------------------------------------------------------------------------
 
-  /**
-   * Open a single connection attempt.
-   * Replaces any existing client, registers the topology disconnect handler,
-   * and emits db:connected on success.
-   */
   private async openConnection(): Promise<void> {
     const start = Date.now()
 
@@ -228,12 +725,10 @@ export class MongoDBAdapter extends StorageAdapter {
 
     await client.connect()
 
-    // Verify with a ping before declaring success.
     const db = client.db()
     await db.command({ ping: 1 })
     const latencyMs = Date.now() - start
 
-    // Clean up the previous client BEFORE marking as connected.
     await this.closeClient()
 
     this.client = client
@@ -247,14 +742,8 @@ export class MongoDBAdapter extends StorageAdapter {
     eventBus.emit('db:connected', { timestamp: new Date(), latencyMs })
   }
 
-  /**
-   * Listen for unexpected topology closure and start the reconnect loop.
-   * Removing all listeners first prevents duplicate handlers when called
-   * during a reconnect cycle.
-   */
   private registerTopologyHandler(client: MongoClient): void {
     client.once('topologyClosed', () => {
-      // Guard: intentional close or we're already handling a disconnect.
       if (this._intentionalDisconnect || !this._connected) return
 
       this._connected = false
@@ -269,13 +758,6 @@ export class MongoDBAdapter extends StorageAdapter {
     })
   }
 
-  /**
-   * Runtime reconnection with exponential backoff (30s → 5min cap).
-   * Stops when:
-   *  - A connection attempt succeeds (emits db:reconnected)
-   *  - Max attempts are exhausted (emits db:fatal)
-   *  - disconnect() was called (intentionalDisconnect flag)
-   */
   private async reconnectLoop(): Promise<void> {
     const { dbReconnectAttempts } = this.config.rateLimits
     const unlimited = dbReconnectAttempts === 0
@@ -283,7 +765,7 @@ export class MongoDBAdapter extends StorageAdapter {
 
     let attempt = 0
     let delay = 30_000
-    const MAX_DELAY = 300_000 // 5 minutes
+    const MAX_DELAY = 300_000
 
     while (!this._intentionalDisconnect && (unlimited || attempt < dbReconnectAttempts)) {
       attempt++
@@ -307,7 +789,6 @@ export class MongoDBAdapter extends StorageAdapter {
         eventBus.emit('db:reconnected', {
           timestamp: new Date(),
           outageDurationSeconds,
-          // Buffer pipeline will update bufferedResults via its own subscriber.
           bufferedResults: 0,
         })
         return
@@ -328,15 +809,9 @@ export class MongoDBAdapter extends StorageAdapter {
         totalOutageDuration: outageDurationSeconds,
       })
     }
-    // Loop exited — clear the attempt counter either way.
     this.reconnectAttemptCount = null
   }
 
-  /**
-   * Close and discard the current MongoClient.
-   * Removes all listeners first so topology events from the closing client
-   * don't trigger another reconnect cycle.
-   */
   private async closeClient(): Promise<void> {
     if (this.client) {
       this.client.removeAllListeners()
@@ -357,35 +832,36 @@ export class MongoDBAdapter extends StorageAdapter {
   async saveCheck(payload: CheckWritePayload): Promise<void> {
     const db = this.getDb()
     const doc = buildCheckDoc(payload)
-    await db.collection<CheckDoc>(`${this.dbPrefix}checks`).insertOne(doc)
+    await db.collection<WireCheckDoc>(`${this.dbPrefix}checks`).insertOne(doc)
   }
 
   async saveManyChecks(payloads: CheckWritePayload[]): Promise<void> {
     if (payloads.length === 0) return
     const db = this.getDb()
     const docs = payloads.map(buildCheckDoc)
-    await db.collection<CheckDoc>(`${this.dbPrefix}checks`).insertMany(docs)
+    await db.collection<WireCheckDoc>(`${this.dbPrefix}checks`).insertMany(docs)
   }
 
   // ---------------------------------------------------------------------------
   // System events
   // ---------------------------------------------------------------------------
 
-  async saveSystemEvent(event: Omit<SystemEventDoc, '_id'>): Promise<void> {
+  async saveSystemEvent(event: Omit<SystemEventDoc, 'id'>): Promise<void> {
     const db = this.getDb()
     await db
-      .collection<SystemEventDoc>(`${this.dbPrefix}system_events`)
+      .collection<WireSystemEventDoc>(`${this.dbPrefix}system_events`)
       .insertOne({ _id: new ObjectId(), ...event })
   }
 
   async getSystemEvents(limit = 50): Promise<SystemEventDoc[]> {
     if (!this.db) return []
-    return this.db
-      .collection<SystemEventDoc>(`${this.dbPrefix}system_events`)
+    const wires = await this.db
+      .collection<WireSystemEventDoc>(`${this.dbPrefix}system_events`)
       .find()
       .sort({ startedAt: -1 })
       .limit(limit)
       .toArray()
+    return wires.map(systemEventFromWire)
   }
 
   // ---------------------------------------------------------------------------
@@ -394,10 +870,11 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async listEnabledEndpoints(): Promise<EndpointDoc[]> {
     if (!this.db) return []
-    return this.db
-      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+    const wires = await this.db
+      .collection<WireEndpointDoc>(`${this.dbPrefix}endpoints`)
       .find({ status: { $in: ['active', 'paused'] } })
       .toArray()
+    return wires.map(endpointFromWire)
   }
 
   async updateEndpointAfterCheck(
@@ -425,7 +902,7 @@ export class MongoDBAdapter extends StorageAdapter {
     if (sslIssuer && (sslIssuer.o || sslIssuer.cn)) {
       $set.lastSslIssuer = { ...sslIssuer, capturedAt: timestamp }
     }
-    await db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`).updateOne(
+    await db.collection<WireEndpointDoc>(`${this.dbPrefix}endpoints`).updateOne(
       { _id: toObjectId(endpointId, 'endpointId') },
       { $set },
     )
@@ -436,21 +913,69 @@ export class MongoDBAdapter extends StorageAdapter {
   // ---------------------------------------------------------------------------
 
   async createEndpoint(
-    data: Omit<EndpointDoc, '_id' | 'createdAt' | 'updatedAt'>,
+    data: Omit<EndpointDoc, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<EndpointDoc> {
     const db = this.getDb()
     const now = new Date()
-    const doc: EndpointDoc = { ...data, _id: new ObjectId(), createdAt: now, updatedAt: now }
-    await db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`).insertOne(doc)
-    return doc
+    const wire: WireEndpointDoc = {
+      _id: new ObjectId(),
+      name: data.name,
+      type: data.type,
+      checkInterval: data.checkInterval,
+      timeout: data.timeout,
+      enabled: data.enabled,
+      status: data.status,
+      latencyThreshold: data.latencyThreshold,
+      sslWarningDays: data.sslWarningDays,
+      failureThreshold: data.failureThreshold,
+      recoveryThreshold: data.recoveryThreshold,
+      alertCooldown: data.alertCooldown,
+      recoveryAlert: data.recoveryAlert,
+      escalationDelay: data.escalationDelay,
+      notificationChannelIds: data.notificationChannelIds.map((id) =>
+        toObjectId(id, 'channelId'),
+      ),
+      consecutiveFailures: data.consecutiveFailures,
+      consecutiveHealthy: data.consecutiveHealthy,
+      createdAt: now,
+      updatedAt: now,
+    }
+    if (data.description !== undefined) wire.description = data.description
+    if (data.url !== undefined) wire.url = data.url
+    if (data.method !== undefined) wire.method = data.method
+    if (data.headers !== undefined) wire.headers = data.headers
+    if (data.expectedStatusCodes !== undefined) wire.expectedStatusCodes = data.expectedStatusCodes
+    if (data.assertions !== undefined) wire.assertions = data.assertions
+    if (data.host !== undefined) wire.host = data.host
+    if (data.port !== undefined) wire.port = data.port
+    if (data.escalationChannelId) {
+      wire.escalationChannelId = toObjectId(data.escalationChannelId, 'escalationChannelId')
+    }
+    if (data.pausedNotificationChannelIds) {
+      wire.pausedNotificationChannelIds = data.pausedNotificationChannelIds.map((id) =>
+        toObjectId(id, 'channelId'),
+      )
+    }
+    if (data.lastCheckAt !== undefined) wire.lastCheckAt = data.lastCheckAt
+    if (data.lastStatus !== undefined) wire.lastStatus = data.lastStatus
+    if (data.lastResponseTime !== undefined) wire.lastResponseTime = data.lastResponseTime
+    if (data.lastStatusCode !== undefined) wire.lastStatusCode = data.lastStatusCode
+    if (data.lastErrorMessage !== undefined) wire.lastErrorMessage = data.lastErrorMessage
+    if (data.lastSslIssuer !== undefined) wire.lastSslIssuer = data.lastSslIssuer
+    if (data.currentIncidentId) {
+      wire.currentIncidentId = toObjectId(data.currentIncidentId, 'incidentId')
+    }
+    await db.collection<WireEndpointDoc>(`${this.dbPrefix}endpoints`).insertOne(wire)
+    return endpointFromWire(wire)
   }
 
   async getEndpointById(id: string): Promise<EndpointDoc | null> {
     if (!this.db) return null
     if (!ObjectId.isValid(id)) return null
-    return this.db
-      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+    const wire = await this.db
+      .collection<WireEndpointDoc>(`${this.dbPrefix}endpoints`)
       .findOne({ _id: new ObjectId(id) })
+    return wire ? endpointFromWire(wire) : null
   }
 
   async listEndpoints(
@@ -463,7 +988,11 @@ export class MongoDBAdapter extends StorageAdapter {
       filter.status = { $in: ['active', 'paused'] }
     }
     if (opts.type) filter.type = opts.type
-    return this.paginate<EndpointDoc>('endpoints', filter, opts, { _id: 1 })
+    const page = await this.paginate<WireEndpointDoc>('endpoints', filter, opts, { _id: 1 })
+    return {
+      ...page,
+      items: page.items.map(endpointFromWire),
+    }
   }
 
   async updateEndpoint(
@@ -471,21 +1000,21 @@ export class MongoDBAdapter extends StorageAdapter {
     changes: Partial<EndpointDoc>,
   ): Promise<EndpointDoc | null> {
     const db = this.getDb()
-    const { _id: _dropped, createdAt: _c, ...safe } = changes as Record<string, unknown>
+    const patch = endpointPatchToWire(changes)
     const result = await db
-      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+      .collection<WireEndpointDoc>(`${this.dbPrefix}endpoints`)
       .findOneAndUpdate(
         { _id: toObjectId(id, 'endpointId') },
-        { $set: { ...safe, updatedAt: new Date() } },
+        { $set: { ...patch, updatedAt: new Date() } },
         { returnDocument: 'after' },
       )
-    return result ?? null
+    return result ? endpointFromWire(result) : null
   }
 
   async deleteEndpoint(id: string): Promise<boolean> {
     const db = this.getDb()
     const r = await db
-      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+      .collection<WireEndpointDoc>(`${this.dbPrefix}endpoints`)
       .deleteOne({ _id: toObjectId(id, 'endpointId') })
     return r.deletedCount > 0
   }
@@ -493,12 +1022,13 @@ export class MongoDBAdapter extends StorageAdapter {
   async getLatestCheck(endpointId: string): Promise<CheckDoc | null> {
     if (!this.db) return null
     if (!ObjectId.isValid(endpointId)) return null
-    return this.db
-      .collection<CheckDoc>(`${this.dbPrefix}checks`)
+    const wire = await this.db
+      .collection<WireCheckDoc>(`${this.dbPrefix}checks`)
       .findOne(
         { endpointId: new ObjectId(endpointId) },
         { sort: { timestamp: -1 } },
       )
+    return wire ? checkFromWire(wire) : null
   }
 
   // ---------------------------------------------------------------------------
@@ -517,7 +1047,8 @@ export class MongoDBAdapter extends StorageAdapter {
       filter.timestamp = ts
     }
     if (opts.status) filter.status = opts.status
-    return this.paginate<CheckDoc>('checks', filter, opts, { _id: -1 })
+    const page = await this.paginate<WireCheckDoc>('checks', filter, opts, { _id: -1 })
+    return { ...page, items: page.items.map(checkFromWire) }
   }
 
   async listHourlySummaries(
@@ -526,12 +1057,13 @@ export class MongoDBAdapter extends StorageAdapter {
   ): Promise<HourlySummaryDoc[]> {
     if (!this.db) return []
     const limit = Math.min(opts.limit ?? 48, 1000)
-    return this.db
-      .collection<HourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
+    const wires = await this.db
+      .collection<WireHourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
       .find({ endpointId: toObjectId(endpointId, 'endpointId') })
       .sort({ hour: -1 })
       .limit(limit)
       .toArray()
+    return wires.map(hourlySummaryFromWire)
   }
 
   async listDailySummaries(
@@ -540,12 +1072,13 @@ export class MongoDBAdapter extends StorageAdapter {
   ): Promise<DailySummaryDoc[]> {
     if (!this.db) return []
     const limit = Math.min(opts.limit ?? 90, 365)
-    return this.db
-      .collection<DailySummaryDoc>(`${this.dbPrefix}daily_summaries`)
+    const wires = await this.db
+      .collection<WireDailySummaryDoc>(`${this.dbPrefix}daily_summaries`)
       .find({ endpointId: toObjectId(endpointId, 'endpointId') })
       .sort({ date: -1 })
       .limit(limit)
       .toArray()
+    return wires.map(dailySummaryFromWire)
   }
 
   async getUptimeStats(
@@ -555,9 +1088,8 @@ export class MongoDBAdapter extends StorageAdapter {
 
     const oid = toObjectId(endpointId, 'endpointId')
     const now = new Date()
-    const coll = this.db.collection<CheckDoc>(`${this.dbPrefix}checks`)
+    const coll = this.db.collection<WireCheckDoc>(`${this.dbPrefix}checks`)
 
-    // Find the oldest check to know how far back data actually exists.
     const oldest = await coll
       .findOne({ endpointId: oid }, { sort: { timestamp: 1 }, projection: { timestamp: 1 } })
     if (!oldest) return { '24h': null, '7d': null, '30d': null, '90d': null }
@@ -565,7 +1097,6 @@ export class MongoDBAdapter extends StorageAdapter {
     const dataAgeMs = now.getTime() - oldest.timestamp.getTime()
 
     const calcUptime = async (sinceMs: number): Promise<number | null> => {
-      // Only report for windows where we have data covering at least 50% of the period.
       if (dataAgeMs < sinceMs * 0.5) return null
       const since = new Date(now.getTime() - sinceMs)
       const [total, healthy] = await Promise.all([
@@ -606,34 +1137,50 @@ export class MongoDBAdapter extends StorageAdapter {
       if (opts.to) ts.$lte = opts.to
       filter.startedAt = ts
     }
-    return this.paginate<IncidentDoc>('incidents', filter, opts, { _id: -1 })
+    const page = await this.paginate<WireIncidentDoc>('incidents', filter, opts, { _id: -1 })
+    return { ...page, items: page.items.map(incidentFromWire) }
   }
 
   async getIncidentById(id: string): Promise<IncidentDoc | null> {
     if (!this.db) return null
     if (!ObjectId.isValid(id)) return null
-    return this.db
-      .collection<IncidentDoc>(`${this.dbPrefix}incidents`)
+    const wire = await this.db
+      .collection<WireIncidentDoc>(`${this.dbPrefix}incidents`)
       .findOne({ _id: new ObjectId(id) })
+    return wire ? incidentFromWire(wire) : null
   }
 
   async listActiveIncidents(): Promise<IncidentDoc[]> {
     if (!this.db) return []
-    return this.db
-      .collection<IncidentDoc>(`${this.dbPrefix}incidents`)
+    const wires = await this.db
+      .collection<WireIncidentDoc>(`${this.dbPrefix}incidents`)
       .find({ status: 'active' })
       .sort({ startedAt: -1 })
       .toArray()
+    return wires.map(incidentFromWire)
   }
 
   async createIncident(
-    data: Omit<IncidentDoc, '_id' | 'createdAt' | 'updatedAt'>,
+    data: Omit<IncidentDoc, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<IncidentDoc> {
     const db = this.getDb()
     const now = new Date()
-    const doc: IncidentDoc = { ...data, _id: new ObjectId(), createdAt: now, updatedAt: now }
-    await db.collection<IncidentDoc>(`${this.dbPrefix}incidents`).insertOne(doc)
-    return doc
+    const wire: WireIncidentDoc = {
+      _id: new ObjectId(),
+      endpointId: toObjectId(data.endpointId, 'endpointId'),
+      status: data.status,
+      cause: data.cause,
+      startedAt: data.startedAt,
+      timeline: data.timeline,
+      notificationsSent: data.notificationsSent,
+      createdAt: now,
+      updatedAt: now,
+    }
+    if (data.causeDetail !== undefined) wire.causeDetail = data.causeDetail
+    if (data.resolvedAt !== undefined) wire.resolvedAt = data.resolvedAt
+    if (data.durationSeconds !== undefined) wire.durationSeconds = data.durationSeconds
+    await db.collection<WireIncidentDoc>(`${this.dbPrefix}incidents`).insertOne(wire)
+    return incidentFromWire(wire)
   }
 
   async resolveIncident(
@@ -643,7 +1190,7 @@ export class MongoDBAdapter extends StorageAdapter {
   ): Promise<IncidentDoc | null> {
     const db = this.getDb()
     const result = await db
-      .collection<IncidentDoc>(`${this.dbPrefix}incidents`)
+      .collection<WireIncidentDoc>(`${this.dbPrefix}incidents`)
       .findOneAndUpdate(
         { _id: toObjectId(id, 'incidentId'), status: 'active' },
         {
@@ -659,7 +1206,7 @@ export class MongoDBAdapter extends StorageAdapter {
         },
         { returnDocument: 'after' },
       )
-    return result ?? null
+    return result ? incidentFromWire(result) : null
   }
 
   async addIncidentTimelineEvent(
@@ -667,7 +1214,7 @@ export class MongoDBAdapter extends StorageAdapter {
     event: { at: Date; event: string; detail?: string },
   ): Promise<void> {
     const db = this.getDb()
-    await db.collection<IncidentDoc>(`${this.dbPrefix}incidents`).updateOne(
+    await db.collection<WireIncidentDoc>(`${this.dbPrefix}incidents`).updateOne(
       { _id: toObjectId(incidentId, 'incidentId') },
       { $push: { timeline: event }, $set: { updatedAt: new Date() } },
     )
@@ -679,9 +1226,8 @@ export class MongoDBAdapter extends StorageAdapter {
   ): Promise<void> {
     const db = this.getDb()
     const filter = { _id: toObjectId(endpointId, 'endpointId') }
-    const coll = db.collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
+    const coll = db.collection<WireEndpointDoc>(`${this.dbPrefix}endpoints`)
     if (incidentId === null) {
-      // Mongo silently ignores `undefined` in $set — must use $unset to clear.
       await coll.updateOne(filter, {
         $unset: { currentIncidentId: 1 },
         $set: { updatedAt: new Date() },
@@ -698,7 +1244,7 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async getIncidentStats(filter: IncidentStatsFilter): Promise<IncidentStats> {
     const db = this.getDb()
-    const coll = db.collection<IncidentDoc>(`${this.dbPrefix}incidents`)
+    const coll = db.collection<WireIncidentDoc>(`${this.dbPrefix}incidents`)
 
     const tz = filter.tz ?? 'UTC'
     const windowMs = filter.to.getTime() - filter.from.getTime()
@@ -800,7 +1346,6 @@ export class MongoDBAdapter extends StorageAdapter {
       ])
       .toArray()
 
-    // Previous-window counts per endpoint for trend calculation.
     const prevAgg = await coll
       .aggregate<{ _id: ObjectId; count: number }>([
         {
@@ -817,7 +1362,6 @@ export class MongoDBAdapter extends StorageAdapter {
     const prevByEndpoint = new Map<string, number>()
     for (const r of prevAgg) prevByEndpoint.set(r._id.toHexString(), r.count)
 
-    // ── Shape output ───────────────────────────────────────────────────────
     const totals = raw?.totals[0] ?? {
       total: 0,
       active: 0,
@@ -825,10 +1369,6 @@ export class MongoDBAdapter extends StorageAdapter {
       notificationsSent: 0,
     }
 
-    // Zero-filled per-day bucket list, keyed yyyy-mm-dd in the requested tz.
-    // Using Intl + the tz param keeps the server buckets aligned with what
-    // the client's calendar shows, so "today" doesn't slip a day near UTC
-    // day boundaries.
     const dates = enumerateDayKeys(filter.from, filter.to, tz)
     const byDayMap = new Map<string, { date: string; total: number; causes: Record<string, number> }>()
     for (const d of dates) byDayMap.set(d, { date: d, total: 0, causes: {} })
@@ -883,23 +1423,29 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async listNotificationChannels(): Promise<NotificationChannelDoc[]> {
     if (!this.db) return []
-    return this.db
-      .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+    const wires = await this.db
+      .collection<WireNotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
       .find()
       .sort({ createdAt: 1 })
       .toArray()
+    return wires.map(notificationChannelFromWire)
   }
 
   async createNotificationChannel(
-    data: Omit<NotificationChannelDoc, '_id' | 'createdAt' | 'updatedAt'>,
+    data: Omit<NotificationChannelDoc, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<NotificationChannelDoc> {
     const db = this.getDb()
     const now = new Date()
-    const doc: NotificationChannelDoc = { ...data, _id: new ObjectId(), createdAt: now, updatedAt: now }
+    const wire: WireNotificationChannelDoc = {
+      _id: new ObjectId(),
+      ...data,
+      createdAt: now,
+      updatedAt: now,
+    }
     await db
-      .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
-      .insertOne(doc)
-    return doc
+      .collection<WireNotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+      .insertOne(wire)
+    return notificationChannelFromWire(wire)
   }
 
   async updateNotificationChannel(
@@ -907,21 +1453,23 @@ export class MongoDBAdapter extends StorageAdapter {
     changes: Partial<NotificationChannelDoc>,
   ): Promise<NotificationChannelDoc | null> {
     const db = this.getDb()
-    const { _id: _d, createdAt: _c, ...safe } = changes as Record<string, unknown>
+    const safe: Record<string, unknown> = { ...changes }
+    delete safe.id
+    delete safe.createdAt
     const result = await db
-      .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+      .collection<WireNotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
       .findOneAndUpdate(
         { _id: toObjectId(id, 'channelId') },
         { $set: { ...safe, updatedAt: new Date() } },
         { returnDocument: 'after' },
       )
-    return result ?? null
+    return result ? notificationChannelFromWire(result) : null
   }
 
   async deleteNotificationChannel(id: string): Promise<boolean> {
     const db = this.getDb()
     const r = await db
-      .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+      .collection<WireNotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
       .deleteOne({ _id: toObjectId(id, 'channelId') })
     return r.deletedCount > 0
   }
@@ -929,9 +1477,10 @@ export class MongoDBAdapter extends StorageAdapter {
   async getNotificationChannelById(id: string): Promise<NotificationChannelDoc | null> {
     if (!this.db) return null
     if (!ObjectId.isValid(id)) return null
-    return this.db
-      .collection<NotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
+    const wire = await this.db
+      .collection<WireNotificationChannelDoc>(`${this.dbPrefix}notification_channels`)
       .findOne({ _id: new ObjectId(id) })
+    return wire ? notificationChannelFromWire(wire) : null
   }
 
   // ---------------------------------------------------------------------------
@@ -942,7 +1491,13 @@ export class MongoDBAdapter extends StorageAdapter {
     opts: DbPaginationOpts & NotificationLogFilter,
   ): Promise<DbPage<NotificationLogDoc>> {
     const filter = this.buildNotificationLogFilter(opts)
-    return this.paginate<NotificationLogDoc>('notification_log', filter, opts, { _id: -1 })
+    const page = await this.paginate<WireNotificationLogDoc>(
+      'notification_log',
+      filter,
+      opts,
+      { _id: -1 },
+    )
+    return { ...page, items: page.items.map(notificationLogFromWire) }
   }
 
   async listNotificationLogForEndpoint(
@@ -961,45 +1516,81 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async listNotificationLogForIncident(incidentId: string): Promise<NotificationLogDoc[]> {
     if (!this.db) return []
-    return this.db
-      .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+    const wires = await this.db
+      .collection<WireNotificationLogDoc>(`${this.dbPrefix}notification_log`)
       .find({ incidentId: toObjectId(incidentId, 'incidentId') })
       .sort({ sentAt: -1 })
       .limit(500)
       .toArray()
+    return wires.map(notificationLogFromWire)
   }
 
   async findCoalescedDeliveriesFor(incidentId: string): Promise<NotificationLogDoc[]> {
     if (!this.db) return []
-    return this.db
-      .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+    const wires = await this.db
+      .collection<WireNotificationLogDoc>(`${this.dbPrefix}notification_log`)
       .find({ coalescedIncidentIds: toObjectId(incidentId, 'incidentId') })
       .sort({ sentAt: -1 })
       .limit(100)
       .toArray()
+    return wires.map(notificationLogFromWire)
   }
 
   async getNotificationLogById(id: string): Promise<NotificationLogDoc | null> {
     if (!this.db) return null
     if (!ObjectId.isValid(id)) return null
-    return this.db
-      .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+    const wire = await this.db
+      .collection<WireNotificationLogDoc>(`${this.dbPrefix}notification_log`)
       .findOne({ _id: new ObjectId(id) })
+    return wire ? notificationLogFromWire(wire) : null
   }
 
   async writeNotificationLog(
-    row: Omit<NotificationLogDoc, '_id' | 'createdAt'>,
+    row: Omit<NotificationLogDoc, 'id' | 'createdAt'>,
   ): Promise<NotificationLogDoc> {
     const db = this.getDb()
-    const doc: NotificationLogDoc = { ...row, _id: new ObjectId(), createdAt: new Date() }
-    await db.collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`).insertOne(doc)
-    return doc
+    const wire: WireNotificationLogDoc = {
+      _id: new ObjectId(),
+      channelId: toObjectId(row.channelId, 'channelId'),
+      type: row.type,
+      channelType: row.channelType,
+      channelTarget: row.channelTarget,
+      messageSummary: row.messageSummary,
+      severity: row.severity,
+      kind: row.kind,
+      deliveryStatus: row.deliveryStatus,
+      sentAt: row.sentAt,
+      createdAt: new Date(),
+    }
+    if (row.endpointId) wire.endpointId = toObjectId(row.endpointId, 'endpointId')
+    if (row.incidentId) wire.incidentId = toObjectId(row.incidentId, 'incidentId')
+    if (row.failureReason !== undefined) wire.failureReason = row.failureReason
+    if (row.suppressedReason !== undefined) wire.suppressedReason = row.suppressedReason
+    if (row.latencyMs !== undefined) wire.latencyMs = row.latencyMs
+    if (row.idempotencyKey !== undefined) wire.idempotencyKey = row.idempotencyKey
+    if (row.retryOf) wire.retryOf = toObjectId(row.retryOf, 'retryOf')
+    if (row.coalescedIntoLogId) {
+      wire.coalescedIntoLogId = toObjectId(row.coalescedIntoLogId, 'coalescedIntoLogId')
+    }
+    if (row.coalescedCount !== undefined) wire.coalescedCount = row.coalescedCount
+    if (row.coalescedIncidentIds) {
+      wire.coalescedIncidentIds = row.coalescedIncidentIds.map((id) =>
+        toObjectId(id, 'incidentId'),
+      )
+    }
+    if (row.payload !== undefined) wire.payload = row.payload
+    if (row.request !== undefined) wire.request = row.request
+    if (row.response !== undefined) wire.response = row.response
+    await db
+      .collection<WireNotificationLogDoc>(`${this.dbPrefix}notification_log`)
+      .insertOne(wire)
+    return notificationLogFromWire(wire)
   }
 
   async redactOldNotificationLogs(before: Date): Promise<number> {
     const db = this.getDb()
     const result = await db
-      .collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+      .collection<WireNotificationLogDoc>(`${this.dbPrefix}notification_log`)
       .updateMany(
         {
           sentAt: { $lt: before },
@@ -1035,7 +1626,7 @@ export class MongoDBAdapter extends StorageAdapter {
     }
     if (!this.db) return empty
 
-    const coll = this.db.collection<NotificationLogDoc>(`${this.dbPrefix}notification_log`)
+    const coll = this.db.collection<WireNotificationLogDoc>(`${this.dbPrefix}notification_log`)
     const match = { sentAt: { $gte: window.from, $lte: window.to } }
 
     const [statusAgg, channelAgg, reasonAgg, kindAgg, lastSent, lastFailed] = await Promise.all([
@@ -1121,7 +1712,6 @@ export class MongoDBAdapter extends StorageAdapter {
       filter.sentAt = ts
     }
     if (f.search && f.search.trim() !== '') {
-      // Escape regex special chars — messageSummary is user-controlled via template output.
       const escaped = f.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       filter.messageSummary = { $regex: escaped, $options: 'i' }
     }
@@ -1133,38 +1723,48 @@ export class MongoDBAdapter extends StorageAdapter {
   // ---------------------------------------------------------------------------
 
   async recordMute(
-    data: Omit<NotificationMuteDoc, '_id' | 'mutedAt'>,
+    data: Omit<NotificationMuteDoc, 'id' | 'mutedAt'>,
   ): Promise<NotificationMuteDoc> {
     const db = this.getDb()
-    const doc: NotificationMuteDoc = { ...data, _id: new ObjectId(), mutedAt: new Date() }
-    await db.collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`).insertOne(doc)
-    return doc
+    const wire: WireNotificationMuteDoc = {
+      _id: new ObjectId(),
+      scope: data.scope,
+      mutedBy: data.mutedBy,
+      mutedAt: new Date(),
+      expiresAt: data.expiresAt,
+    }
+    if (data.targetId) wire.targetId = toObjectId(data.targetId, 'targetId')
+    if (data.reason !== undefined) wire.reason = data.reason
+    await db
+      .collection<WireNotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
+      .insertOne(wire)
+    return notificationMuteFromWire(wire)
   }
 
   async listActiveMutes(): Promise<NotificationMuteDoc[]> {
     if (!this.db) return []
-    // TTL drops expired docs, but the index is checked every ~60s so filter
-    // defensively too.
-    return this.db
-      .collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
+    const wires = await this.db
+      .collection<WireNotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
       .find({ expiresAt: { $gt: new Date() } })
       .sort({ expiresAt: 1 })
       .toArray()
+    return wires.map(notificationMuteFromWire)
   }
 
   async getMuteById(id: string): Promise<NotificationMuteDoc | null> {
     if (!this.db) return null
     if (!ObjectId.isValid(id)) return null
-    return this.db
-      .collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
+    const wire = await this.db
+      .collection<WireNotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
       .findOne({ _id: new ObjectId(id) })
+    return wire ? notificationMuteFromWire(wire) : null
   }
 
   async deleteMute(id: string): Promise<boolean> {
     if (!ObjectId.isValid(id)) return false
     const db = this.getDb()
     const r = await db
-      .collection<NotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
+      .collection<WireNotificationMuteDoc>(`${this.dbPrefix}notification_mutes`)
       .deleteOne({ _id: new ObjectId(id) })
     return r.deletedCount > 0
   }
@@ -1175,26 +1775,26 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async getNotificationPreferences(): Promise<NotificationPreferencesDoc> {
     const db = this.getDb()
-    const coll = db.collection<NotificationPreferencesDoc>(
+    const coll = db.collection<WireNotificationPreferencesDoc>(
       `${this.dbPrefix}notification_preferences`,
     )
     const existing = await coll.findOne({ _id: 'global' })
-    if (existing) return existing
-    const seed: NotificationPreferencesDoc = {
+    if (existing) return notificationPreferencesFromWire(existing)
+    const seed: WireNotificationPreferencesDoc = {
       _id: 'global',
       defaultSeverityFilter: 'warning+',
       defaultEventFilters: { sendOpen: true, sendResolved: true, sendEscalation: true },
       updatedAt: new Date(),
     }
     await coll.updateOne({ _id: 'global' }, { $setOnInsert: seed }, { upsert: true })
-    return seed
+    return notificationPreferencesFromWire(seed)
   }
 
   async updateNotificationPreferences(
-    changes: Partial<Omit<NotificationPreferencesDoc, '_id'>>,
+    changes: Partial<Omit<NotificationPreferencesDoc, 'id'>>,
   ): Promise<NotificationPreferencesDoc> {
     const db = this.getDb()
-    const coll = db.collection<NotificationPreferencesDoc>(
+    const coll = db.collection<WireNotificationPreferencesDoc>(
       `${this.dbPrefix}notification_preferences`,
     )
     const patch = { ...changes, updatedAt: new Date() }
@@ -1203,76 +1803,14 @@ export class MongoDBAdapter extends StorageAdapter {
       { $set: patch },
       { upsert: true, returnDocument: 'after' },
     )
-    if (result) return result
-    // Extreme fallback — driver returned null despite upsert.
-    return {
+    if (result) return notificationPreferencesFromWire(result)
+    return notificationPreferencesFromWire({
       _id: 'global',
       defaultSeverityFilter: 'warning+',
       defaultEventFilters: { sendOpen: true, sendResolved: true, sendEscalation: true },
       updatedAt: new Date(),
       ...changes,
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Maintenance API
-  // ---------------------------------------------------------------------------
-
-  async addMaintenanceWindows(
-    endpointIds: string[],
-    windowData: Omit<MaintenanceWindow, '_id'>,
-  ): Promise<MaintenanceWindow[]> {
-    const db = this.getDb()
-    const windows: MaintenanceWindow[] = endpointIds.map((id) => ({
-      ...windowData,
-      _id: new ObjectId(),
-    }))
-
-    await Promise.all(
-      endpointIds.map((id, i) =>
-        db
-          .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
-          .updateOne(
-            { _id: toObjectId(id, 'endpointId') },
-            { $push: { maintenanceWindows: windows[i]! }, $set: { updatedAt: new Date() } },
-          ),
-      ),
-    )
-    return windows
-  }
-
-  async removeMaintenanceWindow(windowId: string): Promise<boolean> {
-    const db = this.getDb()
-    const oid = toObjectId(windowId, 'windowId')
-    const r = await db
-      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
-      .updateOne(
-        { 'maintenanceWindows._id': oid },
-        { $pull: { maintenanceWindows: { _id: oid } }, $set: { updatedAt: new Date() } },
-      )
-    return r.modifiedCount > 0
-  }
-
-  async listMaintenanceWindows(): Promise<
-    Array<{ endpoint: EndpointDoc; window: MaintenanceWindow }>
-  > {
-    if (!this.db) return []
-    const now = new Date()
-    const endpoints = await this.db
-      .collection<EndpointDoc>(`${this.dbPrefix}endpoints`)
-      .find({ 'maintenanceWindows.0': { $exists: true } })
-      .toArray()
-
-    const result: Array<{ endpoint: EndpointDoc; window: MaintenanceWindow }> = []
-    for (const ep of endpoints) {
-      for (const w of ep.maintenanceWindows) {
-        // active: now is within the window; scheduled: window hasn't started yet
-        if (w.endTime >= now) {
-          result.push({ endpoint: ep, window: w })
-        }
-      }
-    }
-    return result
+    })
   }
 
   // ---------------------------------------------------------------------------
@@ -1281,38 +1819,43 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async getChecksInHour(endpointId: string, hourStart: Date, hourEnd: Date): Promise<CheckDoc[]> {
     if (!this.db) return []
-    return this.db
-      .collection<CheckDoc>(`${this.dbPrefix}checks`)
+    const wires = await this.db
+      .collection<WireCheckDoc>(`${this.dbPrefix}checks`)
       .find({
         endpointId: toObjectId(endpointId, 'endpointId'),
         timestamp: { $gte: hourStart, $lt: hourEnd },
       })
       .sort({ timestamp: 1 })
       .toArray()
+    return wires.map(checkFromWire)
   }
 
   async upsertHourlySummary(
-    summary: Omit<HourlySummaryDoc, '_id' | 'createdAt'>,
+    summary: Omit<HourlySummaryDoc, 'id' | 'createdAt'>,
   ): Promise<void> {
     const db = this.getDb()
+    const endpointOid = toObjectId(summary.endpointId, 'endpointId')
+    const wireDoc = { ...summary, endpointId: endpointOid, createdAt: new Date() }
     await db
-      .collection<HourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
+      .collection<WireHourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
       .updateOne(
-        { endpointId: summary.endpointId, hour: summary.hour },
-        { $set: { ...summary, createdAt: new Date() } },
+        { endpointId: endpointOid, hour: summary.hour },
+        { $set: wireDoc },
         { upsert: true },
       )
   }
 
   async upsertDailySummary(
-    summary: Omit<DailySummaryDoc, '_id' | 'createdAt'>,
+    summary: Omit<DailySummaryDoc, 'id' | 'createdAt'>,
   ): Promise<void> {
     const db = this.getDb()
+    const endpointOid = toObjectId(summary.endpointId, 'endpointId')
+    const wireDoc = { ...summary, endpointId: endpointOid, createdAt: new Date() }
     await db
-      .collection<DailySummaryDoc>(`${this.dbPrefix}daily_summaries`)
+      .collection<WireDailySummaryDoc>(`${this.dbPrefix}daily_summaries`)
       .updateOne(
-        { endpointId: summary.endpointId, date: summary.date },
-        { $set: { ...summary, createdAt: new Date() } },
+        { endpointId: endpointOid, date: summary.date },
+        { $set: wireDoc },
         { upsert: true },
       )
   }
@@ -1320,7 +1863,7 @@ export class MongoDBAdapter extends StorageAdapter {
   async deleteHourlySummariesBefore(before: Date): Promise<number> {
     const db = this.getDb()
     const result = await db
-      .collection<HourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
+      .collection<WireHourlySummaryDoc>(`${this.dbPrefix}hourly_summaries`)
       .deleteMany({ hour: { $lt: before } })
     return result.deletedCount
   }
@@ -1328,7 +1871,7 @@ export class MongoDBAdapter extends StorageAdapter {
   async deleteDailySummariesBefore(before: Date): Promise<number> {
     const db = this.getDb()
     const result = await db
-      .collection<DailySummaryDoc>(`${this.dbPrefix}daily_summaries`)
+      .collection<WireDailySummaryDoc>(`${this.dbPrefix}daily_summaries`)
       .deleteMany({ date: { $lt: before } })
     return result.deletedCount
   }
@@ -1336,7 +1879,7 @@ export class MongoDBAdapter extends StorageAdapter {
   async getEndpointIdsWithChecks(from: Date, to: Date): Promise<string[]> {
     if (!this.db) return []
     const results = await this.db
-      .collection<CheckDoc>(`${this.dbPrefix}checks`)
+      .collection<WireCheckDoc>(`${this.dbPrefix}checks`)
       .distinct('endpointId', { timestamp: { $gte: from, $lt: to } })
     return results.map((id: ObjectId) => id.toHexString())
   }
@@ -1348,36 +1891,33 @@ export class MongoDBAdapter extends StorageAdapter {
   async getSettings(): Promise<SettingsDoc> {
     const db = this.getDb()
     const existing = await db
-      .collection<SettingsDoc>(`${this.dbPrefix}settings`)
+      .collection<WireSettingsDoc>(`${this.dbPrefix}settings`)
       .findOne({ _id: 'global' })
-    if (existing) return existing
-    // Upsert empty doc on first access
-    const doc: SettingsDoc = { _id: 'global' }
+    if (existing) return settingsFromWire(existing)
+    const seed: WireSettingsDoc = { _id: 'global' }
     await db
-      .collection<SettingsDoc>(`${this.dbPrefix}settings`)
-      .updateOne({ _id: 'global' }, { $setOnInsert: doc }, { upsert: true })
-    return doc
+      .collection<WireSettingsDoc>(`${this.dbPrefix}settings`)
+      .updateOne({ _id: 'global' }, { $setOnInsert: seed }, { upsert: true })
+    return settingsFromWire(seed)
   }
 
   async updateSettings(changes: Record<string, unknown>): Promise<SettingsDoc> {
     const db = this.getDb()
-    const { _id: _d, ...safe } = changes
+    const { _id: _d, id: _id2, ...safe } = changes
+    void _d
+    void _id2
     const result = await db
-      .collection<SettingsDoc>(`${this.dbPrefix}settings`)
+      .collection<WireSettingsDoc>(`${this.dbPrefix}settings`)
       .findOneAndUpdate(
         { _id: 'global' },
         { $set: safe },
         { upsert: true, returnDocument: 'after' },
       )
-    return result ?? { _id: 'global', ...safe }
+    return result ? settingsFromWire(result) : settingsFromWire({ _id: 'global', ...safe })
   }
 
   async hardReset(): Promise<Record<string, number>> {
     const db = this.getDb()
-    // Short, stable suffix list — matches what migrations.ts creates. Using a
-    // fixed list (rather than listCollections) keeps the wipe predictable and
-    // avoids accidentally deleting collections that share the prefix but were
-    // created outside WatchDeck.
     const suffixes = [
       'endpoints',
       'checks',
@@ -1406,9 +1946,9 @@ export class MongoDBAdapter extends StorageAdapter {
   // System Health persistence
   // ---------------------------------------------------------------------------
 
-  async saveHealthState(state: Omit<HealthStateDoc, '_id'>): Promise<void> {
+  async saveHealthState(state: Omit<HealthStateDoc, 'id'>): Promise<void> {
     const db = this.getDb()
-    await db.collection<HealthStateDoc>(`${this.dbPrefix}health_state`).updateOne(
+    await db.collection<WireHealthStateDoc>(`${this.dbPrefix}health_state`).updateOne(
       { _id: 'snapshot' },
       { $set: { ...state, _id: 'snapshot' } },
       { upsert: true },
@@ -1417,49 +1957,57 @@ export class MongoDBAdapter extends StorageAdapter {
 
   async loadHealthState(): Promise<HealthStateDoc | null> {
     if (!this.db) return null
-    return this.db
-      .collection<HealthStateDoc>(`${this.dbPrefix}health_state`)
+    const wire = await this.db
+      .collection<WireHealthStateDoc>(`${this.dbPrefix}health_state`)
       .findOne({ _id: 'snapshot' })
+    return wire ? healthStateFromWire(wire) : null
   }
 
   async listInternalIncidents(): Promise<InternalIncidentDoc[]> {
     if (!this.db) return []
-    return this.db
-      .collection<InternalIncidentDoc>(`${this.dbPrefix}internal_incidents`)
+    const wires = await this.db
+      .collection<WireInternalIncidentDoc>(`${this.dbPrefix}internal_incidents`)
       .find()
       .sort({ startedAt: -1 })
       .limit(500)
       .toArray()
+    return wires.map(internalIncidentFromWire)
   }
 
   async upsertInternalIncident(doc: InternalIncidentDoc): Promise<void> {
     const db = this.getDb()
+    const wire: WireInternalIncidentDoc = {
+      _id: doc.id,
+      subsystem: doc.subsystem,
+      severity: doc.severity,
+      status: doc.status,
+      title: doc.title,
+      cause: doc.cause,
+      startedAt: doc.startedAt,
+      commits: doc.commits,
+      timeline: doc.timeline,
+    }
+    if (doc.resolvedAt !== undefined) wire.resolvedAt = doc.resolvedAt
+    if (doc.durationSeconds !== undefined) wire.durationSeconds = doc.durationSeconds
+    if (doc.expiresAt !== undefined) wire.expiresAt = doc.expiresAt
     await db
-      .collection<InternalIncidentDoc>(`${this.dbPrefix}internal_incidents`)
-      .updateOne({ _id: doc._id }, { $set: doc }, { upsert: true })
+      .collection<WireInternalIncidentDoc>(`${this.dbPrefix}internal_incidents`)
+      .updateOne({ _id: wire._id }, { $set: wire }, { upsert: true })
   }
 
   // ---------------------------------------------------------------------------
-  // Package-internal accessor for MongoDBAdapter subclasses / same-module code
+  // Package-internal accessor
   // ---------------------------------------------------------------------------
 
-  /**
-   * Exposes the raw Db for use within the storage layer only.
-   * Throws if called before connect() succeeds.
-   */
   protected getDb(): Db {
     if (!this.db) throw new Error('MongoDBAdapter.getDb() called before connect()')
     return this.db
   }
 
   // ---------------------------------------------------------------------------
-  // Shared pagination helper
+  // Shared pagination helper (operates on wire docs)
   // ---------------------------------------------------------------------------
 
-  /**
-   * Cursor-based pagination over any collection.
-   * sort direction determines cursor direction: _id:1 uses $gt, _id:-1 uses $lt.
-   */
   private async paginate<T extends { _id: ObjectId }>(
     collSuffix: string,
     filter: Record<string, unknown>,
@@ -1468,8 +2016,6 @@ export class MongoDBAdapter extends StorageAdapter {
   ): Promise<DbPage<T>> {
     if (!this.db) return { items: [], total: 0, hasMore: false, nextCursor: null, prevCursor: null }
 
-    // Hard safety ceiling; route handlers apply their own (tighter) caps
-    // via parsePagination or inline logic before reaching this helper.
     const limit = Math.min(opts.limit ?? 20, 5000)
     const coll = this.db.collection<T>(`${this.dbPrefix}${collSuffix}`)
     const sortDir = Object.values(sort)[0] ?? 1

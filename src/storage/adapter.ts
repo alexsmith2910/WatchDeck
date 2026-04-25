@@ -10,7 +10,6 @@ import type {
   HourlySummaryDoc,
   IncidentDoc,
   InternalIncidentDoc,
-  MaintenanceWindow,
   NotificationChannelDoc,
   NotificationDeliveryStatus,
   NotificationKind,
@@ -237,7 +236,7 @@ export abstract class StorageAdapter {
   /**
    * Persist a system event record (e.g. a DB outage summary).
    */
-  abstract saveSystemEvent(event: Omit<SystemEventDoc, '_id'>): Promise<void>
+  abstract saveSystemEvent(event: Omit<SystemEventDoc, 'id'>): Promise<void>
 
   /**
    * Retrieve recent system event records, newest first.
@@ -276,7 +275,7 @@ export abstract class StorageAdapter {
   // ---------------------------------------------------------------------------
 
   abstract createEndpoint(
-    data: Omit<EndpointDoc, '_id' | 'createdAt' | 'updatedAt'>,
+    data: Omit<EndpointDoc, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<EndpointDoc>
 
   abstract getEndpointById(id: string): Promise<EndpointDoc | null>
@@ -341,7 +340,7 @@ export abstract class StorageAdapter {
   abstract listActiveIncidents(): Promise<IncidentDoc[]>
 
   abstract createIncident(
-    data: Omit<IncidentDoc, '_id' | 'createdAt' | 'updatedAt'>,
+    data: Omit<IncidentDoc, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<IncidentDoc>
 
   abstract resolveIncident(
@@ -375,7 +374,7 @@ export abstract class StorageAdapter {
   abstract listNotificationChannels(): Promise<NotificationChannelDoc[]>
 
   abstract createNotificationChannel(
-    data: Omit<NotificationChannelDoc, '_id' | 'createdAt' | 'updatedAt'>,
+    data: Omit<NotificationChannelDoc, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<NotificationChannelDoc>
 
   abstract updateNotificationChannel(
@@ -423,7 +422,7 @@ export abstract class StorageAdapter {
 
   /** Persist a single log row. Returns the inserted doc. */
   abstract writeNotificationLog(
-    row: Omit<NotificationLogDoc, '_id' | 'createdAt'>,
+    row: Omit<NotificationLogDoc, 'id' | 'createdAt'>,
   ): Promise<NotificationLogDoc>
 
   /**
@@ -442,7 +441,7 @@ export abstract class StorageAdapter {
   // ---------------------------------------------------------------------------
 
   abstract recordMute(
-    data: Omit<NotificationMuteDoc, '_id' | 'mutedAt'>,
+    data: Omit<NotificationMuteDoc, 'id' | 'mutedAt'>,
   ): Promise<NotificationMuteDoc>
 
   abstract listActiveMutes(): Promise<NotificationMuteDoc[]>
@@ -452,32 +451,14 @@ export abstract class StorageAdapter {
   abstract deleteMute(id: string): Promise<boolean>
 
   // ---------------------------------------------------------------------------
-  // Notification preferences (singleton, _id = "global")
+  // Notification preferences (singleton, id = "global")
   // ---------------------------------------------------------------------------
 
   abstract getNotificationPreferences(): Promise<NotificationPreferencesDoc>
 
   abstract updateNotificationPreferences(
-    changes: Partial<Omit<NotificationPreferencesDoc, '_id'>>,
+    changes: Partial<Omit<NotificationPreferencesDoc, 'id'>>,
   ): Promise<NotificationPreferencesDoc>
-
-  // ---------------------------------------------------------------------------
-  // Maintenance API
-  // ---------------------------------------------------------------------------
-
-  /** Add a maintenance window to each of the given endpoints. Returns one window per endpointId. */
-  abstract addMaintenanceWindows(
-    endpointIds: string[],
-    window: Omit<MaintenanceWindow, '_id'>,
-  ): Promise<MaintenanceWindow[]>
-
-  /** Remove a maintenance window (by its ObjectId) from whichever endpoint owns it. */
-  abstract removeMaintenanceWindow(windowId: string): Promise<boolean>
-
-  /** All active (now between start/end) and scheduled (start > now) windows across all endpoints. */
-  abstract listMaintenanceWindows(): Promise<
-    Array<{ endpoint: EndpointDoc; window: MaintenanceWindow }>
-  >
 
   // ---------------------------------------------------------------------------
   // Aggregation write API
@@ -494,7 +475,7 @@ export abstract class StorageAdapter {
    * If a summary already exists for that hour it is replaced.
    */
   abstract upsertHourlySummary(
-    summary: Omit<HourlySummaryDoc, '_id' | 'createdAt'>,
+    summary: Omit<HourlySummaryDoc, 'id' | 'createdAt'>,
   ): Promise<void>
 
   /**
@@ -502,7 +483,7 @@ export abstract class StorageAdapter {
    * If a summary already exists for that date it is replaced.
    */
   abstract upsertDailySummary(
-    summary: Omit<DailySummaryDoc, '_id' | 'createdAt'>,
+    summary: Omit<DailySummaryDoc, 'id' | 'createdAt'>,
   ): Promise<void>
 
   /**
@@ -578,7 +559,7 @@ export abstract class StorageAdapter {
   // ---------------------------------------------------------------------------
 
   /** Persist (or replace) the single health-state snapshot document. */
-  abstract saveHealthState(state: Omit<HealthStateDoc, '_id'>): Promise<void>
+  abstract saveHealthState(state: Omit<HealthStateDoc, 'id'>): Promise<void>
 
   /** Load the health-state snapshot, or null if none has been saved yet. */
   abstract loadHealthState(): Promise<HealthStateDoc | null>
@@ -586,6 +567,6 @@ export abstract class StorageAdapter {
   /** Internal-incident history (most recent first, capped to a sane number). */
   abstract listInternalIncidents(): Promise<InternalIncidentDoc[]>
 
-  /** Upsert a single internal-incident document keyed by its synthesized _id. */
+  /** Upsert a single internal-incident document keyed by its synthesized id. */
   abstract upsertInternalIncident(doc: InternalIncidentDoc): Promise<void>
 }
