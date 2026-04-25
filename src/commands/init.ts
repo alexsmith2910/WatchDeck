@@ -82,8 +82,6 @@ export async function runInit(options: InitOptions): Promise<void> {
       dbName: 'watchdeck',
       dbPrefix: 'mx_',
       dashboardMode: 'standalone',
-      discord: 'false',
-      slack: 'false',
       encryptionKey: generateEncryptionKey(),
     })
 
@@ -109,20 +107,40 @@ export async function runInit(options: InitOptions): Promise<void> {
     },
   }))
 
-  // Step 2 — MongoDB location
+  // Step 2 — Database backend
+  const backend = requireValue(await p.select({
+    message: 'Which database backend?',
+    options: [
+      { value: 'mongodb', label: 'MongoDB', hint: 'Default. Local or Atlas.' },
+      { value: 'postgres', label: 'Postgres', hint: 'Local, managed, or Supabase.' },
+    ],
+    initialValue: 'mongodb',
+  })) as 'mongodb' | 'postgres'
+
+  const uriPlaceholder = backend === 'mongodb'
+    ? 'mongodb://localhost:27017/watchdeck'
+    : 'postgres://user:pass@localhost:5432/watchdeck'
+
+  // Step 3 — Connection URI
   const dbUri = requireValue(await p.text({
-    message: 'MongoDB connection URI',
-    placeholder: 'mongodb://localhost:27017/watchdeck',
-    defaultValue: 'mongodb://localhost:27017/watchdeck',
+    message: `${backend === 'mongodb' ? 'MongoDB' : 'Postgres'} connection URI`,
+    placeholder: uriPlaceholder,
+    defaultValue: uriPlaceholder,
     validate: (value) => {
       if (!value) return // empty = accept default
-      if (!value.startsWith('mongodb://') && !value.startsWith('mongodb+srv://')) {
-        return 'URI must start with mongodb:// or mongodb+srv://'
+      if (backend === 'mongodb') {
+        if (!value.startsWith('mongodb://') && !value.startsWith('mongodb+srv://')) {
+          return 'URI must start with mongodb:// or mongodb+srv://'
+        }
+      } else {
+        if (!value.startsWith('postgres://') && !value.startsWith('postgresql://')) {
+          return 'URI must start with postgres:// or postgresql://'
+        }
       }
     },
   }))
 
-  // Step 3 — DB name
+  // Step 4 — Database name (replaces whatever's at the tail of the URI path)
   const dbName = requireValue(await p.text({
     message: 'Database name',
     placeholder: 'watchdeck',
@@ -133,9 +151,9 @@ export async function runInit(options: InitOptions): Promise<void> {
     },
   }))
 
-  // Step 4 — Collection prefix
+  // Step 5 — Collection/table prefix
   const dbPrefix = requireValue(await p.text({
-    message: 'Collection prefix',
+    message: backend === 'postgres' ? 'Table prefix' : 'Collection prefix',
     placeholder: 'mx_',
     defaultValue: 'mx_',
     validate: (value) => {
@@ -146,7 +164,7 @@ export async function runInit(options: InitOptions): Promise<void> {
     },
   }))
 
-  // Step 5 — Dashboard mode
+  // Step 6 — Dashboard mode
   const dashboardMode = requireValue(await p.select({
     message: 'Dashboard mode',
     options: [
@@ -155,15 +173,9 @@ export async function runInit(options: InitOptions): Promise<void> {
     ],
   }))
 
-  // Step 6 — Notification channels
-  const channels = requireValue(await p.multiselect({
-    message: 'Which notification channels do you want to enable? (Space to select, Enter to confirm)',
-    options: [
-      { value: 'discord', label: 'Discord' },
-      { value: 'slack', label: 'Slack' },
-    ],
-    required: false,
-  }))
+  // Notification channels are configured in the dashboard — no wizard prompt
+  // needed. Each channel's credentials (webhook URL, SMTP URL, recipients)
+  // live on the channel doc, not in config.
 
   writeFiles({
     port,
@@ -171,8 +183,6 @@ export async function runInit(options: InitOptions): Promise<void> {
     dbName,
     dbPrefix,
     dashboardMode,
-    discord: channels.includes('discord') ? 'true' : 'false',
-    slack: channels.includes('slack') ? 'true' : 'false',
     encryptionKey: generateEncryptionKey(),
   })
 
@@ -180,7 +190,8 @@ export async function runInit(options: InitOptions): Promise<void> {
     chalk.green('Setup complete!') +
       `\n\n  ${chalk.dim('Next steps:')}` +
       `\n  1. Copy ${chalk.cyan(ENV_EXAMPLE_FILE)} to ${chalk.cyan('.env')} and fill in your values` +
-      `\n  2. Run ${chalk.cyan('watchdeck start')} to launch the server\n`,
+      `\n  2. Run ${chalk.cyan('watchdeck start')} to launch the server` +
+      `\n  3. Open the dashboard and add notification channels under Notifications → Add Channel\n`,
   )
 }
 
@@ -190,8 +201,6 @@ interface TemplateVars {
   dbName: string
   dbPrefix: string
   dashboardMode: string
-  discord: string
-  slack: string
   encryptionKey: string
 }
 
@@ -205,13 +214,15 @@ function writeFiles(vars: TemplateVars): void {
     'utf8',
   )
 
-  const dbUriWithName = vars.dbUri.replace(/\/[^/]*$/, `/${vars.dbName}`)
+  // The URI may carry a query string (common for Supabase: `?sslmode=require`).
+  // Split it off, rewrite only the path tail, then stitch the query back on.
+  const [uriBase, uriQuery] = vars.dbUri.split('?', 2)
+  const rewrittenBase = (uriBase ?? vars.dbUri).replace(/\/[^/]*$/, `/${vars.dbName}`)
+  const dbUriWithName = uriQuery ? `${rewrittenBase}?${uriQuery}` : rewrittenBase
 
   const configContent = renderTemplate(configTemplate, {
     PORT: vars.port,
     DASHBOARD_MODE: vars.dashboardMode,
-    DISCORD: vars.discord,
-    SLACK: vars.slack,
   })
 
   const envContent = renderTemplate(envTemplate, {
