@@ -3,6 +3,7 @@ import { ScrollShadow, Tooltip, TooltipTrigger, TooltipContent } from '@heroui/r
 import { cn } from '@heroui/react'
 import { useApi } from '../hooks/useApi'
 import { useSSE } from '../hooks/useSSE'
+import { getBasePath } from '../lib/apiBase'
 
 import SidebarNav, { type NavSection } from '../components/SidebarNav'
 
@@ -141,7 +142,7 @@ export default function Sidebar({ isCompact }: SidebarProps) {
         <Tooltip delay={300} closeDelay={0} isDisabled={!isCompact}>
           <TooltipTrigger>
             <img
-              src="/logo-mark.svg"
+              src={`${getBasePath()}/logo-mark.svg`}
               alt="WatchDeck"
               className="h-9 w-9 shrink-0 cursor-default"
             />

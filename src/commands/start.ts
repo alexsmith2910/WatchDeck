@@ -495,10 +495,25 @@ export async function runStart(options: StartOptions): Promise<void> {
   let server
 
   try {
-    server = await buildServer({ adapter, scheduler, config, notifications, logRequests: verbose })
+    // Dashboard is served by Fastify only when running standalone and the
+    // operator hasn't asked for an api-only boot. Mounted mode means a host
+    // app (Next.js etc.) imports the dashboard component itself.
+    const serveDashboard = !options.apiOnly && config.dashboardMode === 'standalone'
+    server = await buildServer({
+      adapter,
+      scheduler,
+      config,
+      notifications,
+      logRequests: verbose,
+      serveDashboard,
+    })
     await server.listen({ port, host: '0.0.0.0' })
+    const dashboardUrl = serveDashboard
+      ? `  ·  dashboard http://localhost:${port}${config.dashboardRoute}`
+      : ''
     serverSpinner.succeed(
-      chalk.bold('API server listening') + chalk.dim(`  http://localhost:${port}${config.apiBasePath}`),
+      chalk.bold('API server listening') +
+        chalk.dim(`  http://localhost:${port}${config.apiBasePath}${dashboardUrl}`),
     )
 
     // Wire and start the probe-based health system. Must happen after the

@@ -5,12 +5,13 @@ import { ThemeProvider } from 'next-themes'
 import { SSEProvider } from './context/SSEContext'
 import { PreferencesProvider } from './context/PreferencesContext'
 import { ToastProvider, ToastBridge } from './ui/toast'
+import { getBasePath } from './lib/apiBase'
 import App from './App'
 import './globals.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={getBasePath()}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <PreferencesProvider>
           <SSEProvider>

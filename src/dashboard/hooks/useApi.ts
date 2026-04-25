@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-
-const API_BASE = '/api/mx'
+import { getApiBase } from '../lib/apiBase'
 
 interface ApiOptions extends Omit<RequestInit, 'body'> {
   body?: unknown
@@ -48,7 +47,7 @@ export function useApi() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}${path}`, init)
+      const res = await fetch(`${getApiBase()}${path}`, init)
       let data: T
       try {
         data = await res.json()

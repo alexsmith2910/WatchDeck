@@ -26,6 +26,7 @@ import { healthProbePublicRoutes, healthProbeAuthedRoutes } from './routes/healt
 import type { StorageAdapter } from '../storage/adapter.js'
 import type { WatchDeckConfig } from '../config/types.js'
 import { sseRoutes } from './sse.js'
+import { dashboardPlugin } from './dashboard.js'
 import type { CheckScheduler } from '../core/scheduler.js'
 import type { NotificationDispatcher } from '../notifications/dispatcher.js'
 
@@ -36,6 +37,12 @@ export interface AppContext {
   /** Wired up in start.ts — routes read metrics + call test/retry paths through it. */
   notifications?: NotificationDispatcher
   logRequests?: boolean
+  /**
+   * When true, register the dashboard SPA plugin at `config.dashboardRoute`.
+   * False for `--api-only` and for `dashboardMode: 'mounted'` (the host app
+   * embeds the dashboard component itself).
+   */
+  serveDashboard?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +138,18 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
     await app.register(healthProbeAuthedRoutes(ctx), { prefix: base })
     await app.register(sseRoutes(ctx), { prefix: base })
   })
+
+  // ── Dashboard SPA (standalone mode only) ─────────────────────────────────
+  // Registered last so the API + SSE route prefixes win against any catch-all
+  // collision. Skipped in api-only and mounted modes.
+  if (ctx.serveDashboard) {
+    await fastify.register(
+      dashboardPlugin({
+        dashboardRoute: ctx.config.dashboardRoute,
+        apiBasePath: ctx.config.apiBasePath,
+      }),
+    )
+  }
 
   return fastify
 }

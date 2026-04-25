@@ -1,6 +1,5 @@
 import { createContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react'
-
-const API_BASE = '/api/mx'
+import { getApiBase } from '../lib/apiBase'
 
 type SSEStatus = 'connecting' | 'connected' | 'disconnected'
 type SSEHandler = (data: unknown) => void
@@ -71,7 +70,7 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     function connect() {
       if (disposed) return
 
-      const es = new EventSource(`${API_BASE}/stream`)
+      const es = new EventSource(`${getApiBase()}/stream`)
       esRef.current = es
       // New EventSource means no dispatchers are attached yet.
       dispatchedRef.current = new Set()
