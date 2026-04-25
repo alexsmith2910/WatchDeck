@@ -32,7 +32,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
-import { ObjectId } from 'mongodb'
+import { randomUUID } from 'node:crypto'
 import { eventBus } from '../../core/eventBus.js'
 import { formatError } from '../../utils/errors.js'
 import { parsePagination, toEnvelope } from '../utils/pagination.js'
@@ -63,17 +63,6 @@ const channelBaseSchema = {
     },
     additionalProperties: false,
   },
-  quietHours: {
-    type: 'object',
-    properties: {
-      start: { type: 'string' },
-      end: { type: 'string' },
-      tz: { type: 'string' },
-    },
-    required: ['start', 'end', 'tz'],
-    additionalProperties: false,
-    nullable: true,
-  },
   rateLimit: {
     type: 'object',
     properties: { maxPerMinute: { type: 'integer', minimum: 1, maximum: 10000 } },
@@ -83,18 +72,13 @@ const channelBaseSchema = {
   },
   retryOnFailure: { type: 'boolean' },
   metadata: { type: 'object', additionalProperties: true, nullable: true },
-  // Discord
-  discordTransport: { type: 'string', enum: ['webhook', 'bot'] },
+  // Discord — webhook only in V1
   discordWebhookUrl: { type: 'string' },
-  discordChannelId: { type: 'string' },
-  discordGuildId: { type: 'string' },
   discordUsername: { type: 'string' },
   discordAvatarUrl: { type: 'string' },
-  // Slack
+  // Slack — webhook only in V1
   slackWebhookUrl: { type: 'string' },
-  slackChannelId: { type: 'string' },
-  slackWorkspaceName: { type: 'string' },
-  // Email
+  // Email — SMTP URL + recipient list
   emailEndpoint: { type: 'string' },
   emailRecipients: { type: 'array', items: { type: 'string' } },
   // Webhook
@@ -199,48 +183,8 @@ function parseLogFilters(q: Record<string, string | undefined>): {
   const to = parseDate(q.to)
   if (to) out.to = to
   if (q.search) out.search = q.search
-  if (q.retryOf && ObjectId.isValid(q.retryOf)) out.retryOf = q.retryOf
+  if (q.retryOf) out.retryOf = q.retryOf
   return out
-}
-
-function moduleGate(
-  ctx: AppContext,
-  type: NotificationChannelType,
-  body: Record<string, unknown>,
-): { ok: true } | { ok: false; response: ReturnType<typeof formatError> } {
-  if (type === 'discord' && !ctx.config.modules.discord) {
-    // Discord webhook transport does not require the Discord module — it's a
-    // plain HTTPS POST to a user-supplied webhook URL and never touches
-    // MX_DISCORD_TOKEN. Only the bot transport is gated.
-    const transport = (body.discordTransport as string | undefined) ?? 'webhook'
-    if (transport !== 'webhook') {
-      return {
-        ok: false,
-        response: formatError('MODULE_DISABLED', 'Discord bot transport is disabled', [
-          {
-            field: 'body.discordTransport',
-            value: transport,
-            expected: 'modules.discord to be true (or use the webhook transport)',
-            fix: 'Set modules.discord to true in watchdeck.config.js and restart, or switch to the Discord webhook transport',
-          },
-        ]),
-      }
-    }
-  }
-  if (type === 'slack' && !ctx.config.modules.slack) {
-    return {
-      ok: false,
-      response: formatError('MODULE_DISABLED', 'Slack notifications are disabled', [
-        {
-          field: 'body.type',
-          value: 'slack',
-          expected: 'modules.slack to be true',
-          fix: 'Set modules.slack to true in watchdeck.config.js and restart',
-        },
-      ]),
-    }
-  }
-  return { ok: true }
 }
 
 function defaultWindow(query: Record<string, string | undefined>): { from: Date; to: Date } {
@@ -275,15 +219,21 @@ export function notificationsRoutes(ctx: AppContext) {
       })
     })
 
+    fastify.get('/notifications/channels/:id', async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const channel = await ctx.adapter.getNotificationChannelById(id)
+      if (!channel) {
+        return reply.code(404).send(formatError('NOT_FOUND', `Channel ${id} not found`))
+      }
+      return reply.send({ data: channel })
+    })
+
     fastify.post(
       '/notifications/channels',
       { schema: { body: createChannelSchema } },
       async (request, reply) => {
         const body = request.body as Record<string, unknown>
         const type = body.type as NotificationChannelType
-
-        const gate = moduleGate(ctx, type, body)
-        if (!gate.ok) return reply.code(409).send(gate.response)
 
         // New channels inherit the dashboard-configured severity/event filters
         // unless the request explicitly overrides them. Lets users set the
@@ -303,19 +253,13 @@ export function notificationsRoutes(ctx: AppContext) {
             (body.eventFilters as NotificationChannelDoc['eventFilters']) ?? {
               ...prefs.defaultEventFilters,
             },
-          quietHours: body.quietHours as NotificationChannelDoc['quietHours'],
           rateLimit: body.rateLimit as NotificationChannelDoc['rateLimit'],
           retryOnFailure: body.retryOnFailure !== false,
           metadata: body.metadata as NotificationChannelDoc['metadata'],
-          discordTransport: body.discordTransport as NotificationChannelDoc['discordTransport'],
           discordWebhookUrl: body.discordWebhookUrl as string | undefined,
-          discordChannelId: body.discordChannelId as string | undefined,
-          discordGuildId: body.discordGuildId as string | undefined,
           discordUsername: body.discordUsername as string | undefined,
           discordAvatarUrl: body.discordAvatarUrl as string | undefined,
           slackWebhookUrl: body.slackWebhookUrl as string | undefined,
-          slackChannelId: body.slackChannelId as string | undefined,
-          slackWorkspaceName: body.slackWorkspaceName as string | undefined,
           emailEndpoint: body.emailEndpoint as string | undefined,
           emailRecipients: body.emailRecipients as string[] | undefined,
           webhookUrl: body.webhookUrl as string | undefined,
@@ -328,7 +272,7 @@ export function notificationsRoutes(ctx: AppContext) {
         if (provider) {
           const validation = provider.validateTarget({
             ...draft,
-            _id: new ObjectId(),
+            id: randomUUID(),
             createdAt: new Date(),
             updatedAt: new Date(),
           } as NotificationChannelDoc)
@@ -342,7 +286,7 @@ export function notificationsRoutes(ctx: AppContext) {
         const channel = await ctx.adapter.createNotificationChannel(draft)
         eventBus.emit('notification:channelCreated', {
           timestamp: new Date(),
-          channelId: channel._id.toHexString(),
+          channelId: channel.id,
         })
         return reply.code(201).send({ data: channel })
       },
@@ -353,11 +297,6 @@ export function notificationsRoutes(ctx: AppContext) {
       { schema: { body: updateChannelSchema } },
       async (request, reply) => {
         const { id } = request.params as { id: string }
-        if (!ObjectId.isValid(id)) {
-          return reply
-            .code(400)
-            .send(formatError('INVALID_ID', 'Channel ID is not a valid ObjectId'))
-        }
 
         const body = request.body as Record<string, unknown>
         const { _id: _d, createdAt: _c, type: _t, ...changes } = body
@@ -379,9 +318,6 @@ export function notificationsRoutes(ctx: AppContext) {
 
     fastify.delete('/notifications/channels/:id', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Channel ID is not a valid ObjectId'))
-      }
       const deleted = await ctx.adapter.deleteNotificationChannel(id)
       if (!deleted) {
         return reply.code(404).send(formatError('NOT_FOUND', `Channel ${id} not found`))
@@ -397,9 +333,6 @@ export function notificationsRoutes(ctx: AppContext) {
 
     fastify.post('/notifications/channels/:id/test', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Channel ID is not a valid ObjectId'))
-      }
       const channel = await ctx.adapter.getNotificationChannelById(id)
       if (!channel) {
         return reply.code(404).send(formatError('NOT_FOUND', `Channel ${id} not found`))
@@ -426,9 +359,6 @@ export function notificationsRoutes(ctx: AppContext) {
 
     fastify.get('/notifications/log/:id', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Log ID is not a valid ObjectId'))
-      }
       const row = await ctx.adapter.getNotificationLogById(id)
       if (!row) return reply.code(404).send(formatError('NOT_FOUND', `Log row ${id} not found`))
       return reply.send({ data: row })
@@ -436,9 +366,6 @@ export function notificationsRoutes(ctx: AppContext) {
 
     fastify.post('/notifications/log/:id/retry', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Log ID is not a valid ObjectId'))
-      }
       if (!ctx.notifications) {
         return reply.code(503).send(
           formatError('DISPATCHER_UNAVAILABLE', 'Notification dispatcher is not initialised'),
@@ -455,10 +382,10 @@ export function notificationsRoutes(ctx: AppContext) {
       // The dispatcher needs the live channel + a message bundle. For simple
       // retries of a recorded row the most reliable path is to rebuild from
       // the source incident (if any) + target channel, then re-queue it.
-      const channel = await ctx.adapter.getNotificationChannelById(row.channelId.toHexString())
+      const channel = await ctx.adapter.getNotificationChannelById(row.channelId)
       if (!channel) {
         return reply.code(404).send(
-          formatError('CHANNEL_GONE', `Channel ${row.channelId.toHexString()} no longer exists`),
+          formatError('CHANNEL_GONE', `Channel ${row.channelId} no longer exists`),
         )
       }
       if (!row.incidentId) {
@@ -466,16 +393,16 @@ export function notificationsRoutes(ctx: AppContext) {
           formatError('UNSUPPORTED', 'Only incident-related dispatches can be retried'),
         )
       }
-      const incident = await ctx.adapter.getIncidentById(row.incidentId.toHexString())
+      const incident = await ctx.adapter.getIncidentById(row.incidentId)
       if (!incident) {
         return reply.code(404).send(
-          formatError('NOT_FOUND', `Source incident ${row.incidentId.toHexString()} not found`),
+          formatError('NOT_FOUND', `Source incident ${row.incidentId} not found`),
         )
       }
-      const endpoint = await ctx.adapter.getEndpointById(incident.endpointId.toHexString())
+      const endpoint = await ctx.adapter.getEndpointById(incident.endpointId)
       if (!endpoint) {
         return reply.code(404).send(
-          formatError('NOT_FOUND', `Endpoint ${incident.endpointId.toHexString()} not found`),
+          formatError('NOT_FOUND', `Endpoint ${incident.endpointId} not found`),
         )
       }
 
@@ -484,7 +411,7 @@ export function notificationsRoutes(ctx: AppContext) {
         incident,
         endpoint,
         channel,
-        retryOfLogId: row._id.toHexString(),
+        retryOfLogId: row.id,
       })
       return reply.send({ data: result })
     })
@@ -586,15 +513,9 @@ export function notificationsRoutes(ctx: AppContext) {
             formatError('MISSING_TARGET', `targetId is required when scope is '${body.scope}'`),
           )
         }
-        if (body.targetId && !ObjectId.isValid(body.targetId)) {
-          return reply.code(400).send(
-            formatError('INVALID_ID', 'targetId is not a valid ObjectId'),
-          )
-        }
-
         const mute = await ctx.adapter.recordMute({
           scope: body.scope,
-          targetId: body.targetId ? new ObjectId(body.targetId) : undefined,
+          targetId: body.targetId,
           expiresAt,
           mutedBy: body.mutedBy ?? 'api',
           reason: body.reason,
@@ -602,7 +523,7 @@ export function notificationsRoutes(ctx: AppContext) {
         eventBus.emit('notification:muted', {
           timestamp: new Date(),
           scope: mute.scope,
-          targetId: mute.targetId?.toHexString(),
+          targetId: mute.targetId,
           expiresAt: mute.expiresAt,
         })
         return reply.code(201).send({ data: mute })
@@ -611,9 +532,6 @@ export function notificationsRoutes(ctx: AppContext) {
 
     fastify.delete('/notifications/mutes/:id', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Mute ID is not a valid ObjectId'))
-      }
       const existing = await ctx.adapter.getMuteById(id)
       const deleted = await ctx.adapter.deleteMute(id)
       if (!deleted) {
@@ -623,7 +541,7 @@ export function notificationsRoutes(ctx: AppContext) {
         eventBus.emit('notification:unmuted', {
           timestamp: new Date(),
           scope: existing.scope,
-          targetId: existing.targetId?.toHexString(),
+          targetId: existing.targetId,
         })
       }
       return reply.code(204).send()
@@ -633,9 +551,6 @@ export function notificationsRoutes(ctx: AppContext) {
 
     fastify.get('/endpoints/:id/notifications/log', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
       const query = request.query as Record<string, string | undefined>
       const pagination = parsePagination(query)
       const filters = parseLogFilters(query)
@@ -648,9 +563,6 @@ export function notificationsRoutes(ctx: AppContext) {
 
     fastify.get('/endpoints/:id/notifications/stats', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
       const window = defaultWindow(request.query as Record<string, string | undefined>)
       const all = await ctx.adapter.countNotificationStats(window)
       const scoped = await ctx.adapter.listNotificationLogForEndpoint(id, {
@@ -671,9 +583,6 @@ export function notificationsRoutes(ctx: AppContext) {
       { schema: { body: endpointMuteSchema } },
       async (request, reply) => {
         const { id } = request.params as { id: string }
-        if (!ObjectId.isValid(id)) {
-          return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-        }
         const body = request.body as { expiresAt: string; mutedBy?: string; reason?: string }
         const expiresAt = parseDate(body.expiresAt)
         if (!expiresAt || expiresAt.getTime() <= Date.now()) {
@@ -687,7 +596,7 @@ export function notificationsRoutes(ctx: AppContext) {
         }
         const mute = await ctx.adapter.recordMute({
           scope: 'endpoint',
-          targetId: new ObjectId(id),
+          targetId: id,
           expiresAt,
           mutedBy: body.mutedBy ?? 'api',
           reason: body.reason,
