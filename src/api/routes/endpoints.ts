@@ -12,7 +12,6 @@
  */
 
 import type { FastifyInstance } from 'fastify'
-import { ObjectId } from 'mongodb'
 import { eventBus } from '../../core/eventBus.js'
 import { formatError, type ValidationError } from '../../utils/errors.js'
 import { parsePagination, toEnvelope } from '../utils/pagination.js'
@@ -151,6 +150,26 @@ const testAssertionsBodySchema = {
   },
 } as const
 
+// Body schema for POST /endpoints/test-probe — the Add-endpoint flow's test
+// button. Mirrors test-assertions but without a persisted endpoint: the full
+// draft config travels in the body so the user can validate a probe before
+// clicking Create.
+const testProbeBodySchema = {
+  type: 'object',
+  required: ['url'],
+  additionalProperties: false,
+  properties: {
+    url: mutableFieldProps.url,
+    method: mutableFieldProps.method,
+    headers: mutableFieldProps.headers,
+    expectedStatusCodes: mutableFieldProps.expectedStatusCodes,
+    timeout: mutableFieldProps.timeout,
+    latencyThreshold: mutableFieldProps.latencyThreshold,
+    sslWarningDays: mutableFieldProps.sslWarningDays,
+    assertions: mutableFieldProps.assertions,
+  },
+} as const
+
 const updateBodySchema = {
   type: 'object',
   properties: mutableFieldProps,
@@ -242,9 +261,6 @@ export function endpointsRoutes(ctx: AppContext) {
     // ── GET /endpoints/:id ───────────────────────────────────────────────────
     fastify.get('/endpoints/:id', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
       const endpoint = await ctx.adapter.getEndpointById(id)
       if (!endpoint) {
         return reply.code(404).send(formatError('NOT_FOUND', `Endpoint ${id} not found`))
@@ -298,7 +314,7 @@ export function endpointsRoutes(ctx: AppContext) {
       const cfg = await ctx.adapter.getEffectiveDefaults(ctx.config)
       const now = new Date()
 
-      const endpointData: Omit<EndpointDoc, '_id' | 'createdAt' | 'updatedAt'> = {
+      const endpointData: Omit<EndpointDoc, 'id' | 'createdAt' | 'updatedAt'> = {
         name: body.name as string,
         ...(body.description ? { description: body.description as string } : {}),
         type,
@@ -314,9 +330,7 @@ export function endpointsRoutes(ctx: AppContext) {
         recoveryAlert: (body.recoveryAlert as boolean | undefined) ?? cfg.recoveryAlert,
         escalationDelay: (body.escalationDelay as number | undefined) ?? cfg.escalationDelay,
         notificationChannelIds: ((body.notificationChannelIds as unknown[] | undefined) ?? [])
-          .filter((v): v is string => typeof v === 'string' && ObjectId.isValid(v))
-          .map((id) => new ObjectId(id)),
-        maintenanceWindows: [],
+          .filter((v): v is string => typeof v === 'string'),
         consecutiveFailures: 0,
         consecutiveHealthy: 0,
       }
@@ -343,9 +357,6 @@ export function endpointsRoutes(ctx: AppContext) {
     // ── PUT /endpoints/:id ───────────────────────────────────────────────────
     fastify.put('/endpoints/:id', { schema: { body: updateBodySchema } }, async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
 
       const existing = await ctx.adapter.getEndpointById(id)
       if (!existing) {
@@ -408,24 +419,13 @@ export function endpointsRoutes(ctx: AppContext) {
         )
       }
 
-      // Coerce ID-typed fields the API receives as strings back into
-      // ObjectIds. Mongo will happily store strings here, but code that
-      // reads them (e.g. the notification dispatcher's fan-out) assumes
-      // ObjectId instances — mixing shapes causes runtime crashes.
       if (Array.isArray(changes.notificationChannelIds)) {
         changes.notificationChannelIds = (changes.notificationChannelIds as unknown[])
-          .filter((v): v is string => typeof v === 'string' && ObjectId.isValid(v))
-          .map((v) => new ObjectId(v))
+          .filter((v): v is string => typeof v === 'string')
       }
       if (Array.isArray(changes.pausedNotificationChannelIds)) {
         changes.pausedNotificationChannelIds = (changes.pausedNotificationChannelIds as unknown[])
-          .filter((v): v is string => typeof v === 'string' && ObjectId.isValid(v))
-          .map((v) => new ObjectId(v))
-      }
-      if (typeof changes.escalationChannelId === 'string') {
-        changes.escalationChannelId = ObjectId.isValid(changes.escalationChannelId)
-          ? new ObjectId(changes.escalationChannelId)
-          : null
+          .filter((v): v is string => typeof v === 'string')
       }
 
       const updated = await ctx.adapter.updateEndpoint(id, changes as Partial<EndpointDoc>)
@@ -450,9 +450,6 @@ export function endpointsRoutes(ctx: AppContext) {
     // distinct Archive action with its own UI. See V2 backlog item 7.
     fastify.delete('/endpoints/:id', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
 
       const existing = await ctx.adapter.getEndpointById(id)
       if (!existing) {
@@ -474,9 +471,6 @@ export function endpointsRoutes(ctx: AppContext) {
       const { id } = request.params as { id: string }
       const query = request.query as { wait?: string }
 
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
 
       const endpoint = await ctx.adapter.getEndpointById(id)
       if (!endpoint) {
@@ -513,19 +507,14 @@ export function endpointsRoutes(ctx: AppContext) {
     // incidentId, consecutiveFailures, lastCheckAt are not carried over.
     fastify.post('/endpoints/:id/clone', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
       const existing = await ctx.adapter.getEndpointById(id)
       if (!existing) {
         return reply.code(404).send(formatError('NOT_FOUND', `Endpoint ${id} not found`))
       }
 
-      // Strip runtime-state fields; keep config. ObjectIds in channel-list
-      // fields are already ObjectId instances on the existing doc — carry
-      // them through as-is.
+      // Strip runtime-state fields; keep config.
       const {
-        _id: _omit_id,
+        id: _omit_id,
         createdAt: _omit_createdAt,
         updatedAt: _omit_updatedAt,
         lastCheckAt: _omit_lastCheckAt,
@@ -540,7 +529,7 @@ export function endpointsRoutes(ctx: AppContext) {
         ...configFields
       } = existing
 
-      const cloneData: Omit<EndpointDoc, '_id' | 'createdAt' | 'updatedAt'> = {
+      const cloneData: Omit<EndpointDoc, 'id' | 'createdAt' | 'updatedAt'> = {
         ...configFields,
         name: `Copy of ${existing.name}`,
         status: 'paused', // safer default — the user hasn't reviewed it yet
@@ -559,9 +548,6 @@ export function endpointsRoutes(ctx: AppContext) {
     fastify.patch('/endpoints/:id/toggle', async (request, reply) => {
       const { id } = request.params as { id: string }
 
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
 
       const existing = await ctx.adapter.getEndpointById(id)
       if (!existing) {
@@ -656,6 +642,108 @@ export function endpointsRoutes(ctx: AppContext) {
       return reply.code(400).send(formatError('INVALID_TYPE', 'type must be http or port'))
     })
 
+    // ── POST /endpoints/test-probe ────────────────────────────────────────────
+    // Add-endpoint flow's test button. Same probe + evaluator pipeline as
+    // /endpoints/:id/test-assertions, but runs against the draft config in the
+    // body — no persisted endpoint needed. Never emits check:complete, never
+    // writes to mx_checks.
+    fastify.post(
+      '/endpoints/test-probe',
+      { schema: { body: testProbeBodySchema } },
+      async (request, reply) => {
+        const body = request.body as {
+          url: string
+          method?: EndpointDoc['method']
+          headers?: Record<string, string>
+          expectedStatusCodes?: number[]
+          timeout?: number
+          latencyThreshold?: number
+          sslWarningDays?: number
+          assertions?: Assertion[]
+        }
+
+        const urlErr = validateUrlValue(body.url)
+        if (urlErr) {
+          return reply.code(422).send(
+            formatError('VALIDATION_ERROR', 'Request body has 1 error', [urlErr]),
+          )
+        }
+
+        const cfg = await ctx.adapter.getEffectiveDefaults(ctx.config)
+        const timeout = body.timeout ?? cfg.timeout
+        const expectedStatusCodes = body.expectedStatusCodes ?? cfg.expectedStatusCodes
+        const latencyThreshold = body.latencyThreshold ?? cfg.latencyThreshold
+        const sslWarningDays = body.sslWarningDays ?? cfg.sslWarningDays
+        const assertions = body.assertions ?? []
+        const isHttps = body.url.startsWith('https://')
+
+        const probe = await runHttpCheck({
+          url: body.url,
+          method: body.method ?? 'GET',
+          headers: body.headers ?? {},
+          timeout,
+          captureSsl: isHttps && ctx.config.modules.sslChecks,
+          captureBodySize: ctx.config.captureBodySize,
+          maxBodyBytesToRead: ctx.config.maxBodyBytesToRead,
+        })
+
+        const hasLatencyAssertion = assertions.some((r) => r.kind === 'latency')
+        const hasSslAssertion = assertions.some((r) => r.kind === 'ssl')
+
+        const base = evaluateStatus({
+          type: 'http',
+          statusCode: probe.statusCode,
+          responseTime: probe.responseTime,
+          errorMessage: probe.errorMessage,
+          expectedStatusCodes,
+          latencyThreshold,
+          skipLatencyCheck: hasLatencyAssertion,
+        })
+
+        let baseStatus = base.status
+        let baseReason = base.statusReason
+        if (baseStatus === 'healthy' && !hasSslAssertion) {
+          const sslEval_ = evaluateSsl({
+            sslDaysRemaining: probe.sslDaysRemaining,
+            sslWarningDays,
+          })
+          if (sslEval_.status === 'degraded') {
+            baseStatus = 'degraded'
+            baseReason = sslEval_.statusReason
+          }
+        }
+
+        const assertionResult =
+          baseStatus !== 'down' && assertions.length > 0
+            ? evaluateAssertions({
+                assertions,
+                body: probe.body,
+                headers: probe.headers,
+                responseTime: probe.responseTime,
+                sslDaysRemaining: probe.sslDaysRemaining,
+                isHttps,
+              })
+            : null
+
+        return reply.send({
+          data: {
+            baseStatus,
+            baseReason,
+            probe: {
+              statusCode: probe.statusCode,
+              responseTime: probe.responseTime,
+              errorMessage: probe.errorMessage,
+              contentType: probe.headers?.['content-type'] ?? null,
+              bodyBytes: probe.bodyBytes,
+              bodyBytesTruncated: probe.bodyBytesTruncated,
+              sslDaysRemaining: probe.sslDaysRemaining,
+            },
+            assertionResult,
+          },
+        })
+      },
+    )
+
     // ── POST /endpoints/:id/test-assertions ───────────────────────────────────
     // Runs the endpoint's probe + evaluator once against the supplied (or
     // saved) assertions and returns the result. Does NOT emit check:complete,
@@ -666,9 +754,6 @@ export function endpointsRoutes(ctx: AppContext) {
       { schema: { body: testAssertionsBodySchema } },
       async (request, reply) => {
         const { id } = request.params as { id: string }
-        if (!ObjectId.isValid(id)) {
-          return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-        }
         const endpoint = await ctx.adapter.getEndpointById(id)
         if (!endpoint) {
           return reply.code(404).send(formatError('NOT_FOUND', `Endpoint ${id} not found`))
