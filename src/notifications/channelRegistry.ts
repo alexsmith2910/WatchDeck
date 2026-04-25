@@ -47,7 +47,7 @@ export class ChannelRegistry {
     const rows = await this.adapter.listNotificationChannels()
     this.channels.clear()
     for (const row of rows) {
-      this.channels.set(row._id.toHexString(), row)
+      this.channels.set(row.id, row)
     }
   }
 

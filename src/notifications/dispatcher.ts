@@ -3,8 +3,8 @@
  *
  * Subscribes to `incident:opened` / `incident:resolved`, builds a channel-
  * agnostic `NotificationMessage`, fans out to every channel linked to the
- * endpoint, runs the gate chain (enabled → severity → event → maintenance →
- * quiet-hours → mute → cooldown → dedup → rate-limit → coalescing), calls
+ * endpoint, runs the gate chain (enabled → severity → event → quiet-hours →
+ * mute → cooldown → dedup → rate-limit → coalescing), calls
  * `provider.send()`, and writes a `mx_notification_log` row for every
  * outcome — sent, failed, and suppressed.
  *
@@ -19,7 +19,6 @@
  * one bad channel can never cascade into another.
  */
 
-import { ObjectId } from 'mongodb'
 import { eventBus } from '../core/eventBus.js'
 import type { StorageAdapter } from '../storage/adapter.js'
 import type { WatchDeckConfig } from '../config/types.js'
@@ -77,52 +76,6 @@ function filterFloor(filter: NotificationSeverityFilter): number {
 
 function passesSeverity(severity: NotificationSeverity, filter: NotificationSeverityFilter): boolean {
   return SEVERITY_ORDER[severity] >= filterFloor(filter)
-}
-
-// ---------------------------------------------------------------------------
-// Quiet-hours check (channel + global)
-// ---------------------------------------------------------------------------
-
-function inQuietHours(
-  now: Date,
-  window: { start: string; end: string; tz: string },
-): boolean {
-  const parts = formatLocal(now, window.tz)
-  if (!parts) return false
-  const nowMin = parts.hh * 60 + parts.mm
-  const start = parseHM(window.start)
-  const end = parseHM(window.end)
-  if (start === null || end === null) return false
-  if (start <= end) return nowMin >= start && nowMin < end
-  // Wraps midnight — e.g. 22:00 → 06:00.
-  return nowMin >= start || nowMin < end
-}
-
-function parseHM(hhmm: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm)
-  if (!m) return null
-  const hh = Number(m[1])
-  const mm = Number(m[2])
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
-  return hh * 60 + mm
-}
-
-function formatLocal(now: Date, tz: string): { hh: number; mm: number } | null {
-  try {
-    const fmt = new Intl.DateTimeFormat('en-GB', {
-      timeZone: tz,
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    })
-    const parts = fmt.formatToParts(now)
-    const hh = Number(parts.find((p) => p.type === 'hour')?.value)
-    const mm = Number(parts.find((p) => p.type === 'minute')?.value)
-    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-    return { hh, mm }
-  } catch {
-    return null
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -348,28 +301,28 @@ export class NotificationDispatcher {
     })
     await this.recordChannelDeliveryOutcome(channel, result.status === 'sent')
     if (result.status === 'sent') {
-      notificationMetrics.recordSent({ kind, channelId: channel._id.toHexString() })
+      notificationMetrics.recordSent({ kind, channelId: channel.id })
       if (log) {
         eventBus.emit('notification:dispatched', {
           timestamp: new Date(),
-          logId: log._id.toHexString(),
-          channelId: channel._id.toHexString(),
-          endpointId: endpoint._id.toHexString(),
-          incidentId: incident._id.toHexString(),
+          logId: log.id,
+          channelId: channel.id,
+          endpointId: endpoint.id,
+          incidentId: incident.id,
           kind,
           severity: message.severity,
           latencyMs: result.latencyMs,
         })
       }
     } else {
-      notificationMetrics.recordFailed({ kind, channelId: channel._id.toHexString() })
+      notificationMetrics.recordFailed({ kind, channelId: channel.id })
       if (log) {
         eventBus.emit('notification:failed', {
           timestamp: new Date(),
-          logId: log._id.toHexString(),
-          channelId: channel._id.toHexString(),
-          endpointId: endpoint._id.toHexString(),
-          incidentId: incident._id.toHexString(),
+          logId: log.id,
+          channelId: channel.id,
+          endpointId: endpoint.id,
+          incidentId: incident.id,
           kind,
           reason: result.failureReason ?? 'unknown',
         })
@@ -384,7 +337,7 @@ export class NotificationDispatcher {
 
   private async handleIncidentOpened(incident: IncidentDoc): Promise<void> {
     const endpoint = await this.adapter
-      .getEndpointById(incident.endpointId.toHexString())
+      .getEndpointById(incident.endpointId)
       .catch(() => null)
     if (!endpoint) return
     const message = buildIncidentOpenedMessage(endpoint, incident, { baseUrl: this.baseUrl })
@@ -399,7 +352,7 @@ export class NotificationDispatcher {
     const incident = await this.adapter.getIncidentById(incidentId).catch(() => null)
     if (!incident) return
     const endpoint = await this.adapter
-      .getEndpointById(incident.endpointId.toHexString())
+      .getEndpointById(incident.endpointId)
       .catch(() => null)
     if (!endpoint) return
     const message = buildIncidentResolvedMessage(endpoint, incident, durationSeconds, {
@@ -417,7 +370,7 @@ export class NotificationDispatcher {
     // Resolved alerts clear the per-incident dedup & cooldown state so the
     // next outage can re-alert immediately.
     this.dedup.clearIncident(incidentId)
-    this.cooldowns.clearEndpoint(endpoint._id.toHexString())
+    this.cooldowns.clearEndpoint(endpoint.id)
 
     // Only emit recovery to channels that *actually received* the matching
     // open. Without this, a coalesced batch of 50 incidents would emit 50
@@ -443,7 +396,7 @@ export class NotificationDispatcher {
       for (const row of logs) {
         if (row.deliveryStatus !== 'sent') continue
         if (row.kind !== 'incident_opened' && row.kind !== 'incident_escalated') continue
-        channels.add(row.channelId.toHexString())
+        channels.add(row.channelId)
       }
       // Coalesced summary rows store the original incident IDs in
       // `coalescedIncidentIds` and only attach `incidentId` to the
@@ -452,7 +405,7 @@ export class NotificationDispatcher {
       const coalesced = await this.adapter.findCoalescedDeliveriesFor(incidentId)
       for (const row of coalesced) {
         if (row.deliveryStatus !== 'sent') continue
-        channels.add(row.channelId.toHexString())
+        channels.add(row.channelId)
       }
     } catch (err) {
       console.error('[notifications] failed to look up open-delivery log:', err)
@@ -498,14 +451,7 @@ export class NotificationDispatcher {
     // Per-endpoint pause applies to escalation the same way it applies to
     // the main fan-out — the user's toggle should silence every dispatch to
     // that channel from this endpoint, regardless of which path triggered it.
-    for (const raw of endpoint.pausedNotificationChannelIds ?? []) {
-      const id = typeof raw === 'string'
-        ? raw
-        : typeof (raw as { toHexString?: unknown }).toHexString === 'function'
-          ? (raw as ObjectId).toHexString()
-          : null
-      if (id === req.channelId) return
-    }
+    if (endpoint.pausedNotificationChannelIds?.includes(req.channelId)) return
     const channel = this.channels.getChannel(req.channelId)
     if (!channel) return
     const message = buildEscalationMessage(endpoint, incident, { baseUrl: this.baseUrl })
@@ -531,30 +477,11 @@ export class NotificationDispatcher {
     message: NotificationMessage,
     incident: IncidentDoc,
   ): Promise<void> {
-    // `notificationChannelIds` is typed as ObjectId[], but legacy documents
-    // may contain raw strings (early builds of the PUT route stored them
-    // as-is). Normalise defensively so one broken row can't crash dispatch.
-    const channelIds: string[] = []
-    for (const raw of endpoint.notificationChannelIds ?? []) {
-      if (raw == null) continue
-      if (typeof raw === 'string') {
-        channelIds.push(raw)
-      } else if (typeof (raw as { toHexString?: unknown }).toHexString === 'function') {
-        channelIds.push((raw as ObjectId).toHexString())
-      }
-    }
+    const channelIds: string[] = [...(endpoint.notificationChannelIds ?? [])]
     // Per-endpoint pause: skip channels the user has toggled off for this
     // endpoint specifically. The channel itself is untouched and still fires
     // for any other endpoint routing to it.
-    const pausedIds = new Set<string>()
-    for (const raw of endpoint.pausedNotificationChannelIds ?? []) {
-      if (raw == null) continue
-      if (typeof raw === 'string') {
-        pausedIds.add(raw)
-      } else if (typeof (raw as { toHexString?: unknown }).toHexString === 'function') {
-        pausedIds.add((raw as ObjectId).toHexString())
-      }
-    }
+    const pausedIds = new Set<string>(endpoint.pausedNotificationChannelIds ?? [])
     for (const channelId of channelIds) {
       if (pausedIds.has(channelId)) continue
       const channel = this.channels.getChannel(channelId)
@@ -633,16 +560,8 @@ export class NotificationDispatcher {
       return { reason: 'event_filter' }
     }
 
-    if (endpoint && !notif.alertDuringMaintenance && this.inMaintenance(endpoint, new Date())) {
-      return { reason: 'maintenance' }
-    }
-
-    if (this.isQuietHours(channel, message.severity)) {
-      return { reason: 'quiet_hours' }
-    }
-
     const mute = this.mutes.isMuted({
-      endpointId: endpoint?._id.toHexString(),
+      endpointId: endpoint?.id,
       channelId: dispatch.channelId,
     })
     if (mute.muted) return { reason: 'muted', detail: mute.scope }
@@ -654,7 +573,7 @@ export class NotificationDispatcher {
     // delivered (see handleIncidentResolved).
     if (endpoint && !resolvedBypass) {
       const inCool = this.cooldowns.inCooldown(
-        endpoint._id.toHexString(),
+        endpoint.id,
         dispatch.channelId,
         message.kind,
       )
@@ -663,7 +582,7 @@ export class NotificationDispatcher {
 
     if (incident) {
       const dup = this.dedup.markIfNew(
-        incident._id.toHexString(),
+        incident.id,
         dispatch.channelId,
         message.kind,
       )
@@ -676,24 +595,6 @@ export class NotificationDispatcher {
     }
 
     return null
-  }
-
-  private inMaintenance(endpoint: EndpointDoc, now: Date): boolean {
-    if (!endpoint.maintenanceWindows?.length) return false
-    const t = now.getTime()
-    return endpoint.maintenanceWindows.some(
-      (w) => w.startTime.getTime() <= t && w.endTime.getTime() >= t,
-    )
-  }
-
-  private isQuietHours(channel: NotificationChannelDoc, severity: NotificationSeverity): boolean {
-    // Critical always bypasses quiet hours.
-    if (severity === 'critical') return false
-    const now = new Date()
-    const global = this.config.defaults.notifications.quietHours
-    if (global && inQuietHours(now, global)) return true
-    if (channel.quietHours && inQuietHours(now, channel.quietHours)) return true
-    return false
   }
 
   private resolveRateLimit(channel: NotificationChannelDoc): number {
@@ -758,7 +659,7 @@ export class NotificationDispatcher {
       if (log) {
         eventBus.emit('notification:dispatched', {
           timestamp: new Date(),
-          logId: log._id.toHexString(),
+          logId: log.id,
           channelId: dispatch.channelId,
           endpointId,
           incidentId: message.incident?.id,
@@ -801,7 +702,7 @@ export class NotificationDispatcher {
     if (log) {
       eventBus.emit('notification:failed', {
         timestamp: new Date(),
-        logId: log._id.toHexString(),
+        logId: log.id,
         channelId: dispatch.channelId,
         endpointId: message.endpoint?.id,
         incidentId: message.incident?.id,
@@ -812,7 +713,7 @@ export class NotificationDispatcher {
 
     // Schedule retry on failure if enabled.
     if (this.shouldRetry(channel, dispatch)) {
-      this.scheduleRetry(dispatch, log?._id.toHexString())
+      this.scheduleRetry(dispatch, log?.id)
     }
   }
 
@@ -914,7 +815,7 @@ export class NotificationDispatcher {
         channelId: payload.channelId,
         endpointId: payload.endpointId,
         count,
-        logId: log._id.toHexString(),
+        logId: log.id,
       })
     }
   }
@@ -934,14 +835,7 @@ export class NotificationDispatcher {
     message: NotificationMessage,
     reason: NotificationSuppressedReason,
   ): Promise<void> {
-    const channelIds: string[] = []
-    for (const raw of endpoint.notificationChannelIds ?? []) {
-      if (raw == null) continue
-      if (typeof raw === 'string') channelIds.push(raw)
-      else if (typeof (raw as { toHexString?: unknown }).toHexString === 'function') {
-        channelIds.push((raw as ObjectId).toHexString())
-      }
-    }
+    const channelIds: string[] = [...(endpoint.notificationChannelIds ?? [])]
     for (const channelId of channelIds) {
       const channel = this.channels.getChannel(channelId)
       if (!channel) continue
@@ -1001,7 +895,7 @@ export class NotificationDispatcher {
     const flip = ok !== channel.isConnected
     if (flip) changes.isConnected = ok
     try {
-      await this.adapter.updateNotificationChannel(channel._id.toHexString(), changes)
+      await this.adapter.updateNotificationChannel(channel.id, changes)
     } catch (err) {
       console.error('[notifications] failed to update channel health:', err)
       return
@@ -1009,7 +903,7 @@ export class NotificationDispatcher {
     if (flip) {
       eventBus.emit('notification:channelUpdated', {
         timestamp: now,
-        channelId: channel._id.toHexString(),
+        channelId: channel.id,
       })
     }
   }
@@ -1033,9 +927,9 @@ export class NotificationDispatcher {
       // raw payload would be misleading since nothing went over the wire.
       const payload = row.status === 'suppressed' ? undefined : payloadSnapshot(row.message)
       return await this.adapter.writeNotificationLog({
-        endpointId: row.message.endpoint ? new ObjectId(row.message.endpoint.id) : undefined,
-        incidentId: row.message.incident ? new ObjectId(row.message.incident.id) : undefined,
-        channelId: row.channel._id,
+        endpointId: row.message.endpoint?.id,
+        incidentId: row.message.incident?.id,
+        channelId: row.channel.id,
         type: kindToLegacyType(row.message.kind),
         channelType: row.channel.type,
         channelTarget: describeTarget(row.channel),
@@ -1047,9 +941,9 @@ export class NotificationDispatcher {
         suppressedReason: row.suppressedReason,
         latencyMs: row.latencyMs,
         idempotencyKey: row.message.idempotencyKey,
-        retryOf: row.retryOf ? new ObjectId(row.retryOf) : undefined,
+        retryOf: row.retryOf,
         coalescedCount: row.coalescedCount,
-        coalescedIncidentIds: row.coalescedIncidentIds?.map((id) => new ObjectId(id)),
+        coalescedIncidentIds: row.coalescedIncidentIds,
         payload,
         request: row.request,
         response: row.response,
@@ -1088,8 +982,8 @@ function eventFilterAllows(
 
 function describeTarget(channel: NotificationChannelDoc): string {
   switch (channel.type) {
-    case 'discord': return channel.discordChannelId ?? channel.discordWebhookUrl ?? channel.name
-    case 'slack': return channel.slackChannelId ?? channel.slackWebhookUrl ?? channel.name
+    case 'discord': return channel.discordWebhookUrl ?? channel.name
+    case 'slack': return channel.slackWebhookUrl ?? channel.name
     case 'email': return channel.emailRecipients?.join(', ') ?? channel.name
     case 'webhook': return channel.webhookUrl ?? channel.name
   }

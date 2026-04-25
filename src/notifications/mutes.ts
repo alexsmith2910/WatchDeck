@@ -81,7 +81,7 @@ export class MuteTracker {
       if (row.expiresAt.getTime() > current) this.globalMuteUntil = row.expiresAt
       return
     }
-    const target = row.targetId?.toHexString()
+    const target = row.targetId
     if (!target) return
     if (row.scope === 'endpoint') {
       const prev = this.byEndpoint.get(target)?.getTime() ?? 0

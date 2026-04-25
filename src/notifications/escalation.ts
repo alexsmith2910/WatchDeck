@@ -12,7 +12,6 @@
  * source of truth for "did we already escalate this one".
  */
 
-import { ObjectId } from 'mongodb'
 import { eventBus } from '../core/eventBus.js'
 import type { StorageAdapter } from '../storage/adapter.js'
 import type { EndpointDoc, IncidentDoc } from '../storage/types.js'
@@ -166,8 +165,8 @@ export class EscalationScheduler {
 
   private async maybeScheduleForIncident(incident: IncidentDoc): Promise<void> {
     if (incident.status !== 'active') return
-    const incidentId = incident._id.toHexString()
-    const endpointId = incident.endpointId.toHexString()
+    const incidentId = incident.id
+    const endpointId = incident.endpointId
 
     const endpoint = await this.adapter.getEndpointById(endpointId).catch(() => null)
     if (!endpoint) return
@@ -188,10 +187,9 @@ export class EscalationScheduler {
 
   private resolveTarget(endpoint: EndpointDoc): { channelId: string; delaySeconds: number } | null {
     const delaySeconds = endpoint.escalationDelay
-    const channel = endpoint.escalationChannelId
+    const channelId = endpoint.escalationChannelId
     if (!delaySeconds || delaySeconds <= 0) return null
-    if (!channel) return null
-    const channelId = channel instanceof ObjectId ? channel.toHexString() : String(channel)
+    if (!channelId) return null
     return { channelId, delaySeconds }
   }
 

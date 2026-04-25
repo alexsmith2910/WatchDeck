@@ -24,8 +24,8 @@ export function buildIncidentOpenedMessage(
   incident: IncidentDoc,
   opts: BuildMessageOpts,
 ): NotificationMessage {
-  const endpointId = endpoint._id.toHexString()
-  const incidentId = incident._id.toHexString()
+  const endpointId = endpoint.id
+  const incidentId = incident.id
   const link = `${opts.baseUrl}/endpoints/${endpointId}?incident=${incidentId}`
   const fields: NotificationMessageField[] = [
     { label: 'Endpoint', value: endpoint.name },
@@ -54,8 +54,8 @@ export function buildIncidentResolvedMessage(
   durationSeconds: number,
   opts: BuildMessageOpts,
 ): NotificationMessage {
-  const endpointId = endpoint._id.toHexString()
-  const incidentId = incident._id.toHexString()
+  const endpointId = endpoint.id
+  const incidentId = incident.id
   const link = `${opts.baseUrl}/endpoints/${endpointId}?incident=${incidentId}`
   return {
     kind: 'incident_resolved',
@@ -88,7 +88,7 @@ export function buildEscalationMessage(
     summary: `Endpoint ${endpoint.name} has been down for ${formatDuration(
       Math.max(0, Math.floor((Date.now() - incident.startedAt.getTime()) / 1000)),
     )} and has not recovered.`,
-    idempotencyKey: opts.idempotencyKey ?? `${incident._id.toHexString()}:escalated`,
+    idempotencyKey: opts.idempotencyKey ?? `${incident.id}:escalated`,
   }
 }
 

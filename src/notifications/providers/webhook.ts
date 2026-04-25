@@ -50,7 +50,7 @@ export class WebhookProvider extends NotificationProvider {
       title: `Test dispatch — ${target.name}`,
       summary: 'This is a test message from WatchDeck — the webhook is wired correctly.',
       link: '',
-      idempotencyKey: `test:${target._id.toHexString()}:${now.getTime()}`,
+      idempotencyKey: `test:${target.id}:${now.getTime()}`,
       tags: ['test'],
     }
     return this.post(target, testMsg)
