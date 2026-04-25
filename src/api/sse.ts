@@ -90,8 +90,6 @@ const SSE_EVENTS: (keyof EventMap)[] = [
   'system:warning',
   'system:reset',
   'health:update',
-  'maintenance:started',
-  'maintenance:ended',
   'replay:progress',
   'db:connected',
   'db:disconnected',

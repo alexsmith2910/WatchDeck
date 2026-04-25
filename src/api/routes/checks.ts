@@ -8,7 +8,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
-import { ObjectId } from 'mongodb'
+import { randomUUID } from 'node:crypto'
 import { formatError } from '../../utils/errors.js'
 import { parsePagination, toEnvelope } from '../utils/pagination.js'
 import { buildHourlySummary } from '../../aggregation/detailedToHourly.js'
@@ -35,9 +35,6 @@ export function checksRoutes(ctx: AppContext) {
     // ── GET /endpoints/:id/checks ────────────────────────────────────────────
     fastify.get('/endpoints/:id/checks', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
 
       const query = request.query as {
         cursor?: string
@@ -69,9 +66,6 @@ export function checksRoutes(ctx: AppContext) {
     // in-progress hour (computed on-the-fly from raw checks).
     fastify.get('/endpoints/:id/hourly', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
 
       const query = request.query as { limit?: string }
       const limit = query.limit ? Math.min(parseInt(query.limit, 10) || 48, 1000) : 48
@@ -95,12 +89,12 @@ export function checksRoutes(ctx: AppContext) {
           summaries.length > 0 &&
           summaries[0].hour.getTime() === currentHourStart.getTime()
         ) {
-          summaries[0] = { ...partial, _id: summaries[0]._id, createdAt: summaries[0].createdAt }
+          summaries[0] = { ...partial, id: summaries[0].id, createdAt: summaries[0].createdAt }
         } else {
-          // Prepend partial as the newest entry (assign a temporary _id)
+          // Prepend partial as the newest entry (assign a temporary id)
           summaries.unshift({
             ...partial,
-            _id: new ObjectId(),
+            id: randomUUID(),
             createdAt: now,
           } as typeof summaries[0])
         }
@@ -114,9 +108,6 @@ export function checksRoutes(ctx: AppContext) {
     // (computed on-the-fly from today's hourly summaries + current hour).
     fastify.get('/endpoints/:id/daily', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
 
       const query = request.query as { limit?: string }
       const limit = query.limit ? Math.min(parseInt(query.limit, 10) || 90, 365) : 90
@@ -144,7 +135,7 @@ export function checksRoutes(ctx: AppContext) {
         const partialHour = buildHourlySummary(id, currentHourStart, currentHourChecks)
         todayCompletedHourlies.push({
           ...partialHour,
-          _id: new ObjectId(),
+          id: randomUUID(),
           createdAt: now,
         } as typeof todayCompletedHourlies[0])
       }
@@ -158,11 +149,11 @@ export function checksRoutes(ctx: AppContext) {
           dailies.length > 0 &&
           dailies[0].date.getTime() === todayStart.getTime()
         ) {
-          dailies[0] = { ...partialDay, _id: dailies[0]._id, createdAt: dailies[0].createdAt }
+          dailies[0] = { ...partialDay, id: dailies[0].id, createdAt: dailies[0].createdAt }
         } else {
           dailies.unshift({
             ...partialDay,
-            _id: new ObjectId(),
+            id: randomUUID(),
             createdAt: now,
           } as typeof dailies[0])
         }
@@ -182,7 +173,7 @@ export function checksRoutes(ctx: AppContext) {
           const partialDay = buildDailySummary(id, yesterdayStart, yesterdayHourlies)
           const synthEntry = {
             ...partialDay,
-            _id: new ObjectId(),
+            id: randomUUID(),
             createdAt: now,
           } as typeof dailies[0]
           // Insert in date-desc order: after any entries newer than yesterday.
@@ -198,9 +189,6 @@ export function checksRoutes(ctx: AppContext) {
     // ── GET /endpoints/:id/uptime ────────────────────────────────────────────
     fastify.get('/endpoints/:id/uptime', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
 
       const stats = await ctx.adapter.getUptimeStats(id)
       return reply.send({ data: stats })

@@ -21,7 +21,6 @@ import type { FastifyInstance } from 'fastify'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { ObjectId } from 'mongodb'
 import { eventBus } from '../../core/eventBus.js'
 import { formatError } from '../../utils/errors.js'
 import type { AppContext } from '../server.js'
@@ -246,9 +245,6 @@ export function settingsRoutes(ctx: AppContext) {
 
     fastify.get('/endpoints/:id/settings', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
       const endpoint = await ctx.adapter.getEndpointById(id)
       if (!endpoint) {
         return reply.code(404).send(formatError('NOT_FOUND', `Endpoint ${id} not found`))
@@ -263,9 +259,6 @@ export function settingsRoutes(ctx: AppContext) {
 
     fastify.put('/endpoints/:id/settings', { schema: { body: settingsBodySchema } }, async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Endpoint ID is not a valid ObjectId'))
-      }
       const existing = await ctx.adapter.getEndpointById(id)
       if (!existing) {
         return reply.code(404).send(formatError('NOT_FOUND', `Endpoint ${id} not found`))
@@ -284,18 +277,9 @@ export function settingsRoutes(ctx: AppContext) {
         )
       }
 
-      // Coerce ID-typed fields back into ObjectIds — the dispatcher's fan-out
-      // reads these as ObjectId instances, and mixing strings crashes at
-      // runtime. Mirrors the same coercion in PUT /endpoints/:id.
       if (Array.isArray(changes.notificationChannelIds)) {
         changes.notificationChannelIds = (changes.notificationChannelIds as unknown[])
-          .filter((v): v is string => typeof v === 'string' && ObjectId.isValid(v))
-          .map((v) => new ObjectId(v))
-      }
-      if (typeof changes.escalationChannelId === 'string') {
-        changes.escalationChannelId = ObjectId.isValid(changes.escalationChannelId)
-          ? new ObjectId(changes.escalationChannelId)
-          : null
+          .filter((v): v is string => typeof v === 'string')
       }
 
       const updated = await ctx.adapter.updateEndpoint(id, changes as Partial<EndpointDoc>)

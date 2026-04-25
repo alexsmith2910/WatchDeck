@@ -8,7 +8,6 @@
  */
 
 import type { FastifyInstance } from 'fastify'
-import { ObjectId } from 'mongodb'
 import { formatError } from '../../utils/errors.js'
 import { parsePagination, toEnvelope } from '../utils/pagination.js'
 import type { AppContext } from '../server.js'
@@ -61,18 +60,6 @@ export function incidentsRoutes(ctx: AppContext) {
           ]),
         )
       }
-      if (query.endpointId && !ObjectId.isValid(query.endpointId)) {
-        return reply.code(400).send(
-          formatError('INVALID_QUERY', '`endpointId` is not a valid ObjectId', [
-            {
-              field: 'endpointId',
-              value: query.endpointId,
-              expected: '24-character hex string',
-              fix: 'Omit the filter or pass a valid endpoint id',
-            },
-          ]),
-        )
-      }
       const stats = await ctx.adapter.getIncidentStats({
         from,
         to,
@@ -107,9 +94,6 @@ export function incidentsRoutes(ctx: AppContext) {
 
     fastify.get('/incidents/:id', async (request, reply) => {
       const { id } = request.params as { id: string }
-      if (!ObjectId.isValid(id)) {
-        return reply.code(400).send(formatError('INVALID_ID', 'Incident ID is not a valid ObjectId'))
-      }
       const incident = await ctx.adapter.getIncidentById(id)
       if (!incident) {
         return reply.code(404).send(formatError('NOT_FOUND', `Incident ${id} not found`))
