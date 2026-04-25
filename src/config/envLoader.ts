@@ -12,10 +12,6 @@ export interface LoadedEnv {
   MX_DB_URI: string
   /** Collection name prefix. Defaults to "mx_". */
   MX_DB_PREFIX: string
-  /** Discord bot token. Required when modules.discord is true. */
-  MX_DISCORD_TOKEN?: string
-  /** Slack bot token. Required when modules.slack is true. */
-  MX_SLACK_TOKEN?: string
   /** AES-256 key for encrypting stored secrets. Optional in V1. */
   MX_ENCRYPTION_KEY?: string
 }
@@ -82,8 +78,6 @@ export function loadEnv(): LoadedEnv {
   return {
     MX_DB_URI: process.env.MX_DB_URI!,
     MX_DB_PREFIX: process.env.MX_DB_PREFIX ?? 'mx_',
-    MX_DISCORD_TOKEN: process.env.MX_DISCORD_TOKEN,
-    MX_SLACK_TOKEN: process.env.MX_SLACK_TOKEN,
     MX_ENCRYPTION_KEY: process.env.MX_ENCRYPTION_KEY,
   }
 }

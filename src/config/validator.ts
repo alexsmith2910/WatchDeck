@@ -1,6 +1,5 @@
 import {
   formatValidationReport,
-  formatWarning,
   type ValidationError,
 } from '../utils/errors.js'
 import type { LoadedEnv } from './envLoader.js'
@@ -252,7 +251,6 @@ function validateDefaults(
 
 const ALLOWED_SEVERITY_FILTERS = ['info+', 'warning+', 'critical'] as const
 const ALLOWED_BYPASS_SEVERITIES = ['info', 'warning', 'critical'] as const
-const TIME_HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 
 function validateNotifications(
   cfg: WatchDeckConfig,
@@ -285,7 +283,7 @@ function validateNotifications(
     )
   }
 
-  for (const key of ['sendOpen', 'sendResolved', 'sendEscalation', 'alertDuringMaintenance', 'retryOnFailure'] as const) {
+  for (const key of ['sendOpen', 'sendResolved', 'sendEscalation', 'retryOnFailure'] as const) {
     if (typeof n[key] !== 'boolean') {
       push(errors, `defaults.notifications.${key}`, n[key], 'boolean', `Set ${key} to true or false`)
     }
@@ -343,27 +341,6 @@ function validateNotifications(
         c.bypassSeverity,
         `one of ["${ALLOWED_BYPASS_SEVERITIES.join('", "')}"]`,
         'Set bypassSeverity to "info", "warning", or "critical"',
-      )
-    }
-  }
-
-  if (n.quietHours !== null) {
-    if (
-      !n.quietHours ||
-      typeof n.quietHours !== 'object' ||
-      typeof n.quietHours.start !== 'string' ||
-      !TIME_HHMM_RE.test(n.quietHours.start) ||
-      typeof n.quietHours.end !== 'string' ||
-      !TIME_HHMM_RE.test(n.quietHours.end) ||
-      typeof n.quietHours.tz !== 'string' ||
-      n.quietHours.tz.trim() === ''
-    ) {
-      push(
-        errors,
-        'defaults.notifications.quietHours',
-        n.quietHours,
-        '{ start: "HH:MM", end: "HH:MM", tz: IANA zone } or null',
-        'Provide a valid quiet hours object, or set to null to disable',
       )
     }
   }
@@ -677,36 +654,6 @@ function validateAuth(cfg: WatchDeckConfig, errors: ValidationError[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-validation: module tokens
-// ---------------------------------------------------------------------------
-
-function crossValidateModuleTokens(
-  cfg: WatchDeckConfig,
-  env: LoadedEnv,
-  warnings: string[],
-): void {
-  if (cfg.modules.discord && !env.MX_DISCORD_TOKEN) {
-    warnings.push(
-      formatWarning(
-        'modules.discord',
-        'MX_DISCORD_TOKEN is not set. Discord notifications will not work. ' +
-          'Add MX_DISCORD_TOKEN to your .env, or set modules.discord to false.',
-      ),
-    )
-  }
-
-  if (cfg.modules.slack && !env.MX_SLACK_TOKEN) {
-    warnings.push(
-      formatWarning(
-        'modules.slack',
-        'MX_SLACK_TOKEN is not set. Slack notifications will not work. ' +
-          'Add MX_SLACK_TOKEN to your .env, or set modules.slack to false.',
-      ),
-    )
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Public: validate + freeze
 // ---------------------------------------------------------------------------
 
@@ -718,7 +665,6 @@ export interface ValidateResult {
 
 /**
  * Validate all config fields against their allowed ranges/types.
- * Cross-validates module token requirements against loaded env vars.
  *
  * Returns warnings (non-fatal) for the caller to display — does NOT print them.
  * Throws a formatted error string if any hard validation failures are found.
@@ -727,7 +673,7 @@ export interface ValidateResult {
  */
 export function validateAndFreeze(
   cfg: WatchDeckConfig,
-  env: LoadedEnv,
+  _env: LoadedEnv,
 ): ValidateResult {
   const errors: ValidationError[] = []
   const warnings: string[] = []
@@ -743,7 +689,6 @@ export function validateAndFreeze(
   validateAggregation(cfg, errors)
   validateCors(cfg, errors)
   validateAuth(cfg, errors)
-  crossValidateModuleTokens(cfg, env, warnings)
 
   if (errors.length > 0) {
     throw new Error(formatValidationReport(errors))

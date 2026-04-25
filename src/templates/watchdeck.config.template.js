@@ -5,11 +5,8 @@ export default {
   dashboardMode: '{{DASHBOARD_MODE}}',
 
   modules: {
-    discord: {{DISCORD}},
-    slack: {{SLACK}},
     sslChecks: true,
     portChecks: true,
-    bodyValidation: true,
   },
 
   defaults: {
@@ -30,7 +27,6 @@ export default {
       sendOpen: true,
       sendResolved: true,
       sendEscalation: true,
-      alertDuringMaintenance: false,
       retryOnFailure: true,
       retryBackoffMs: [2000, 8000, 30000],
       coalescing: {
@@ -39,7 +35,6 @@ export default {
         minBurstCount: 3,
         bypassSeverity: 'critical',
       },
-      quietHours: null,
       channelDefaults: {
         discord: { rateLimitPerMinute: 30 },
         slack: { rateLimitPerMinute: 30 },
