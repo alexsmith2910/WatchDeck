@@ -7,6 +7,10 @@ import { initConfig } from '../config/index.js'
 import { eventBus, initEventBus } from '../core/eventBus.js'
 import type { EventMap } from '../core/eventTypes.js'
 import { MongoDBAdapter } from '../storage/mongodb.js'
+import { PostgresAdapter } from '../storage/postgres/adapter.js'
+import { RetentionSweeper } from '../storage/postgres/retention.js'
+import type { StorageAdapter } from '../storage/adapter.js'
+import type { WatchDeckConfig } from '../config/types.js'
 import type { CheckWritePayload } from '../storage/types.js'
 import { MemoryBuffer } from '../buffer/memoryBuffer.js'
 import { DiskBuffer } from '../buffer/diskBuffer.js'
@@ -100,13 +104,28 @@ function installProcessSafetyNets(): void {
   })
 }
 
-/** Extract just the host from a MongoDB URI without exposing credentials. */
+/** Extract just the host from a DB URI without exposing credentials. */
 function hostFromUri(uri: string): string {
   try {
     return new URL(uri).host
   } catch {
     return 'unknown host'
   }
+}
+
+/** Detect which backend a URI targets. The scheme is the source of truth. */
+function backendFromUri(uri: string): 'mongodb' | 'postgres' {
+  if (uri.startsWith('mongodb://') || uri.startsWith('mongodb+srv://')) return 'mongodb'
+  if (uri.startsWith('postgres://') || uri.startsWith('postgresql://')) return 'postgres'
+  throw new Error(
+    `Unsupported MX_DB_URI scheme. Expected one of: mongodb://, mongodb+srv://, postgres://, postgresql://`,
+  )
+}
+
+function buildAdapter(uri: string, prefix: string, config: WatchDeckConfig): StorageAdapter {
+  const backend = backendFromUri(uri)
+  if (backend === 'mongodb') return new MongoDBAdapter(uri, prefix, config)
+  return new PostgresAdapter(uri, prefix, config)
 }
 
 // ---------------------------------------------------------------------------
@@ -204,7 +223,8 @@ export async function runStart(options: StartOptions): Promise<void> {
 
   const dbUri = process.env.MX_DB_URI!
   const dbPrefix = process.env.MX_DB_PREFIX ?? 'mx_'
-  const adapter = new MongoDBAdapter(dbUri, dbPrefix, config)
+  const adapter = buildAdapter(dbUri, dbPrefix, config)
+  const backend = backendFromUri(dbUri)
 
   // Runtime reconnect listeners — stay active for the lifetime of the process.
   eventBus.subscribe('db:reconnecting', ({ attempt, maxAttempts, nextRetryInSeconds }) => {
@@ -258,7 +278,7 @@ export async function runStart(options: StartOptions): Promise<void> {
         '',
         chalk.dim('  ' + msg),
         '',
-        chalk.dim('  Check that MongoDB is running and MX_DB_URI in your .env is correct.'),
+        chalk.dim(`  Check that ${backend === 'postgres' ? 'Postgres' : 'MongoDB'} is running and MX_DB_URI in your .env is correct.`),
         '',
       ].join('\n') + '\n',
     )
@@ -275,13 +295,25 @@ export async function runStart(options: StartOptions): Promise<void> {
     const migrateResult = await adapter.migrate()
     migSpinner.succeed(chalk.bold('Migrations complete'))
     if (!silent && verbose) {
-      subItem(`${migrateResult.collectionCount} collections ensured`)
+      const tableWord = backend === 'postgres' ? 'tables' : 'collections'
+      subItem(`${migrateResult.collectionCount} ${tableWord} ensured`)
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     migSpinner.fail(chalk.bold('Migrations failed'))
     process.stderr.write(chalk.dim('  ' + msg) + '\n')
     process.exit(1)
+  }
+
+  // Retention sweeper — Postgres has no TTL indexes; mirror Mongo's TTL behavior
+  // by periodically deleting rows older than the configured retention windows.
+  let retentionSweeper: RetentionSweeper | null = null
+  if (adapter instanceof PostgresAdapter) {
+    retentionSweeper = new RetentionSweeper(adapter.getPool(), dbPrefix, config)
+    retentionSweeper.start()
+    if (!silent && verbose) {
+      subItem(`retention sweeper scheduled (10-minute cadence)`)
+    }
   }
 
   // ── Buffer ───────────────────────────────────────────────────────────────
@@ -485,6 +517,7 @@ export async function runStart(options: StartOptions): Promise<void> {
     scheduler.stop()
     notifications.stop()
     aggregation.stop()
+    retentionSweeper?.stop()
     void healthPersistence.flush().finally(() => {
       void server!.close().finally(() => {
         void adapter.disconnect().finally(() => process.exit(0))
