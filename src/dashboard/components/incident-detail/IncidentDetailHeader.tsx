@@ -83,8 +83,8 @@ function IncidentDetailHeaderBase({
   // Use the trailing 8 chars of the ObjectId so the displayed form matches
   // what `navigator.clipboard.writeText` actually copies when the ID is
   // truncated in logs or shared inline. Breadcrumb uses the same slice.
-  const shortId = `inc-${incident._id.slice(-8)}`;
-  const fullId = incident._id;
+  const shortId = `inc-${incident.id.slice(-8)}`;
+  const fullId = incident.id;
   const liveSec = isActive
     ? liveElapsedSec(incident.startedAt)
     : (incident.durationSeconds ?? 0);

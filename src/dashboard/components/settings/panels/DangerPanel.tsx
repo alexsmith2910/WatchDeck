@@ -80,7 +80,7 @@ export function DangerPanel() {
         </div>
 
         <ul className="text-[11.5px] text-wd-muted space-y-0.5 pl-4 list-disc">
-          <li>Endpoints and every attached check, incident, and maintenance window.</li>
+          <li>Endpoints and every attached check and incident.</li>
           <li>Notification channels, delivery log, mutes, and preferences.</li>
           <li>Runtime overrides in <span className="font-mono text-foreground">mx_settings</span>.</li>
           <li>Disk buffer file at <span className="font-mono text-foreground">~/.watchdeck/buffer.jsonl</span>.</li>

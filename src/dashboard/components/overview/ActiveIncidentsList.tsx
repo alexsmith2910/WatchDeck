@@ -85,9 +85,9 @@ export function ActiveIncidentsList({ incidents, endpointName }: Props) {
 
               return (
                 <button
-                  key={i._id}
+                  key={i.id}
                   type="button"
-                  onClick={() => navigate(`/incidents/${i._id}`)}
+                  onClick={() => navigate(`/incidents/${i.id}`)}
                   className={cn(
                     "grid grid-cols-[34px_1fr_auto] gap-3 items-start text-left p-3 rounded-xl border transition-colors",
                     tone.row,

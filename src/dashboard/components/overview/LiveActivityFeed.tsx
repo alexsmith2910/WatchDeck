@@ -65,10 +65,10 @@ export function LiveActivityFeed({
     for (const inc of recentIncidents.slice(0, 15)) {
       const name = endpointName(inc.endpointId);
       const cause = metaFor(inc.cause).label;
-      seenIncidentsRef.current.add(inc._id);
+      seenIncidentsRef.current.add(inc.id);
       if (inc.status === "active") {
         seeds.push({
-          id: `seed-inc-open-${inc._id}`,
+          id: `seed-inc-open-${inc.id}`,
           kind: "down",
           at: inc.startedAt,
           text: (
@@ -79,7 +79,7 @@ export function LiveActivityFeed({
         });
       } else {
         seeds.push({
-          id: `seed-inc-res-${inc._id}`,
+          id: `seed-inc-res-${inc.id}`,
           kind: "ok",
           at: inc.resolvedAt ?? inc.startedAt,
           text: (
@@ -105,14 +105,14 @@ export function LiveActivityFeed({
     return subscribe("incident:opened", (raw) => {
       const evt = raw as { timestamp?: string; incident?: ApiIncident };
       const inc = evt.incident;
-      if (!inc || seenIncidentsRef.current.has(inc._id)) return;
-      seenIncidentsRef.current.add(inc._id);
+      if (!inc || seenIncidentsRef.current.has(inc.id)) return;
+      seenIncidentsRef.current.add(inc.id);
       const name = endpointName(inc.endpointId);
       const cause = metaFor(inc.cause).label;
       setItems((prev) =>
         [
           {
-            id: `sse-inc-open-${inc._id}`,
+            id: `sse-inc-open-${inc.id}`,
             kind: "down",
             at: evt.timestamp ?? inc.startedAt,
             text: (

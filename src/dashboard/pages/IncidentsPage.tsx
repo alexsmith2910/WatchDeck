@@ -97,8 +97,8 @@ export default function IncidentsPage() {
   const endpointById = useMemo<Map<string, EndpointLite>>(() => {
     const m = new Map<string, EndpointLite>()
     for (const ep of endpoints) {
-      m.set(ep._id, {
-        _id: ep._id,
+      m.set(ep.id, {
+        id: ep.id,
         name: ep.name,
         type: ep.type,
         url: ep.url,
@@ -113,7 +113,7 @@ export default function IncidentsPage() {
   const endpointStateById = useMemo<Map<string, HeroEndpointState>>(() => {
     const m = new Map<string, HeroEndpointState>()
     for (const ep of endpoints) {
-      m.set(ep._id, {
+      m.set(ep.id, {
         lastStatus: ep.lastStatus,
         lastStatusCode: ep.lastStatusCode,
         lastResponseTime: ep.lastResponseTime,
@@ -126,7 +126,7 @@ export default function IncidentsPage() {
 
   const channelById = useMemo<Map<string, ApiChannel>>(() => {
     const m = new Map<string, ApiChannel>()
-    for (const c of channels) m.set(c._id, c)
+    for (const c of channels) m.set(c.id, c)
     return m
   }, [channels])
 
@@ -170,13 +170,13 @@ export default function IncidentsPage() {
 
   useEffect(() => {
     const seen = new Map<string, ApiIncident>()
-    for (const i of activeIncidents) seen.set(i._id, i)
-    for (const i of historyIncidents) if (!seen.has(i._id)) seen.set(i._id, i)
+    for (const i of activeIncidents) seen.set(i.id, i)
+    for (const i of historyIncidents) if (!seen.has(i.id)) seen.set(i.id, i)
     if (seen.size === 0) return
 
     const missing: ApiIncident[] = []
     for (const inc of seen.values()) {
-      const version = `${inc._id}:${inc.status}:${inc.resolvedAt ?? ''}`
+      const version = `${inc.id}:${inc.status}:${inc.resolvedAt ?? ''}`
       if (!fetchedVersionsRef.current.has(version)) {
         fetchedVersionsRef.current.add(version)
         missing.push(inc)
@@ -207,7 +207,7 @@ export default function IncidentsPage() {
           values: checks.map((c) => c.responseTime),
           timestamps: checks.map((c) => c.timestamp),
         }
-        return [inc._id, sparkline] as const
+        return [inc.id, sparkline] as const
       }),
     )
       .then((entries) => {
@@ -308,8 +308,8 @@ export default function IncidentsPage() {
     try {
       const page = await fetchHistory(nextCursor)
       setHistoryIncidents((prev) => {
-        const seen = new Set(prev.map((i) => i._id))
-        return [...prev, ...page.items.filter((i) => !seen.has(i._id))]
+        const seen = new Set(prev.map((i) => i.id))
+        return [...prev, ...page.items.filter((i) => !seen.has(i.id))]
       })
       setHasMore(page.pagination?.hasMore ?? false)
       setNextCursor(page.pagination?.nextCursor ?? null)
@@ -343,11 +343,11 @@ export default function IncidentsPage() {
       const evt = raw as IncidentOpenedEvent
       setActiveIncidents((prev) => [
         evt.incident,
-        ...prev.filter((i) => i._id !== evt.incident._id),
+        ...prev.filter((i) => i.id !== evt.incident.id),
       ])
       setHistoryIncidents((prev) => [
         evt.incident,
-        ...prev.filter((i) => i._id !== evt.incident._id),
+        ...prev.filter((i) => i.id !== evt.incident.id),
       ])
       setLastUpdatedAt(Date.now())
       void fetchStats()
@@ -357,10 +357,10 @@ export default function IncidentsPage() {
   useEffect(() => {
     return subscribe('incident:resolved', (raw) => {
       const evt = raw as IncidentResolvedEvent
-      setActiveIncidents((prev) => prev.filter((i) => i._id !== evt.incidentId))
+      setActiveIncidents((prev) => prev.filter((i) => i.id !== evt.incidentId))
       setHistoryIncidents((prev) =>
         prev.map((i) =>
-          i._id === evt.incidentId
+          i.id === evt.incidentId
             ? {
                 ...i,
                 status: 'resolved' as const,

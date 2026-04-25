@@ -29,7 +29,7 @@ export function MutesCard({ mutes, channels, endpointNameById, onChanged }: Prop
 
   const channelName = useMemo(() => {
     const m = new Map<string, string>()
-    for (const c of channels) m.set(c._id, c.name)
+    for (const c of channels) m.set(c.id, c.name)
     return m
   }, [channels])
 
@@ -42,13 +42,13 @@ export function MutesCard({ mutes, channels, endpointNameById, onChanged }: Prop
   const hidden = sorted.length - visible.length
 
   const sub = sorted.length === 0
-    ? 'No active mutes. Use mutes during maintenance or to silence noisy sources.'
+    ? 'No active mutes. Use mutes during deploys or to silence noisy sources.'
     : `${sorted.length} ${sorted.length === 1 ? 'rule silencing alerts' : 'rules silencing alerts'} · all time-boxed.`
 
   async function unmute(mute: ApiNotificationMute) {
-    setBusyId(mute._id)
+    setBusyId(mute.id)
     try {
-      const res = await request(`/notifications/mutes/${mute._id}`, { method: 'DELETE' })
+      const res = await request(`/notifications/mutes/${mute.id}`, { method: 'DELETE' })
       if (res.status >= 400) toast.error('Unmute failed', { description: `HTTP ${res.status}` })
       else {
         toast.success('Unmuted')
@@ -94,10 +94,10 @@ export function MutesCard({ mutes, channels, endpointNameById, onChanged }: Prop
         <div className="flex flex-col gap-1.5">
           {visible.map((m) => (
             <MuteRow
-              key={m._id}
+              key={m.id}
               mute={m}
               scopeLabel={scopeLabel(m)}
-              busy={busyId === m._id}
+              busy={busyId === m.id}
               onUnmute={() => void unmute(m)}
             />
           ))}

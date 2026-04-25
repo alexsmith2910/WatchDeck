@@ -197,7 +197,7 @@ export default function EndpointDetailPage() {
     if (incidents.length === 0) return;
     const missing: ApiIncident[] = [];
     for (const inc of incidents) {
-      const version = `${inc._id}:${inc.status}:${inc.resolvedAt ?? ""}`;
+      const version = `${inc.id}:${inc.status}:${inc.resolvedAt ?? ""}`;
       if (!fetchedSparkVersionsRef.current.has(version)) {
         fetchedSparkVersionsRef.current.add(version);
         missing.push(inc);
@@ -228,7 +228,7 @@ export default function EndpointDetailPage() {
           values: checks.map((c) => c.responseTime),
           timestamps: checks.map((c) => c.timestamp),
         };
-        return [inc._id, sparkline] as const;
+        return [inc.id, sparkline] as const;
       }),
     )
       .then((entries) => {
@@ -269,26 +269,24 @@ export default function EndpointDetailPage() {
           : ep,
       );
       setLatestCheck((lc) => ({
-        _id: `live-${Date.now()}`,
+        id: `live-${Date.now()}`,
         endpointId: payload.endpointId,
         timestamp: payload.timestamp,
         responseTime: payload.responseTime,
         statusCode: payload.statusCode,
         status: payload.status,
         sslDaysRemaining: payload.sslDaysRemaining ?? lc?.sslDaysRemaining,
-        duringMaintenance: false,
       }));
       setLastHourChecks((prev) => {
         const cutoff = Date.now() - 60 * 60_000;
         const next: ApiCheck = {
-          _id: `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          id: `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           endpointId: payload.endpointId,
           timestamp: payload.timestamp,
           responseTime: payload.responseTime,
           statusCode: payload.statusCode,
           status: payload.status,
           sslDaysRemaining: payload.sslDaysRemaining,
-          duringMaintenance: false,
         };
         return [next, ...prev].filter(
           (c) => new Date(c.timestamp).getTime() >= cutoff,
@@ -300,7 +298,7 @@ export default function EndpointDetailPage() {
       if (payload.incident?.endpointId !== id) return;
       setIncidents((prev) => [
         payload.incident,
-        ...prev.filter((i) => i._id !== payload.incident._id),
+        ...prev.filter((i) => i.id !== payload.incident.id),
       ]);
     });
     const unsubIncResolved = subscribe("incident:resolved", (data: unknown) => {
@@ -311,7 +309,7 @@ export default function EndpointDetailPage() {
       };
       setIncidents((prev) =>
         prev.map((i) =>
-          i._id === payload.incidentId
+          i.id === payload.incidentId
             ? {
                 ...i,
                 status: "resolved",
@@ -339,8 +337,8 @@ export default function EndpointDetailPage() {
   const endpointById = useMemo<Map<string, EndpointLite>>(() => {
     const m = new Map<string, EndpointLite>();
     if (endpoint) {
-      m.set(endpoint._id, {
-        _id: endpoint._id,
+      m.set(endpoint.id, {
+        id: endpoint.id,
         name: endpoint.name,
         type: endpoint.type,
         url: endpoint.url,
@@ -354,7 +352,7 @@ export default function EndpointDetailPage() {
 
   const channelById = useMemo<Map<string, ApiChannel>>(() => {
     const m = new Map<string, ApiChannel>();
-    for (const c of channels) m.set(c._id, c);
+    for (const c of channels) m.set(c.id, c);
     return m;
   }, [channels]);
 
@@ -362,16 +360,16 @@ export default function EndpointDetailPage() {
     number | null
   >(null);
   useEffect(() => {
-    if (!endpoint?._id) return;
+    if (!endpoint?.id) return;
     const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     void request<{ data: { endpointTotal: number } }>(
-      `/endpoints/${endpoint._id}/notifications/stats?from=${from}`,
+      `/endpoints/${endpoint.id}/notifications/stats?from=${from}`,
     ).then((res) => {
       if (res?.status != null && res.status < 400) {
         setNotifications24hCount(res.data?.data?.endpointTotal ?? 0);
       }
     });
-  }, [endpoint?._id, request]);
+  }, [endpoint?.id, request]);
 
   const tabCounts = useMemo(() => {
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -393,7 +391,7 @@ export default function EndpointDetailPage() {
     if (!endpoint) return;
     setPausing(true);
     const res = await request<{ data: ApiEndpoint }>(
-      `/endpoints/${endpoint._id}/toggle`,
+      `/endpoints/${endpoint.id}/toggle`,
       {
         method: "PATCH",
       },
@@ -407,7 +405,7 @@ export default function EndpointDetailPage() {
   const runNow = useCallback(async () => {
     if (!endpoint) return;
     setRunningNow(true);
-    await request(`/endpoints/${endpoint._id}/recheck`, { method: "POST" });
+    await request(`/endpoints/${endpoint.id}/recheck`, { method: "POST" });
     // Result will arrive via SSE.
     setRunningNow(false);
   }, [endpoint, request]);
@@ -526,7 +524,7 @@ export default function EndpointDetailPage() {
       <div className="pt-2">
         {activeTab === "metrics" && (
           <MetricsTab
-            endpointId={endpoint._id}
+            endpointId={endpoint.id}
             range={metricsRange}
             setRange={setMetricsRange}
             hourly24h={hourly24h}
@@ -540,7 +538,7 @@ export default function EndpointDetailPage() {
         )}
         {activeTab === "incidents" && (
           <IncidentsTab
-            endpointId={endpoint._id}
+            endpointId={endpoint.id}
             incidents={incidents}
             loading={aggLoading}
             endpointById={endpointById}
@@ -550,7 +548,7 @@ export default function EndpointDetailPage() {
         )}
         {activeTab === "notifications" && (
           <NotificationsTab
-            endpointId={endpoint._id}
+            endpointId={endpoint.id}
             endpoint={endpoint}
             channels={channels}
           />

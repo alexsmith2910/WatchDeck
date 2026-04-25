@@ -90,7 +90,7 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
 
   const channelById = useMemo(() => {
     const m = new Map<string, ApiChannel>();
-    for (const c of channels) m.set(c._id, c);
+    for (const c of channels) m.set(c.id, c);
     return m;
   }, [channels]);
 
@@ -350,12 +350,12 @@ function NotificationsTabBase({ endpointId, endpoint, channels }: Props) {
                 const rowChannel = channelById.get(r.channelId) ?? null;
                 return (
                   <LogRow
-                    key={r._id}
+                    key={r.id}
                     row={r}
                     channel={rowChannel}
-                    expanded={expandedId === r._id}
+                    expanded={expandedId === r.id}
                     onToggle={() => {
-                      setExpandedId((prev) => (prev === r._id ? null : r._id));
+                      setExpandedId((prev) => (prev === r.id ? null : r.id));
                     }}
                   />
                 );
@@ -405,10 +405,10 @@ function RoutesSection({
   onTogglePause: (channelId: string, paused: boolean) => void;
 }) {
   const hasRoutes = routeChannels.main.length > 0 || routeChannels.escalation;
-  const escalationId = routeChannels.escalation?._id;
+  const escalationId = routeChannels.escalation?.id;
   // If the escalation channel is also in the main list, don't render it twice.
   const cards = [...routeChannels.main];
-  if (routeChannels.escalation && !cards.some((c) => c._id === escalationId)) {
+  if (routeChannels.escalation && !cards.some((c) => c.id === escalationId)) {
     cards.push(routeChannels.escalation);
   }
 
@@ -423,12 +423,12 @@ function RoutesSection({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
           {cards.map((c) => (
             <RouteCard
-              key={c._id}
+              key={c.id}
               channel={c}
-              paused={pausedChannelIds.has(c._id)}
-              isEscalation={c._id === escalationId}
+              paused={pausedChannelIds.has(c.id)}
+              isEscalation={c.id === escalationId}
               onTogglePause={(paused) => {
-                onTogglePause(c._id, paused);
+                onTogglePause(c.id, paused);
               }}
             />
           ))}
@@ -445,9 +445,7 @@ function RoutesSection({
 function channelSubtype(channel: ApiChannel): string {
   switch (channel.type) {
     case "discord":
-      return channel.discordTransport === "bot"
-        ? "Discord bot"
-        : "Discord webhook";
+      return "Discord webhook";
     case "slack":
       return "Slack webhook";
     case "email":

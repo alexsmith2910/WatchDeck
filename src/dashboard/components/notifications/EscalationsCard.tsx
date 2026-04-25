@@ -34,7 +34,7 @@ export function EscalationsCard({ escalations, channels, endpointNameById }: Pro
 
   const channelName = useMemo(() => {
     const m = new Map<string, string>()
-    for (const c of channels) m.set(c._id, c.name)
+    for (const c of channels) m.set(c.id, c.name)
     return m
   }, [channels])
 

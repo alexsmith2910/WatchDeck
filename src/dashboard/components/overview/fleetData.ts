@@ -242,14 +242,14 @@ export function buildHeatmapRows(
 
     const byKey = new Map<string, number>();
     if (cfg.hourly) {
-      for (const h of hourlyByEp.get(ep._id) ?? []) {
+      for (const h of hourlyByEp.get(ep.id) ?? []) {
         byKey.set(
           canonKey(h.hour),
           h.totalChecks === 0 ? 1 : h.uptimePercent / 100,
         );
       }
     } else {
-      for (const d of dailyByEp.get(ep._id) ?? []) {
+      for (const d of dailyByEp.get(ep.id) ?? []) {
         byKey.set(
           canonKey(d.date),
           d.totalChecks === 0 ? 1 : d.uptimePercent / 100,
@@ -266,10 +266,10 @@ export function buildHeatmapRows(
     });
 
     return {
-      id: ep._id,
+      id: ep.id,
       name: ep.name,
       status,
-      uptime30d: uptimeByEp.get(ep._id) ?? null,
+      uptime30d: uptimeByEp.get(ep.id) ?? null,
       values,
       hasData: byKey.size > 0,
     };
@@ -306,7 +306,7 @@ export function buildEndpointScores(
     let spark: number[];
 
     if (cfg.hourly) {
-      const hours = (hourlyByEp.get(ep._id) ?? [])
+      const hours = (hourlyByEp.get(ep.id) ?? [])
         .slice()
         .sort((a, b) => a.hour.localeCompare(b.hour));
       spark = hours.map((h) => h.avgResponseTime);
@@ -316,7 +316,7 @@ export function buildEndpointScores(
         failed += h.failCount + h.degradedCount;
       }
     } else {
-      const days = (dailyByEp.get(ep._id) ?? [])
+      const days = (dailyByEp.get(ep.id) ?? [])
         .slice()
         .sort((a, b) => a.date.localeCompare(b.date));
       spark = days.map((d) => d.avgResponseTime);
@@ -334,13 +334,13 @@ export function buildEndpointScores(
       total === 0 ? 0 : Math.round((failed / total) * 10000) / 100;
 
     return {
-      id: ep._id,
+      id: ep.id,
       name: ep.name,
       url: ep.url ?? (ep.host && ep.port ? `${ep.host}:${ep.port}` : ""),
       status: ep.status === "paused" ? "paused" : (ep.lastStatus ?? "nodata"),
       spark,
       p95: maxP95 > 0 ? maxP95 : (ep.lastResponseTime ?? 0),
-      flaps: incidentCountByEp.get(ep._id) ?? 0,
+      flaps: incidentCountByEp.get(ep.id) ?? 0,
       errRate,
     };
   });
@@ -365,7 +365,7 @@ export function buildPerEndpointSeries(
   labelFor: (iso: string) => string,
 ): PerEndpointComparison {
   const cfg = RANGE_CONFIG[range];
-  const series = endpoints.map((ep) => ({ id: ep._id, name: ep.name }));
+  const series = endpoints.map((ep) => ({ id: ep.id, name: ep.name }));
 
   const rows: Record<string, string | number | null>[] = bucketKeys.map(
     (k) => ({
@@ -376,12 +376,12 @@ export function buildPerEndpointSeries(
   for (const ep of endpoints) {
     const byKey = new Map<string, number>();
     if (cfg.hourly) {
-      for (const h of hourlyByEp.get(ep._id) ?? []) {
+      for (const h of hourlyByEp.get(ep.id) ?? []) {
         if (h.avgResponseTime > 0)
           byKey.set(canonKey(h.hour), h.avgResponseTime);
       }
     } else {
-      for (const d of dailyByEp.get(ep._id) ?? []) {
+      for (const d of dailyByEp.get(ep.id) ?? []) {
         if (d.avgResponseTime > 0)
           byKey.set(canonKey(d.date), d.avgResponseTime);
       }
@@ -390,7 +390,7 @@ export function buildPerEndpointSeries(
       const key = bucketKeys[i];
       const row = rows[i];
       const v = byKey.get(key);
-      row[`rt-${ep._id}`] = v ?? null;
+      row[`rt-${ep.id}`] = v ?? null;
     }
   }
 

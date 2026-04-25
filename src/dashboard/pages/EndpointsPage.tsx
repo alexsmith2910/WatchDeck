@@ -89,7 +89,7 @@ function mapEndpoint(doc: ApiEndpoint): Endpoint {
         ? `${doc.host}:${doc.port}`
         : doc.host ?? ''
   return {
-    id: doc._id,
+    id: doc.id,
     name: doc.name,
     type: doc.type,
     url,
@@ -524,12 +524,12 @@ export default function EndpointsPage() {
 
   const handleClone = useCallback(
     async (id: string) => {
-      const res = await request<{ data: { _id: string } }>(
+      const res = await request<{ data: { id: string } }>(
         `/endpoints/${id}/clone`,
         { method: 'POST' },
       )
       if (res.status < 400 && res.data.data) {
-        navigate(`/endpoints/${res.data.data._id}?tab=settings`)
+        navigate(`/endpoints/${res.data.data.id}?tab=settings`)
       }
     },
     [request, navigate],

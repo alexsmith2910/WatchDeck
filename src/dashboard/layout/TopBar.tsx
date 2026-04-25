@@ -14,7 +14,7 @@ import type { ApiNotificationPreferences } from '../types/notifications'
 // ---------------------------------------------------------------------------
 
 interface ApiEndpoint {
-  _id: string
+  id: string
   lastStatus?: 'healthy' | 'degraded' | 'down'
   enabled: boolean
   status: 'active' | 'paused' | 'archived'
@@ -25,7 +25,7 @@ interface ApiPagination {
 }
 
 interface ApiIncident {
-  _id: string
+  id: string
   endpointId: string
   cause: string
   causeDetail?: string
@@ -159,7 +159,7 @@ export default function TopBar({ isCompact, onToggleSidebar }: TopBarProps) {
       const evt = raw as { endpointId: string; status: string; responseTime: number; timestamp: string }
       setEndpoints((prev) =>
         prev.map((ep) =>
-          ep._id === evt.endpointId
+          ep.id === evt.endpointId
             ? { ...ep, lastStatus: evt.status as ApiEndpoint['lastStatus'] }
             : ep,
         ),
@@ -184,7 +184,7 @@ export default function TopBar({ isCompact, onToggleSidebar }: TopBarProps) {
   useEffect(() => {
     return subscribe('endpoint:deleted', (raw) => {
       const evt = raw as { endpointId: string }
-      setEndpoints((prev) => prev.filter((ep) => ep._id !== evt.endpointId))
+      setEndpoints((prev) => prev.filter((ep) => ep.id !== evt.endpointId))
     })
   }, [subscribe])
 
@@ -220,7 +220,7 @@ export default function TopBar({ isCompact, onToggleSidebar }: TopBarProps) {
   }, [activeEndpoints])
 
   const activeIds = useMemo(
-    () => new Set(activeEndpoints.map((ep) => ep._id)),
+    () => new Set(activeEndpoints.map((ep) => ep.id)),
     [activeEndpoints],
   )
 

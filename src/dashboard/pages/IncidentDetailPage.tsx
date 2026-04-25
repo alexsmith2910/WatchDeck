@@ -100,14 +100,14 @@ export default function IncidentDetailPage() {
           `/incidents?endpointId=${inc.endpointId}&from=${encodeURIComponent(relatedFrom)}&limit=20`,
         ),
         request<{ data: ApiNotificationLogRow[] }>(
-          `/notifications/log?incidentId=${encodeURIComponent(inc._id)}&limit=100`,
+          `/notifications/log?incidentId=${encodeURIComponent(inc.id)}&limit=100`,
         ),
       ]);
 
       if (epRes.data?.data) setEndpoint(epRes.data.data);
       if (chkRes.data?.data) setChecks(chkRes.data.data);
       if (relRes.data?.data) {
-        setRelatedIncidents(relRes.data.data.filter((r) => r._id !== inc._id));
+        setRelatedIncidents(relRes.data.data.filter((r) => r.id !== inc.id));
       } else {
         setRelatedIncidents([]);
       }
@@ -154,7 +154,7 @@ export default function IncidentDetailPage() {
         incidentId?: string;
         incident?: ApiIncident;
       };
-      if (data.incidentId === id || data.incident?._id === id) {
+      if (data.incidentId === id || data.incident?.id === id) {
         if (data.incident) {
           setIncident(data.incident);
         } else {
@@ -352,7 +352,7 @@ export default function IncidentDetailPage() {
     );
   }
 
-  const shortId = incident._id.slice(-8);
+  const shortId = incident.id.slice(-8);
 
   return (
     <div className="p-4 lg:p-6 flex flex-col gap-4 max-w-[1440px] mx-auto">
@@ -404,7 +404,7 @@ export default function IncidentDetailPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
             <IncidentTimeline rows={compressedTimeline} />
             <IncidentNotificationsLog
-              incidentId={incident._id}
+              incidentId={incident.id}
               endpointId={incident.endpointId}
             />
           </div>

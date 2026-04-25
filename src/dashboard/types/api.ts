@@ -1,7 +1,7 @@
 // Shared API response types used across dashboard pages
 
 export interface ApiEndpoint {
-  _id: string
+  id: string
   name: string
   description?: string
   type: 'http' | 'port'
@@ -73,7 +73,7 @@ export interface AssertionEvalResult {
 }
 
 export interface ApiCheck {
-  _id: string
+  id: string
   endpointId: string
   timestamp: string
   responseTime: number
@@ -86,7 +86,6 @@ export interface ApiCheck {
   bodyBytesTruncated?: boolean
   assertionResult?: AssertionEvalResult
   portOpen?: boolean
-  duringMaintenance: boolean
 }
 
 export interface IncidentTimelineEvent {
@@ -96,7 +95,7 @@ export interface IncidentTimelineEvent {
 }
 
 export interface ApiIncident {
-  _id: string
+  id: string
   endpointId: string
   status: 'active' | 'resolved'
   cause: string

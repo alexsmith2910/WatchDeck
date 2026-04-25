@@ -82,22 +82,6 @@ export const toastPresets = {
     })
   },
 
-  maintenanceStarted(endpointName?: string, endsAt?: Date): string {
-    const desc = endsAt
-      ? `Ends ${formatTime(endsAt)}`
-      : undefined
-    return toast.info(`Maintenance started${endpointName ? ` — ${endpointName}` : ''}`, {
-      description: desc,
-      timeout: 5000,
-    })
-  },
-
-  maintenanceEnded(endpointName?: string): string {
-    return toast.info(`Maintenance ended${endpointName ? ` — ${endpointName}` : ''}`, {
-      timeout: 4000,
-    })
-  },
-
   systemWarning(module: string, message: string): string {
     return toast.warning(`${module}: ${message}`, {
       group: `system:${module}`,

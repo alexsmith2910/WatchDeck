@@ -20,7 +20,6 @@ export type DeliveryStatus = 'sent' | 'failed' | 'pending' | 'suppressed'
 export type SuppressedReason =
   | 'cooldown'
   | 'quiet_hours'
-  | 'maintenance'
   | 'severity_filter'
   | 'event_filter'
   | 'rate_limit'
@@ -30,12 +29,6 @@ export type SuppressedReason =
   | 'muted'
   | 'channel_disabled'
 
-export interface QuietHours {
-  start: string
-  end: string
-  tz: string
-}
-
 export interface EventFilters {
   sendOpen: boolean
   sendResolved: boolean
@@ -43,28 +36,24 @@ export interface EventFilters {
 }
 
 export interface ApiChannel {
-  _id: string
+  id: string
   type: ChannelType
   name: string
   deliveryPriority: DeliveryPriority
   enabled: boolean
   severityFilter: SeverityFilter
   eventFilters: EventFilters
-  quietHours?: QuietHours | null
   rateLimit?: { maxPerMinute: number } | null
   retryOnFailure: boolean
   metadata?: Record<string, unknown> | null
 
-  discordTransport?: 'webhook' | 'bot'
+  // Discord — webhook only in V1
   discordWebhookUrl?: string
-  discordChannelId?: string
-  discordGuildId?: string
   discordUsername?: string
   discordAvatarUrl?: string
 
+  // Slack — webhook only in V1
   slackWebhookUrl?: string
-  slackChannelId?: string
-  slackWorkspaceName?: string
 
   emailEndpoint?: string
   emailRecipients?: string[]
@@ -104,7 +93,7 @@ export interface ApiNotificationLogResponse {
 }
 
 export interface ApiNotificationLogRow {
-  _id: string
+  id: string
   endpointId?: string
   incidentId?: string
   channelId: string
@@ -146,7 +135,7 @@ export interface ApiNotificationStats {
 }
 
 export interface ApiNotificationMute {
-  _id: string
+  id: string
   scope: 'endpoint' | 'channel' | 'global'
   targetId?: string
   mutedBy: string
@@ -156,7 +145,7 @@ export interface ApiNotificationMute {
 }
 
 export interface ApiNotificationPreferences {
-  _id: 'global'
+  id: 'global'
   globalMuteUntil?: string | null
   defaultSeverityFilter: SeverityFilter
   defaultEventFilters: EventFilters

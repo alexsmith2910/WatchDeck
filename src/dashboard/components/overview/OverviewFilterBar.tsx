@@ -89,7 +89,7 @@ export function OverviewFilterBar({
   const pickedEndpoints = useMemo(
     () =>
       selectedIds
-        .map((id) => endpoints.find((e) => e._id === id))
+        .map((id) => endpoints.find((e) => e.id === id))
         .filter((e): e is ApiEndpoint => !!e),
     [selectedIds, endpoints],
   );
@@ -136,7 +136,7 @@ export function OverviewFilterBar({
           ) : (
             pickedEndpoints.slice(0, 4).map((ep) => (
               <span
-                key={ep._id}
+                key={ep.id}
                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-wd-primary/10 text-wd-primary border border-wd-primary/20 font-mono text-[10.5px]"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -148,7 +148,7 @@ export function OverviewFilterBar({
                   className="opacity-60 hover:opacity-100"
                   onClick={(e) => {
                     e.stopPropagation();
-                    toggleId(ep._id);
+                    toggleId(ep.id);
                   }}
                   aria-label={`Remove ${ep.name}`}
                 >
@@ -211,13 +211,13 @@ export function OverviewFilterBar({
                   </div>
                 ) : (
                   filtered.map((ep) => {
-                    const selected = selectedIds.includes(ep._id);
+                    const selected = selectedIds.includes(ep.id);
                     const dot = statusDotClass(ep.lastStatus, ep.status);
                     return (
                       <div
-                        key={ep._id}
+                        key={ep.id}
                         onClick={() => {
-                          toggleId(ep._id);
+                          toggleId(ep.id);
                         }}
                         className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-wd-surface-hover cursor-pointer text-[12px] text-foreground"
                       >
@@ -266,7 +266,7 @@ export function OverviewFilterBar({
                   <button
                     type="button"
                     onClick={() => {
-                      onSelChange(endpoints.map((e) => e._id));
+                      onSelChange(endpoints.map((e) => e.id));
                     }}
                     className="text-wd-primary font-medium px-1.5 py-0.5 rounded hover:bg-wd-surface-hover"
                   >

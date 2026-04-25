@@ -176,11 +176,11 @@ function IncidentsTabBase({
                 })
                 .map((inc) => (
                   <TableRow
-                    key={inc._id}
+                    key={inc.id}
                     incident={inc}
                     endpoint={endpointById.get(inc.endpointId)}
                     channelById={channelById}
-                    sparkline={sparklineByIncidentId.get(inc._id)}
+                    sparkline={sparklineByIncidentId.get(inc.id)}
                     showEndpoint={false}
                   />
                 ))}

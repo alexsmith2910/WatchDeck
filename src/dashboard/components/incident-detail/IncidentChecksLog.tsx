@@ -84,7 +84,7 @@ function IncidentChecksLogBase({ checks, tripTimestamp }: Props) {
                 : "bg-wd-success";
           return (
             <div
-              key={c._id ?? c.timestamp}
+              key={c.id ?? c.timestamp}
               className={cn(
                 "relative grid grid-cols-[36px_86px_96px_56px_70px_1fr] gap-2.5 items-center px-1.5 py-2 text-[12px] border-b border-wd-border/25 last:border-b-0",
                 isFail && !isTrip && "bg-wd-danger/[0.04]",

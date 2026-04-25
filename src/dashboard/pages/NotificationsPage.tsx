@@ -16,6 +16,7 @@
  * re-fetch, and re-pulls the stats/channels/mutes/escalations endpoints.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { useApi } from "../hooks/useApi";
@@ -36,7 +37,6 @@ import {
   DispatchChart,
   LatencyChart,
 } from "../components/notifications/NotificationCharts";
-import { ChannelEditModal } from "../components/notifications/ChannelEditModal";
 import {
   bucketLog,
   deriveChannelStatus,
@@ -82,6 +82,7 @@ function formatUpdatedAgo(sec: number): string {
 }
 
 export default function NotificationsPage() {
+  const navigate = useNavigate();
   const { request } = useApi();
   const { subscribe } = useSSE();
   const { prefs: userPrefs } = useFormat();
@@ -96,13 +97,12 @@ export default function NotificationsPage() {
   const [filters, setFilters] = useState<LogFilters>({});
   const [refreshKey, setRefreshKey] = useState(0);
   const [timeRange, setTimeRange] = useState<TimeRange>("24h");
-  const [addChannelOpen, setAddChannelOpen] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number>(() => Date.now());
   const [, setNow] = useState<number>(() => Date.now());
 
   const endpointNameById = useMemo(() => {
     const m = new Map<string, string>();
-    for (const e of endpoints) m.set(e._id, e.name);
+    for (const e of endpoints) m.set(e.id, e.name);
     return m;
   }, [endpoints]);
 
@@ -246,8 +246,8 @@ export default function NotificationsPage() {
           c.enabled &&
           deriveChannelStatus(
             c,
-            byChannelStats.get(c._id),
-            p95ByChannel.get(c._id),
+            byChannelStats.get(c.id),
+            p95ByChannel.get(c.id),
           ) === "healthy",
       ).length,
     [channels, byChannelStats, p95ByChannel],
@@ -285,9 +285,7 @@ export default function NotificationsPage() {
           <Button
             size="sm"
             variant="outline"
-            onPress={() => {
-              setAddChannelOpen(true);
-            }}
+            onPress={() => navigate("/notifications/channels/new")}
           >
             <Icon icon="solar:add-circle-outline" width={16} />
             Add Channel
@@ -389,23 +387,6 @@ export default function NotificationsPage() {
         filters={filters}
         onFilterChange={handleFilterChange}
         refreshKey={refreshKey}
-      />
-
-      <ChannelEditModal
-        open={addChannelOpen}
-        channel={null}
-        onClose={() => {
-          setAddChannelOpen(false);
-        }}
-        onSaved={() => {
-          void loadChannels();
-          void loadStats();
-          setAddChannelOpen(false);
-        }}
-        onDeleted={() => {
-          void loadChannels();
-          setAddChannelOpen(false);
-        }}
       />
 
       <div className="h-6" />

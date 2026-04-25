@@ -56,10 +56,11 @@ export interface ChartBucket {
 export function channelTargetLabel(ch: ApiChannel): string {
   switch (ch.type) {
     case 'slack':
-      return ch.slackChannelId ?? ch.slackWorkspaceName ?? 'slack webhook'
+      try {
+        if (ch.slackWebhookUrl) return new URL(ch.slackWebhookUrl).hostname
+      } catch { /* ignore */ }
+      return 'slack webhook'
     case 'discord':
-      if (ch.discordChannelId) return ch.discordChannelId
-      if (ch.discordGuildId) return `guild ${ch.discordGuildId.slice(-4)}`
       return 'discord webhook'
     case 'email':
       return ch.emailRecipients?.[0] ?? ch.emailEndpoint ?? 'email'
@@ -137,11 +138,11 @@ export function deriveOverallState(
   const failureRate = total > 0 ? (stats?.failed ?? 0) / total : 0
 
   const statuses = active.map((c) =>
-    deriveChannelStatus(c, byChannel.get(c._id), p95ByChannel?.get(c._id)),
+    deriveChannelStatus(c, byChannel.get(c.id), p95ByChannel?.get(c.id)),
   )
   const failingCount = statuses.filter((s) => s === 'failing').length
   const activeWithTraffic = active.filter((c) => {
-    const cs = byChannel.get(c._id)
+    const cs = byChannel.get(c.id)
     return (cs?.sent ?? 0) + (cs?.failed ?? 0) > 0
   }).length
 
@@ -315,7 +316,6 @@ export const SUPPRESSION_COLORS: Record<string, string> = {
   rate_limit:       'var(--wd-danger)',
   muted:            'var(--wd-muted)',
   channel_disabled: 'var(--wd-muted)',
-  maintenance:      '#22d3ee',
   event_filter:     '#34d399',
   module_disabled:  'var(--wd-muted)',
   recovery_disabled:'var(--wd-muted)',

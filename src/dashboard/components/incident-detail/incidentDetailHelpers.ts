@@ -12,9 +12,9 @@ import type { ApiCheck, IncidentTimelineEvent } from "../../types/api";
 
 /**
  * Subset of fields the SSE `check:complete` event actually sends. This is
- * intentionally NOT ApiCheck — the event has no `_id`, no `duringMaintenance`,
- * no SSL/body-validation fields, because the broker forwards the raw check
- * engine event, not the saved DB document.
+ * intentionally NOT ApiCheck — the event has no `_id`, no SSL/body-validation
+ * fields, because the broker forwards the raw check engine event, not the
+ * saved DB document.
  */
 export interface LiveCheck {
   timestamp: string;
@@ -34,7 +34,7 @@ export interface CheckPoint {
   statusCode: number | null;
   errorMessage?: string | null;
   /** Present for persisted ApiCheck rows, absent for LiveCheck. */
-  _id?: string;
+  id?: string;
 }
 
 export interface TimelineMeta {
@@ -342,7 +342,7 @@ export function buildSignatures(checks: CheckPoint[]): IssueSignature[] {
 /** Normalize an ApiCheck into a CheckPoint (drops fields not in CheckPoint). */
 export function toCheckPoint(c: ApiCheck): CheckPoint {
   return {
-    _id: c._id,
+    id: c.id,
     timestamp: c.timestamp,
     status: c.status,
     responseTime: c.responseTime,

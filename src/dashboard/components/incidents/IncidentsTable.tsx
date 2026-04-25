@@ -140,13 +140,13 @@ export function IncidentsTable({
     const seen = new Set<string>()
     const merged: ApiIncident[] = []
     for (const inc of activeIncidents) {
-      if (seen.has(inc._id)) continue
-      seen.add(inc._id)
+      if (seen.has(inc.id)) continue
+      seen.add(inc.id)
       merged.push(inc)
     }
     for (const inc of filtered) {
-      if (seen.has(inc._id)) continue
-      seen.add(inc._id)
+      if (seen.has(inc.id)) continue
+      seen.add(inc.id)
       merged.push(inc)
     }
     return merged.sort((a, b) => {
@@ -159,7 +159,7 @@ export function IncidentsTable({
 
   const endpointOpts = useMemo(() => {
     const eps = [...endpointById.values()].sort((a, b) => a.name.localeCompare(b.name))
-    return [{ _id: 'all', name: 'All Endpoints' } as EndpointLite, ...eps]
+    return [{ id: 'all', name: 'All Endpoints' } as EndpointLite, ...eps]
   }, [endpointById])
 
   return (
@@ -202,11 +202,11 @@ export function IncidentsTable({
           <ScrollShadow orientation="vertical" size={10} className="flex-1 min-h-0">
             {displayed.map((inc) => (
               <TableRow
-                key={inc._id}
+                key={inc.id}
                 incident={inc}
                 endpoint={endpointById.get(inc.endpointId)}
                 channelById={channelById}
-                sparkline={sparklineByIncidentId.get(inc._id)}
+                sparkline={sparklineByIncidentId.get(inc.id)}
               />
             ))}
             {hasMore && (
@@ -237,7 +237,7 @@ function FilterBar({
   const selectedEndpointLabel =
     filters.endpointId === 'all'
       ? 'All Endpoints'
-      : endpointOpts.find((e) => e._id === filters.endpointId)?.name ?? 'Endpoint'
+      : endpointOpts.find((e) => e.id === filters.endpointId)?.name ?? 'Endpoint'
   const selectedSeverityLabel =
     SEVERITY_OPTIONS.find((o) => o.key === filters.severity)?.label ?? 'All Severities'
   const selectedCauseLabel =
@@ -290,7 +290,7 @@ function FilterBar({
           }}
         >
           {endpointOpts.map((e) => (
-            <Dropdown.Item key={e._id} id={e._id} className="!text-xs">
+            <Dropdown.Item key={e.id} id={e.id} className="!text-xs">
               {e.name}
             </Dropdown.Item>
           ))}
@@ -476,7 +476,7 @@ export const TableRow = memo(function TableRow({
     ? { cls: 'bg-wd-danger/15 text-wd-danger', label: 'Active' }
     : { cls: 'bg-wd-success/15 text-wd-success', label: 'Resolved' }
 
-  const go = () => navigate(`/incidents/${incident._id}`)
+  const go = () => navigate(`/incidents/${incident.id}`)
 
   return (
     <div
@@ -575,7 +575,7 @@ export const TableRow = memo(function TableRow({
         {channels.length > 0 ? (
           <span className="inline-flex items-center gap-1 min-w-0">
             {visibleChannels.map((c) => (
-              <ChannelChip key={c._id} channel={c} />
+              <ChannelChip key={c.id} channel={c} />
             ))}
             {overflowChannels > 0 && (
               <span className="text-[10px] font-mono text-wd-muted">+{overflowChannels}</span>
@@ -638,7 +638,7 @@ function ChannelChip({ channel }: { channel: ApiChannel }) {
 
 function RowMenu({ incident, onView }: { incident: ApiIncident; onView: () => void }) {
   const copyId = () => {
-    void navigator.clipboard?.writeText(incident._id).catch(() => {})
+    void navigator.clipboard?.writeText(incident.id).catch(() => {})
   }
   return (
     <Dropdown>

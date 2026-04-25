@@ -95,12 +95,12 @@ export function IncidentHero({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {activeIncidents.map((inc) => (
           <HeroCard
-            key={inc._id}
+            key={inc.id}
             incident={inc}
             endpoint={endpointById.get(inc.endpointId)}
             endpointState={endpointStateById.get(inc.endpointId)}
             channelById={channelById}
-            sparkline={sparklineByIncidentId.get(inc._id)}
+            sparkline={sparklineByIncidentId.get(inc.id)}
           />
         ))}
       </div>
@@ -233,9 +233,9 @@ const HeroCard = memo(function HeroCard({
     <div
       role="button"
       tabIndex={0}
-      onClick={() => navigate(`/incidents/${incident._id}`)}
+      onClick={() => navigate(`/incidents/${incident.id}`)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') navigate(`/incidents/${incident._id}`)
+        if (e.key === 'Enter') navigate(`/incidents/${incident.id}`)
       }}
       className={cn(
         'flex flex-col gap-2.5 px-5 py-4 border-r border-b border-wd-border/40 cursor-pointer transition-colors',
@@ -316,7 +316,7 @@ const HeroCard = memo(function HeroCard({
       {/* Row 5 — channel icons */}
       <div className="flex items-center pt-1 gap-1 min-w-0 flex-wrap">
         {channels.length > 0 ? (
-          channels.slice(0, 6).map((c) => <ChannelChip key={c._id} channel={c} />)
+          channels.slice(0, 6).map((c) => <ChannelChip key={c.id} channel={c} />)
         ) : (
           <span className="text-[10.5px] text-wd-muted/70 italic">No channels configured</span>
         )}

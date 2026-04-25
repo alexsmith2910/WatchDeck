@@ -16,7 +16,7 @@ interface NotificationFailedEvent {
 }
 interface DbDisconnectedEvent { error?: string; reason?: string }
 interface IncidentOpenedEvent {
-  incident?: { _id?: string; id?: string; endpointName?: string; endpointId?: string }
+  incident?: { id?: string; endpointName?: string; endpointId?: string }
   incidentId?: string
   endpointName?: string
 }
@@ -24,11 +24,6 @@ interface IncidentResolvedEvent {
   incidentId: string
   endpointName?: string
   durationSeconds?: number
-}
-interface MaintenanceEvent {
-  endpointId?: string
-  endpointName?: string
-  endsAt?: string
 }
 interface SystemEvent { module: string; message: string }
 
@@ -65,7 +60,7 @@ export function ToastBridge() {
     offs.push(subscribe('incident:opened', (d) => {
       const ev = asObject(d) as IncidentOpenedEvent | null
       const inc = ev?.incident as Record<string, unknown> | undefined
-      const id = (inc?._id ?? inc?.id ?? ev?.incidentId) as string | undefined
+      const id = (inc?.id ?? ev?.incidentId) as string | undefined
       if (!id) return
       toastPresets.incidentOpened({
         incidentId: id,
@@ -81,19 +76,6 @@ export function ToastBridge() {
         endpointName: ev.endpointName,
         durationSeconds: ev.durationSeconds,
       })
-    }))
-
-    offs.push(subscribe('maintenance:started', (d) => {
-      const ev = asObject(d) as MaintenanceEvent | null
-      toastPresets.maintenanceStarted(
-        ev?.endpointName,
-        ev?.endsAt ? new Date(ev.endsAt) : undefined,
-      )
-    }))
-
-    offs.push(subscribe('maintenance:ended', (d) => {
-      const ev = asObject(d) as MaintenanceEvent | null
-      toastPresets.maintenanceEnded(ev?.endpointName)
     }))
 
     offs.push(subscribe('system:warning', (d) => {

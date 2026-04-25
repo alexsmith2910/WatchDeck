@@ -53,7 +53,7 @@ function RelatedIncidentsBase({ incidents, endpointId }: Props) {
       ) : (
         <div className="flex flex-col gap-0.5">
           {visible.map((r) => (
-            <Row key={r._id} incident={r} />
+            <Row key={r.id} incident={r} />
           ))}
           {hidden > 0 && endpointId && (
             <Link
@@ -80,7 +80,7 @@ function Row({ incident }: { incident: ApiIncident }) {
 
   return (
     <Link
-      to={`/incidents/${incident._id}`}
+      to={`/incidents/${incident.id}`}
       className="grid grid-cols-[10px_1fr_11px] gap-2 items-start px-2 py-2 rounded-lg hover:bg-wd-surface-hover/60 transition-colors"
     >
       <span
@@ -92,7 +92,7 @@ function Row({ incident }: { incident: ApiIncident }) {
       <div className="min-w-0">
         <div className="inline-flex items-center gap-1.5 text-[11.5px]">
           <span className="font-mono text-[10.5px] text-wd-muted/80">
-            inc-{incident._id.slice(-5)}
+            inc-{incident.id.slice(-5)}
           </span>
           <span
             className={cn(

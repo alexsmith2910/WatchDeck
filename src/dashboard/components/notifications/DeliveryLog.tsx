@@ -103,7 +103,7 @@ export function DeliveryLog({
 
   const channelById = useMemo(() => {
     const m = new Map<string, ApiChannel>();
-    for (const c of channels) m.set(c._id, c);
+    for (const c of channels) m.set(c.id, c);
     return m;
   }, [channels]);
 
@@ -111,7 +111,7 @@ export function DeliveryLog({
     const opts: { id: string; label: string }[] = [
       { id: "all", label: "All endpoints" },
     ];
-    for (const e of endpoints) opts.push({ id: e._id, label: e.name });
+    for (const e of endpoints) opts.push({ id: e.id, label: e.name });
     return opts;
   }, [endpoints]);
 
@@ -119,7 +119,7 @@ export function DeliveryLog({
     const opts: { id: string; label: string }[] = [
       { id: "all", label: "All channels" },
     ];
-    for (const c of channels) opts.push({ id: c._id, label: c.name });
+    for (const c of channels) opts.push({ id: c.id, label: c.name });
     return opts;
   }, [channels]);
 
@@ -185,8 +185,8 @@ export function DeliveryLog({
       );
       const next = res.data?.data ?? [];
       setRows((prev) => {
-        const seen = new Set(prev.map((r) => r._id));
-        return [...prev, ...next.filter((r) => !seen.has(r._id))];
+        const seen = new Set(prev.map((r) => r.id));
+        return [...prev, ...next.filter((r) => !seen.has(r.id))];
       });
       setPagination(res.data?.pagination ?? null);
     } finally {
@@ -405,12 +405,12 @@ export function DeliveryLog({
                 const rowChannel = channelById.get(r.channelId) ?? null;
                 return (
                   <LogRow
-                    key={r._id}
+                    key={r.id}
                     row={r}
                     channel={rowChannel}
-                    expanded={expandedId === r._id}
+                    expanded={expandedId === r.id}
                     onToggle={() => {
-                      setExpandedId((prev) => (prev === r._id ? null : r._id));
+                      setExpandedId((prev) => (prev === r.id ? null : r.id));
                     }}
                   />
                 );

@@ -143,7 +143,7 @@ function NotifList({
         </button>
       )}
       {visible.map((n) => (
-        <NotifRow key={n._id} row={n} fmtTime={fmtTime} />
+        <NotifRow key={n.id} row={n} fmtTime={fmtTime} />
       ))}
       {expanded && rows.length > NOTIF_COLLAPSE_LIMIT && (
         <button

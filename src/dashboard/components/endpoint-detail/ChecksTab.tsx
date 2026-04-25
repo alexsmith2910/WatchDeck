@@ -65,7 +65,7 @@ function httpClassOf(check: ApiCheck): HttpClassFilter {
 }
 
 function ChecksTabBase({ endpoint, hourly24h }: Props) {
-  const endpointId = endpoint._id;
+  const endpointId = endpoint.id;
   const { request } = useApi();
   const { runtime } = useRuntimeInfo();
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
@@ -192,13 +192,13 @@ function ChecksTabBase({ endpoint, hourly24h }: Props) {
             <div className="divide-y divide-wd-border/40">
               {displayed.map((c) => (
                 <CheckRow
-                  key={c._id}
+                  key={c.id}
                   check={c}
                   endpoint={endpoint}
                   probeName={runtime.probeName}
-                  expanded={expandedId === c._id}
+                  expanded={expandedId === c.id}
                   onToggle={() =>
-                    setExpandedId((prev) => (prev === c._id ? null : c._id))
+                    setExpandedId((prev) => (prev === c.id ? null : c.id))
                   }
                 />
               ))}

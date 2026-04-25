@@ -44,7 +44,7 @@ const MUTE_PRESETS: Array<{ id: string; label: string; seconds: number | null }>
 ]
 
 const DEFAULT_PREFS: ApiNotificationPreferences = {
-  _id: 'global',
+  id: 'global',
   defaultSeverityFilter: 'warning+',
   defaultEventFilters: { sendOpen: true, sendResolved: true, sendEscalation: true },
   globalMuteUntil: null,

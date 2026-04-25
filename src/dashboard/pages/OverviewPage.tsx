@@ -119,7 +119,7 @@ export default function OverviewPage() {
   const effective = useMemo(() => {
     if (selectedIds.length === 0) return endpoints;
     const s = new Set(selectedIds);
-    return endpoints.filter((ep) => s.has(ep._id));
+    return endpoints.filter((ep) => s.has(ep.id));
   }, [endpoints, selectedIds]);
 
   // Stable key that only changes when the SET of effective endpoint ids
@@ -129,7 +129,7 @@ export default function OverviewPage() {
   const effectiveIdKey = useMemo(
     () =>
       effective
-        .map((e) => e._id)
+        .map((e) => e.id)
         .sort()
         .join(","),
     [effective],
@@ -160,7 +160,7 @@ export default function OverviewPage() {
       if (eps.length > 0) {
         const uptimeResults = await Promise.allSettled(
           eps.map((ep) =>
-            request<{ data: UptimeStats }>(`/endpoints/${ep._id}/uptime`).then(
+            request<{ data: UptimeStats }>(`/endpoints/${ep.id}/uptime`).then(
               (r) => r.data.data,
             ),
           ),
@@ -171,9 +171,9 @@ export default function OverviewPage() {
           const r = uptimeResults[i];
           if (r.status === "fulfilled") {
             const s = r.value;
-            map.set(ep._id, s["30d"] ?? s["7d"] ?? s["24h"] ?? null);
+            map.set(ep.id, s["30d"] ?? s["7d"] ?? s["24h"] ?? null);
           } else {
-            map.set(ep._id, null);
+            map.set(ep.id, null);
           }
         }
         setUptimeByEp(map);
@@ -269,7 +269,7 @@ export default function OverviewPage() {
       };
       setEndpoints((prev) =>
         prev.map((ep) =>
-          ep._id === evt.endpointId
+          ep.id === evt.endpointId
             ? {
                 ...ep,
                 lastStatus: evt.status as ApiEndpoint["lastStatus"],
@@ -296,7 +296,7 @@ export default function OverviewPage() {
   useEffect(() => {
     return subscribe("endpoint:deleted", (raw) => {
       const evt = raw as { endpointId: string };
-      setEndpoints((prev) => prev.filter((ep) => ep._id !== evt.endpointId));
+      setEndpoints((prev) => prev.filter((ep) => ep.id !== evt.endpointId));
     });
   }, [subscribe]);
 
@@ -312,7 +312,7 @@ export default function OverviewPage() {
     return subscribe("incident:resolved", (raw) => {
       const evt = raw as { incidentId: string };
       setActiveIncidents((prev) =>
-        prev.filter((i) => i._id !== evt.incidentId),
+        prev.filter((i) => i.id !== evt.incidentId),
       );
     });
   }, [subscribe]);
@@ -413,7 +413,7 @@ export default function OverviewPage() {
     if (responseTimes.size === 0) return null;
     const values: number[] = [];
     for (const ep of effective) {
-      const v = responseTimes.get(ep._id);
+      const v = responseTimes.get(ep.id);
       if (v != null) values.push(v);
     }
     if (values.length === 0) return null;
@@ -423,7 +423,7 @@ export default function OverviewPage() {
   const fleetUptime = useMemo(() => {
     const vals: number[] = [];
     for (const ep of effective) {
-      const v = uptimeByEp.get(ep._id);
+      const v = uptimeByEp.get(ep.id);
       if (v != null) vals.push(v);
     }
     if (vals.length === 0) return null;
@@ -539,9 +539,9 @@ export default function OverviewPage() {
   const sloItems = useMemo<SLOItem[]>(
     () =>
       effective.map((ep) => ({
-        id: ep._id,
+        id: ep.id,
         name: ep.name,
-        current: uptimeByEp.get(ep._id) ?? null,
+        current: uptimeByEp.get(ep.id) ?? null,
         sampleSize: 1,
       })),
     [effective, uptimeByEp],
@@ -579,7 +579,7 @@ export default function OverviewPage() {
   endpointsRef.current = endpoints;
   const endpointName = useCallback(
     (id: string): string =>
-      endpointsRef.current.find((e) => e._id === id)?.name ?? "endpoint",
+      endpointsRef.current.find((e) => e.id === id)?.name ?? "endpoint",
     [],
   );
 

@@ -139,7 +139,7 @@ export interface EndpointSparkline {
 // ---------------------------------------------------------------------------
 
 export interface EndpointLite {
-  _id: string
+  id: string
   name: string
   type?: 'http' | 'port'
   url?: string
