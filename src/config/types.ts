@@ -17,11 +17,8 @@ export interface WatchDeckConfig {
   maxBodyBytesToRead: number;
 
   modules: {
-    discord: boolean;
-    slack: boolean;
     sslChecks: boolean;
     portChecks: boolean;
-    bodyValidation: boolean;
   };
 
   defaults: {
@@ -41,7 +38,6 @@ export interface WatchDeckConfig {
       sendOpen: boolean;
       sendResolved: boolean;
       sendEscalation: boolean;
-      alertDuringMaintenance: boolean;
       retryOnFailure: boolean;
       retryBackoffMs: number[];
       coalescing: {
@@ -50,7 +46,6 @@ export interface WatchDeckConfig {
         minBurstCount: number;
         bypassSeverity: 'info' | 'warning' | 'critical';
       };
-      quietHours: { start: string; end: string; tz: string } | null;
       channelDefaults: {
         discord: { rateLimitPerMinute: number };
         slack: { rateLimitPerMinute: number };

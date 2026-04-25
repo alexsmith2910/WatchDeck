@@ -53,18 +53,6 @@ export const defaults = {
   // ---------------------------------------------------------------------------
   modules: {
     /**
-     * Enable Discord notification channel.
-     * Requires MX_DISCORD_TOKEN in environment.
-     */
-    discord: true,
-
-    /**
-     * Enable Slack notification channel.
-     * Requires MX_SLACK_TOKEN in environment.
-     */
-    slack: true,
-
-    /**
      * Enable TLS/SSL certificate expiry checks on HTTP endpoints.
      * Adds sslDaysRemaining to check results and fires alerts at sslWarningDays threshold.
      */
@@ -75,12 +63,6 @@ export const defaults = {
      * Disabling removes port check scheduling and API support.
      */
     portChecks: true,
-
-    /**
-     * Enable response body validation rules on HTTP endpoints.
-     * Adds bodyValidation result to every check.
-     */
-    bodyValidation: true,
   },
 
   // ---------------------------------------------------------------------------
@@ -176,8 +158,6 @@ export const defaults = {
       sendResolved: true,
       /** Whether the escalation dispatch fires by default. */
       sendEscalation: true,
-      /** If false, dispatches are suppressed during an endpoint's maintenance window. */
-      alertDuringMaintenance: false,
 
       /**
        * Retry failed provider calls per the backoff schedule below.
@@ -207,12 +187,6 @@ export const defaults = {
         /** Severity that bypasses the coalescing buffer (always immediate). */
         bypassSeverity: 'critical' as 'info' | 'warning' | 'critical',
       },
-
-      /**
-       * Global quiet hours. Set to null to disable; channels can still set
-       * their own quiet hours on top.
-       */
-      quietHours: null as { start: string; end: string; tz: string } | null,
 
       /**
        * Per-channel-type rate limit defaults (can be overridden per-channel).
