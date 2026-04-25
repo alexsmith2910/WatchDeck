@@ -5,7 +5,9 @@ export default defineConfig({
   format: ['esm'],
   target: 'node20',
   outDir: 'dist',
-  clean: true,
+  // Don't wipe dist — the `build` npm script handles targeted cleans so the
+  // dashboard output (produced by `build:dashboard`) isn't clobbered.
+  clean: false,
   sourcemap: true,
   shims: false,
 })

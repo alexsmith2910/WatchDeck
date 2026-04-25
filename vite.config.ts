@@ -7,7 +7,10 @@ export default defineConfig({
   root: 'src/dashboard',
   build: {
     outDir: '../../dist/dashboard',
-    emptyOutDir: true,
+    // Stale hashed assets accumulate but don't break anything (index.html
+    // always points at the freshest hash). The npm `build:dashboard` script
+    // rimrafs dist/dashboard explicitly so clean builds stay clean.
+    emptyOutDir: false,
   },
   server: {
     port: 5173,
