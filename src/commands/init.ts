@@ -10,6 +10,7 @@ const TEMPLATES_DIR = path.resolve(__dirname, '../templates')
 
 const CONFIG_FILE = 'watchdeck.config.js'
 const ENV_EXAMPLE_FILE = '.env.example'
+const MOUNTED_ROUTE_FILE = 'watchdeck-dashboard.example.tsx'
 
 interface InitOptions {
   force: boolean
@@ -186,12 +187,19 @@ export async function runInit(options: InitOptions): Promise<void> {
     encryptionKey: generateEncryptionKey(),
   })
 
+  const mountedTip =
+    dashboardMode === 'mounted'
+      ? `\n  4. Copy ${chalk.cyan(MOUNTED_ROUTE_FILE)} into your app's route tree (e.g. ${chalk.dim('app/admin/watchdeck/page.tsx')}) and import ${chalk.cyan('watchdeck/dashboard/styles.css')} once at the layout level`
+      : ''
+
   p.outro(
     chalk.green('Setup complete!') +
       `\n\n  ${chalk.dim('Next steps:')}` +
       `\n  1. Copy ${chalk.cyan(ENV_EXAMPLE_FILE)} to ${chalk.cyan('.env')} and fill in your values` +
       `\n  2. Run ${chalk.cyan('watchdeck start')} to launch the server` +
-      `\n  3. Open the dashboard and add notification channels under Notifications → Add Channel\n`,
+      `\n  3. Open the dashboard and add notification channels under Notifications → Add Channel` +
+      mountedTip +
+      '\n',
   )
 }
 
@@ -233,4 +241,18 @@ function writeFiles(vars: TemplateVars): void {
 
   fs.writeFileSync(path.resolve(process.cwd(), CONFIG_FILE), configContent, 'utf8')
   fs.writeFileSync(path.resolve(process.cwd(), ENV_EXAMPLE_FILE), envContent, 'utf8')
+
+  // Mounted mode: drop a starter Next.js route the user can copy into their
+  // own app/ tree. Standalone users don't need this — Fastify serves the SPA.
+  if (vars.dashboardMode === 'mounted') {
+    const mountedTemplate = fs.readFileSync(
+      path.join(TEMPLATES_DIR, 'mounted-route.template.tsx'),
+      'utf8',
+    )
+    fs.writeFileSync(
+      path.resolve(process.cwd(), MOUNTED_ROUTE_FILE),
+      mountedTemplate,
+      'utf8',
+    )
+  }
 }

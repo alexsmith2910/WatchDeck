@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { getApiBase } from '../lib/apiBase'
+import { getApiBase, getAuthHeaders } from '../lib/apiBase'
 
 interface ApiOptions extends Omit<RequestInit, 'body'> {
   body?: unknown
@@ -39,11 +39,14 @@ export function useApi() {
     }
 
     const init: RequestInit = { ...rest, signal: controller.signal }
+    // Auth headers are resolved per request so token refresh works without
+    // re-mounting the SPA. Caller-supplied headers win on collision.
+    const auth = getAuthHeaders()
     if (body !== undefined) {
-      init.headers = { 'Content-Type': 'application/json', ...extraHeaders }
+      init.headers = { 'Content-Type': 'application/json', ...auth, ...extraHeaders }
       init.body = JSON.stringify(body)
-    } else if (extraHeaders) {
-      init.headers = extraHeaders
+    } else {
+      init.headers = { ...auth, ...extraHeaders }
     }
 
     try {
