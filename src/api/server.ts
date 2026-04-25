@@ -21,7 +21,6 @@ import { endpointsRoutes } from './routes/endpoints.js'
 import { checksRoutes } from './routes/checks.js'
 import { incidentsRoutes } from './routes/incidents.js'
 import { notificationsRoutes } from './routes/notifications.js'
-import { maintenanceRoutes } from './routes/maintenance.js'
 import { settingsRoutes } from './routes/settings.js'
 import { healthProbePublicRoutes, healthProbeAuthedRoutes } from './routes/healthProbes.js'
 import type { StorageAdapter } from '../storage/adapter.js'
@@ -128,7 +127,6 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
     await app.register(checksRoutes(ctx), { prefix: base })
     await app.register(incidentsRoutes(ctx), { prefix: base })
     await app.register(notificationsRoutes(ctx), { prefix: base })
-    await app.register(maintenanceRoutes(ctx), { prefix: base })
     await app.register(settingsRoutes(ctx), { prefix: base })
     await app.register(healthProbeAuthedRoutes(ctx), { prefix: base })
     await app.register(sseRoutes(ctx), { prefix: base })
