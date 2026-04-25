@@ -2,19 +2,13 @@ import { useEffect, useState } from 'react'
 import { useApi } from './useApi'
 
 export interface ModulesState {
-  discord: boolean
-  slack: boolean
   sslChecks: boolean
   portChecks: boolean
-  bodyValidation: boolean
 }
 
 const DEFAULT_MODULES: ModulesState = {
-  discord: true,
-  slack: true,
   sslChecks: true,
   portChecks: true,
-  bodyValidation: true,
 }
 
 /**

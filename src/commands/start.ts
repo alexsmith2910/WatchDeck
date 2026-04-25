@@ -73,6 +73,28 @@ function spinner(text: string, silent: boolean): Ora {
 }
 
 /**
+ * Render `config.modules` as a single-line check/cross list for the boot log.
+ * Each module shows its enabled state up front so `Modules ssl-checks ✓ ·
+ * port-checks ✗` reads correctly even when scanned. Renders a fixed list of
+ * known module keys so legacy fields lingering in older `watchdeck.config.js`
+ * files don't pollute the line.
+ */
+const KNOWN_MODULES = ['sslChecks', 'portChecks'] as const
+
+function formatModuleStatus(modules: Record<string, boolean>): string {
+  return KNOWN_MODULES
+    .map((key) => {
+      const on = modules[key] !== false
+      // sslChecks → ssl-checks
+      const label = key.replace(/([A-Z])/g, '-$1').toLowerCase()
+      return on
+        ? `${label} ${chalk.green('✓')}`
+        : chalk.dim(`${label} ${chalk.red('✗')}`)
+    })
+    .join(chalk.dim(' · '))
+}
+
+/**
  * Register process-level guards so one escaping error in a module can't
  * tear the whole monitor down. Idempotent — safe to call more than once
  * if the start command is re-entered (e.g. during tests).
@@ -376,13 +398,13 @@ export async function runStart(options: StartOptions): Promise<void> {
       chalk.bold(`Scheduler running`) +
         chalk.dim(`  ${scheduler.queueSize} endpoint${scheduler.queueSize === 1 ? '' : 's'} queued`),
     )
-    if (!silent && verbose) {
-      subItem(
-        `concurrency  max ${config.rateLimits.maxConcurrentChecks}  ·  per-host gap ${config.rateLimits.perHostMinGap}s`,
-      )
-      subItem(
-        `ssl checks  ${config.modules.sslChecks ? 'enabled' : 'disabled'}  ·  port checks  ${config.modules.portChecks ? 'enabled' : 'disabled'}`,
-      )
+    if (!silent) {
+      ok('Modules', formatModuleStatus(config.modules))
+      if (verbose) {
+        subItem(
+          `concurrency  max ${config.rateLimits.maxConcurrentChecks}  ·  per-host gap ${config.rateLimits.perHostMinGap}s`,
+        )
+      }
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

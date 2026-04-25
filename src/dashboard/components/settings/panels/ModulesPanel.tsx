@@ -19,18 +19,6 @@ interface ModuleInfo {
 
 const MODULES: ModuleInfo[] = [
   {
-    key: 'discord',
-    label: 'Discord',
-    description: 'Send incident alerts via Discord webhooks. Requires MX_DISCORD_TOKEN.',
-    icon: 'ic:baseline-discord',
-  },
-  {
-    key: 'slack',
-    label: 'Slack',
-    description: 'Send incident alerts via Slack webhooks. Requires MX_SLACK_TOKEN.',
-    icon: 'logos:slack-icon',
-  },
-  {
     key: 'sslChecks',
     label: 'SSL checks',
     description: 'Capture TLS certificate expiry on every HTTPS probe.',
@@ -41,12 +29,6 @@ const MODULES: ModuleInfo[] = [
     label: 'Port checks',
     description: 'TCP connection-attempt endpoints (type: "port").',
     icon: 'solar:lan-connection-linear',
-  },
-  {
-    key: 'bodyValidation',
-    label: 'Body validation',
-    description: 'Response-body validation rules on HTTP endpoints.',
-    icon: 'solar:document-text-linear',
   },
 ]
 
