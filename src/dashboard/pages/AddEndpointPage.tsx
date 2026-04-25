@@ -24,6 +24,7 @@ import {
   AssertionEditorRow,
   AssertionPresetsRow,
   AssertionRulesOfUse,
+  AssertionTestResults,
   CHECK_INTERVAL_PRESETS,
   EmptyAssertionsHint,
   ESCALATION_DELAY_PRESETS,
@@ -47,6 +48,7 @@ import {
   withCustomOption,
   type AssertionDraft,
   type AssertionKind,
+  type TestResponse,
 } from "../components/endpoint-detail/SettingsTab";
 
 type Section = "general" | "monitoring" | "assertions" | "alerts";
@@ -166,6 +168,60 @@ export default function AddEndpointPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // ── Test probe ──
+  // Fires a dry-run probe + assertion eval against the draft config. Hits the
+  // Add-flow-specific /endpoints/test-probe route so nothing is persisted and
+  // no check is saved to history.
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestResponse | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+
+  const canTest = type === "http" && urlError == null && url.trim() !== "";
+
+  const runTest = useCallback(async () => {
+    if (!canTest) return;
+    setTesting(true);
+    setTestError(null);
+    const headers: Record<string, string> = {};
+    for (const [k, v] of headerRows) {
+      const key = k.trim();
+      if (key) headers[key] = v;
+    }
+    const body: Record<string, unknown> = {
+      url: url.trim(),
+      method,
+      headers,
+      expectedStatusCodes: statusCodes,
+      timeout: timeoutMs,
+      latencyThreshold,
+      sslWarningDays,
+      ...(assertions.length > 0 && { assertions: stripIds(assertions) }),
+    };
+    const res = await request<{ data: TestResponse }>("/endpoints/test-probe", {
+      method: "POST",
+      body,
+    });
+    setTesting(false);
+    if (res.status < 400 && res.data?.data) {
+      setTestResult(res.data.data);
+    } else {
+      const e = res.data as unknown as { message?: string };
+      setTestError(e.message ?? "Test failed");
+      setTestResult(null);
+    }
+  }, [
+    canTest,
+    url,
+    method,
+    headerRows,
+    statusCodes,
+    timeoutMs,
+    latencyThreshold,
+    sslWarningDays,
+    assertions,
+    request,
+  ]);
+
   const submit = useCallback(async () => {
     if (!canSubmit) {
       // Flip to the section that has the first problem so the user sees
@@ -215,7 +271,7 @@ export default function AddEndpointPage() {
     });
     setSubmitting(false);
     if (res.status < 400 && res.data.data) {
-      navigate(`/endpoints/${res.data.data._id}`);
+      navigate(`/endpoints/${res.data.data.id}`);
     } else {
       const e = res.data as unknown as { message?: string };
       setSubmitError(e.message ?? "Failed to create endpoint");
@@ -253,7 +309,7 @@ export default function AddEndpointPage() {
   return (
     <div className="flex flex-col min-h-full">
       {/* Breadcrumb header */}
-      <div className="flex items-center gap-2.5 px-6 pt-6 pb-4">
+      <div className="w-full max-w-6xl mx-auto flex items-center gap-2.5 px-6 pt-6 pb-4">
         <button
           onClick={() => navigate("/endpoints")}
           className="inline-flex items-center gap-1.5 text-[11.5px] text-wd-muted hover:text-foreground transition-colors cursor-pointer"
@@ -272,7 +328,7 @@ export default function AddEndpointPage() {
       </div>
 
       {/* Main grid */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-5 px-6 pb-6">
+      <div className="w-full max-w-6xl mx-auto flex-1 grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-5 px-6 pb-6">
         <nav className="rounded-xl border border-wd-border/50 bg-wd-surface p-1 self-start">
           {SECTIONS.map((s) => {
             const active = section === s.key;
@@ -359,6 +415,12 @@ export default function AddEndpointPage() {
               isHttps={isHttps}
               sslChecksDisabled={sslChecksDisabled}
               onJumpToGeneral={() => setSection("general")}
+              canTest={canTest}
+              testing={testing}
+              testResult={testResult}
+              testError={testError}
+              onRunTest={runTest}
+              onDismissTestResult={() => setTestResult(null)}
             />
           </div>
           <div className={cn(section !== "alerts" && "hidden")}>
@@ -380,44 +442,48 @@ export default function AddEndpointPage() {
       </div>
 
       {/* Sticky footer — keeps Create reachable regardless of which section
-          the user is in, and shows the overall submit state in one place. */}
-      <div className="sticky bottom-0 bg-wd-surface/95 backdrop-blur border-t border-wd-border/50 px-6 py-3 flex items-center gap-3 flex-wrap">
-        {generalError && (
-          <span className="inline-flex items-center gap-1 text-[11.5px] text-wd-danger">
-            <Icon icon="solar:danger-triangle-outline" width={13} />
-            {generalError}
-          </span>
-        )}
-        {submitError && (
-          <span className="inline-flex items-center gap-1 text-[11.5px] text-wd-danger">
-            <Icon icon="solar:danger-triangle-outline" width={13} />
-            {submitError}
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-3">
-          <Button
-            size="sm"
-            variant="outline"
-            className="!rounded-lg"
-            onPress={() => navigate("/endpoints")}
-            isDisabled={submitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="!rounded-lg !border-wd-primary/50 !text-wd-primary hover:!bg-wd-primary/10"
-            onPress={submit}
-            isDisabled={submitting || !canSubmit}
-          >
-            {submitting ? (
-              <Spinner size="sm" />
-            ) : (
-              <Icon icon="solar:add-circle-outline" width={16} />
-            )}
-            Create endpoint
-          </Button>
+          the user is in, and shows the overall submit state in one place.
+          Outer spans full page width so the border-t reads as a page rule;
+          inner is capped to match the grid above. */}
+      <div className="sticky bottom-0 bg-wd-surface/95 backdrop-blur border-t border-wd-border/50">
+        <div className="w-full max-w-6xl mx-auto px-6 py-3 flex items-center gap-3 flex-wrap">
+          {generalError && (
+            <span className="inline-flex items-center gap-1 text-[11.5px] text-wd-danger">
+              <Icon icon="solar:danger-triangle-outline" width={13} />
+              {generalError}
+            </span>
+          )}
+          {submitError && (
+            <span className="inline-flex items-center gap-1 text-[11.5px] text-wd-danger">
+              <Icon icon="solar:danger-triangle-outline" width={13} />
+              {submitError}
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-3">
+            <Button
+              size="sm"
+              variant="outline"
+              className="!rounded-lg"
+              onPress={() => navigate("/endpoints")}
+              isDisabled={submitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="!rounded-lg !border-wd-primary/50 !text-wd-primary hover:!bg-wd-primary/10"
+              onPress={submit}
+              isDisabled={submitting || !canSubmit}
+            >
+              {submitting ? (
+                <Spinner size="sm" />
+              ) : (
+                <Icon icon="solar:add-circle-outline" width={16} />
+              )}
+              Create endpoint
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -843,6 +909,12 @@ function AssertionsSection({
   isHttps,
   sslChecksDisabled,
   onJumpToGeneral,
+  canTest,
+  testing,
+  testResult,
+  testError,
+  onRunTest,
+  onDismissTestResult,
 }: {
   assertions: AssertionDraft[];
   setAssertions: React.Dispatch<React.SetStateAction<AssertionDraft[]>>;
@@ -851,6 +923,12 @@ function AssertionsSection({
   isHttps: boolean;
   sslChecksDisabled: boolean;
   onJumpToGeneral: () => void;
+  canTest: boolean;
+  testing: boolean;
+  testResult: TestResponse | null;
+  testError: string | null;
+  onRunTest: () => void;
+  onDismissTestResult: () => void;
 }) {
   const atCap = assertions.length >= MAX_ASSERTIONS;
 
@@ -961,6 +1039,43 @@ function AssertionsSection({
         }
       />
 
+      <div className="flex items-center gap-3 pt-4 border-t border-wd-border/40 flex-wrap">
+        <Button
+          size="sm"
+          variant="outline"
+          className="!rounded-lg"
+          onPress={onRunTest}
+          isDisabled={!canTest || testing}
+        >
+          {testing ? (
+            <Spinner size="sm" />
+          ) : (
+            <Icon icon="solar:play-circle-outline" width={16} />
+          )}
+          Test now
+        </Button>
+        <span className="inline-flex items-center gap-1 text-[10.5px] text-wd-muted">
+          <Icon icon="solar:info-circle-outline" width={11} />
+          {canTest
+            ? "Runs one probe against the draft — no check is saved to history."
+            : "Enter a valid URL in General to enable testing."}
+        </span>
+      </div>
+
+      {testError && (
+        <div className="rounded-lg border border-wd-danger/40 bg-wd-danger/5 px-3 py-2 text-[11.5px] text-wd-danger inline-flex items-center gap-2">
+          <Icon icon="solar:danger-triangle-outline" width={13} />
+          {testError}
+        </div>
+      )}
+
+      {testResult && (
+        <AssertionTestResults
+          result={testResult}
+          onDismiss={onDismissTestResult}
+        />
+      )}
+
       <AssertionRulesOfUse />
     </div>
   );
@@ -1009,7 +1124,7 @@ function AlertsSection({
   const escalationOptions = useMemo(
     () => [
       { id: NONE_SENTINEL, label: "— none —" },
-      ...channels.map((c) => ({ id: c._id, label: `${c.name} · ${c.type}` })),
+      ...channels.map((c) => ({ id: c.id, label: `${c.name} · ${c.type}` })),
     ],
     [channels],
   );
@@ -1095,11 +1210,11 @@ function AlertsSection({
         ) : (
           <div className="flex flex-wrap gap-2">
             {channels.map((c) => {
-              const on = notificationChannelIds.includes(c._id);
+              const on = notificationChannelIds.includes(c.id);
               return (
                 <button
-                  key={c._id}
-                  onClick={() => toggleChannel(c._id)}
+                  key={c.id}
+                  onClick={() => toggleChannel(c.id)}
                   className={cn(
                     "inline-flex items-center gap-2 px-3 h-8 rounded-lg border text-[12px] transition-colors cursor-pointer",
                     on

@@ -362,7 +362,7 @@ function GeneralPanel({
       body.port = Number(port);
     }
     const res = await request<{ data: ApiEndpoint }>(
-      `/endpoints/${endpoint._id}`,
+      `/endpoints/${endpoint.id}`,
       {
         method: "PUT",
         body,
@@ -395,17 +395,17 @@ function GeneralPanel({
     setCloning(true);
     setCloneError(null);
     const res = await request<{ data: ApiEndpoint }>(
-      `/endpoints/${endpoint._id}/clone`,
+      `/endpoints/${endpoint.id}/clone`,
       { method: "POST" },
     );
     setCloning(false);
     if (res.status < 400 && res.data.data) {
-      navigate(`/endpoints/${res.data.data._id}`);
+      navigate(`/endpoints/${res.data.data.id}`);
     } else {
       const e = res.data as unknown as { message?: string };
       setCloneError(e.message ?? "Failed to clone endpoint");
     }
-  }, [endpoint._id, request, navigate]);
+  }, [endpoint.id, request, navigate]);
 
   return (
     <div className="rounded-xl border border-wd-border/50 bg-wd-surface p-5">
@@ -1185,7 +1185,7 @@ function MonitoringPanel({
       recoveryThreshold,
     };
     const res = await request<{ data: ApiEndpoint }>(
-      `/endpoints/${endpoint._id}/settings`,
+      `/endpoints/${endpoint.id}/settings`,
       {
         method: "PUT",
         body,
@@ -1238,7 +1238,7 @@ function MonitoringPanel({
     sslWarningDays,
     failureThreshold,
     recoveryThreshold,
-    endpoint._id,
+    endpoint.id,
     request,
     onEndpointUpdated,
   ]);
@@ -1416,7 +1416,7 @@ function AlertsPanel({
   const escalationOptions = useMemo(
     () => [
       { id: NONE_SENTINEL, label: "— none —" },
-      ...channels.map((c) => ({ id: c._id, label: `${c.name} · ${c.type}` })),
+      ...channels.map((c) => ({ id: c.id, label: `${c.name} · ${c.type}` })),
     ],
     [channels],
   );
@@ -1454,7 +1454,7 @@ function AlertsPanel({
       notificationChannelIds,
     };
     const res = await request<{ data: ApiEndpoint }>(
-      `/endpoints/${endpoint._id}/settings`,
+      `/endpoints/${endpoint.id}/settings`,
       { method: "PUT", body },
     );
     setSaving(false);
@@ -1472,7 +1472,7 @@ function AlertsPanel({
     escalationDelay,
     escalationChannelId,
     notificationChannelIds,
-    endpoint._id,
+    endpoint.id,
     request,
     onEndpointUpdated,
   ]);
@@ -1557,11 +1557,11 @@ function AlertsPanel({
         ) : (
           <div className="flex flex-wrap gap-2">
             {channels.map((c) => {
-              const on = notificationChannelIds.includes(c._id);
+              const on = notificationChannelIds.includes(c.id);
               return (
                 <button
-                  key={c._id}
-                  onClick={() => toggleChannel(c._id)}
+                  key={c.id}
+                  onClick={() => toggleChannel(c.id)}
                   className={cn(
                     "inline-flex items-center gap-2 px-3 h-8 rounded-lg border text-[12px] transition-colors cursor-pointer",
                     on
@@ -1853,7 +1853,7 @@ const PRESET_ASSERTIONS: Array<{ label: string; build: () => AssertionDraft }> =
   },
 ];
 
-interface TestResponse {
+export interface TestResponse {
   baseStatus: "healthy" | "degraded" | "down";
   baseReason?: string | null;
   probe: {
@@ -1930,7 +1930,7 @@ function AssertionsPanel({
     setSaveError(null);
     const payload = stripIds(assertions);
     const res = await request<{ data: ApiEndpoint }>(
-      `/endpoints/${endpoint._id}/settings`,
+      `/endpoints/${endpoint.id}/settings`,
       { method: "PUT", body: { assertions: payload } },
     );
     setSaving(false);
@@ -1942,14 +1942,14 @@ function AssertionsPanel({
       const e = res.data as unknown as { message?: string };
       setSaveError(e.message ?? "Failed to save");
     }
-  }, [assertions, endpoint._id, request, onEndpointUpdated]);
+  }, [assertions, endpoint.id, request, onEndpointUpdated]);
 
   const runTest = useCallback(async () => {
     setTesting(true);
     setTestError(null);
     const payload = stripIds(assertions);
     const res = await request<{ data: TestResponse }>(
-      `/endpoints/${endpoint._id}/test-assertions`,
+      `/endpoints/${endpoint.id}/test-assertions`,
       { method: "POST", body: { assertions: payload } },
     );
     setTesting(false);
@@ -1960,7 +1960,7 @@ function AssertionsPanel({
       setTestError(e.message ?? "Test failed");
       setTestResult(null);
     }
-  }, [assertions, endpoint._id, request]);
+  }, [assertions, endpoint.id, request]);
 
   const statusCodes = endpoint.expectedStatusCodes ?? [200];
 
@@ -2123,7 +2123,7 @@ function AssertionsPanel({
 // checks and test runs read the same.
 // ---------------------------------------------------------------------------
 
-function AssertionTestResults({
+export function AssertionTestResults({
   result,
   onDismiss,
 }: {
@@ -2805,24 +2805,24 @@ function DangerPanel({
   const togglePause = useCallback(async () => {
     setPausing(true);
     const res = await request<{ data: ApiEndpoint }>(
-      `/endpoints/${endpoint._id}/toggle`,
+      `/endpoints/${endpoint.id}/toggle`,
       {
         method: "PATCH",
       },
     );
     if (res.status < 400 && res.data.data) onEndpointUpdated(res.data.data);
     setPausing(false);
-  }, [endpoint._id, request, onEndpointUpdated]);
+  }, [endpoint.id, request, onEndpointUpdated]);
 
   const destroy = useCallback(async () => {
     if (confirm !== endpoint.name) return;
     setDeleting(true);
-    const res = await request(`/endpoints/${endpoint._id}`, {
+    const res = await request(`/endpoints/${endpoint.id}`, {
       method: "DELETE",
     });
     setDeleting(false);
     if (res.status < 400) onDeleted();
-  }, [confirm, endpoint._id, endpoint.name, request, onDeleted]);
+  }, [confirm, endpoint.id, endpoint.name, request, onDeleted]);
 
   const paused = endpoint.status === "paused";
   return (
