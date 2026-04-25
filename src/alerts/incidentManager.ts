@@ -18,7 +18,6 @@
  * kept fresh via endpoint:created / endpoint:updated / endpoint:deleted events.
  */
 
-import { ObjectId } from 'mongodb'
 import { eventBus } from '../core/eventBus.js'
 import type { StorageAdapter } from '../storage/adapter.js'
 import type { IncidentDoc } from '../storage/types.js'
@@ -52,10 +51,10 @@ export class IncidentManager {
       this.adapter.listEnabledEndpoints(),
     ])
     for (const inc of active) {
-      this.activeIncidents.set(inc.endpointId.toString(), inc._id.toString())
+      this.activeIncidents.set(inc.endpointId.toString(), inc.id.toString())
     }
     for (const ep of endpoints) {
-      this.endpointMeta.set(ep._id.toString(), {
+      this.endpointMeta.set(ep.id.toString(), {
         failureThreshold: ep.failureThreshold,
         recoveryThreshold: ep.recoveryThreshold,
         consecutiveFailures: ep.consecutiveFailures,
@@ -76,7 +75,7 @@ export class IncidentManager {
       'endpoint:created',
       ({ endpoint }) => {
         if (endpoint.status === 'archived' || !endpoint.enabled) return
-        this.endpointMeta.set(endpoint._id.toString(), {
+        this.endpointMeta.set(endpoint.id.toString(), {
           failureThreshold: endpoint.failureThreshold,
           recoveryThreshold: endpoint.recoveryThreshold,
           consecutiveFailures: endpoint.consecutiveFailures,
@@ -242,8 +241,8 @@ export class IncidentManager {
     const cause = status === 'down' ? 'endpoint_down' : 'endpoint_degraded'
     const causeDetail = errorMessage ?? `Endpoint is ${status}`
 
-    const incident: Omit<IncidentDoc, '_id' | 'createdAt' | 'updatedAt'> = {
-      endpointId: new ObjectId(endpointId),
+    const incident: Omit<IncidentDoc, 'id' | 'createdAt' | 'updatedAt'> = {
+      endpointId,
       status: 'active',
       cause,
       causeDetail,
@@ -253,7 +252,7 @@ export class IncidentManager {
     }
 
     const doc = await this.adapter.createIncident(incident)
-    const incidentId = doc._id.toString()
+    const incidentId = doc.id.toString()
 
     this.activeIncidents.set(endpointId, incidentId)
 

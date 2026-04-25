@@ -73,7 +73,7 @@ function severityFor(subsystem: string, status: 'down' | 'degraded'): InternalIn
 
 function toDoc(inc: InternalIncident): InternalIncidentDoc {
   const doc: InternalIncidentDoc = {
-    _id: inc.id,
+    id: inc.id,
     subsystem: inc.subsystem,
     severity: inc.severity,
     status: inc.status,
@@ -100,7 +100,7 @@ function toDoc(inc: InternalIncident): InternalIncidentDoc {
 
 function fromDoc(d: InternalIncidentDoc): InternalIncident {
   const inc: InternalIncident = {
-    id: d._id,
+    id: d.id,
     subsystem: d.subsystem,
     severity: d.severity,
     status: d.status,

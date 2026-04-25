@@ -7,7 +7,6 @@
  * Idempotent — re-running for the same day overwrites with the same data.
  */
 
-import { ObjectId } from 'mongodb'
 import type { StorageAdapter } from '../storage/adapter.js'
 import type { DailySummaryDoc, HourlySummaryDoc } from '../storage/types.js'
 
@@ -56,7 +55,7 @@ export function buildDailySummary(
   endpointId: string,
   date: Date,
   hourlies: HourlySummaryDoc[],
-): Omit<DailySummaryDoc, '_id' | 'createdAt'> {
+): Omit<DailySummaryDoc, 'id' | 'createdAt'> {
   let totalChecks = 0
   let totalSuccess = 0
   let sumResponseTime = 0
@@ -97,7 +96,7 @@ export function buildDailySummary(
     totalChecks === 0 ? 0 : Math.round((totalFails / totalChecks) * 24 * 60 * 100) / 100
 
   return {
-    endpointId: new ObjectId(endpointId),
+    endpointId,
     date,
     totalChecks,
     uptimePercent,

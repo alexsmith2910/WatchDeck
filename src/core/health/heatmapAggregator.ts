@@ -201,10 +201,6 @@ const EVENT_TO_SUBSYSTEMS: { [K in keyof EventMap]?: readonly SubsystemId[] } = 
   // Aggregation — aggregator reads/writes DB in bulk.
   'aggregation:run':     ['aggregator', 'db', 'eventbus', 'sse'],
 
-  // Maintenance windows — persisted to DB, propagated to UI.
-  'maintenance:started': ['db', 'eventbus', 'sse'],
-  'maintenance:ended':   ['db', 'eventbus', 'sse'],
-
   // Replay — buffer draining back to DB after an outage.
   'replay:progress':     ['buffer', 'db', 'eventbus', 'sse'],
 

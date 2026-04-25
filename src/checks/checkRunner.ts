@@ -130,7 +130,7 @@ async function runHttpEndpointCheck(
 
   eventBus.emit('check:complete', {
     timestamp,
-    endpointId: endpoint._id.toString(),
+    endpointId: endpoint.id.toString(),
     status: finalStatus,
     responseTime,
     statusCode: result.statusCode,
@@ -183,7 +183,7 @@ async function runPortEndpointCheck(endpoint: EndpointDoc, timestamp: Date): Pro
 
   eventBus.emit('check:complete', {
     timestamp,
-    endpointId: endpoint._id.toString(),
+    endpointId: endpoint.id.toString(),
     status: eval_.status,
     responseTime,
     statusCode: null,

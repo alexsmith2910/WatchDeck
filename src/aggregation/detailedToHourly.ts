@@ -7,7 +7,6 @@
  * Idempotent — re-running for the same hour overwrites with the same data.
  */
 
-import { ObjectId } from 'mongodb'
 import type { StorageAdapter } from '../storage/adapter.js'
 import type { CheckDoc, HourlySummaryDoc } from '../storage/types.js'
 
@@ -47,7 +46,7 @@ export function buildHourlySummary(
   endpointId: string,
   hour: Date,
   checks: CheckDoc[],
-): Omit<HourlySummaryDoc, '_id' | 'createdAt'> {
+): Omit<HourlySummaryDoc, 'id' | 'createdAt'> {
   const totalChecks = checks.length
   let successCount = 0
   let failCount = 0
@@ -83,7 +82,7 @@ export function buildHourlySummary(
       errorTypes[key] = (errorTypes[key] ?? 0) + 1
     }
 
-    if (check.duringMaintenance === false && check.status === 'down') {
+    if (check.status === 'down') {
       hadActiveIncident = true
     }
   }
@@ -100,7 +99,7 @@ export function buildHourlySummary(
   const p99ResponseTime = responseTimes[p99Index] ?? 0
 
   return {
-    endpointId: new ObjectId(endpointId),
+    endpointId,
     hour,
     totalChecks,
     successCount,

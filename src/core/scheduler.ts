@@ -188,11 +188,11 @@ export class CheckScheduler {
     for (const ep of endpoints) {
       if (ep.status === 'archived') continue
       // Seed consecutive failure + healthy counts from persisted DB state.
-      this.consecutiveFailures.set(ep._id.toString(), ep.consecutiveFailures)
-      this.consecutiveHealthy.set(ep._id.toString(), ep.consecutiveHealthy)
+      this.consecutiveFailures.set(ep.id.toString(), ep.consecutiveFailures)
+      this.consecutiveHealthy.set(ep.id.toString(), ep.consecutiveHealthy)
       // Random jitter spreads initial checks across the first interval window.
       const jitter = Math.floor(Math.random() * ep.checkInterval * 1000)
-      this.insertSafe({ endpointId: ep._id.toString(), nextDue: now + jitter, endpoint: ep })
+      this.insertSafe({ endpointId: ep.id.toString(), nextDue: now + jitter, endpoint: ep })
     }
 
     this.subscribeToEndpointEvents()
@@ -285,7 +285,7 @@ export class CheckScheduler {
         'endpoint:created',
         ({ endpoint }) => {
           if (endpoint.status === 'archived' || !endpoint.enabled) return
-          const id = endpoint._id.toString()
+          const id = endpoint.id.toString()
           this.consecutiveFailures.set(id, endpoint.consecutiveFailures)
           this.consecutiveHealthy.set(id, endpoint.consecutiveHealthy)
           this.insertSafe({ endpointId: id, nextDue: Date.now(), endpoint })

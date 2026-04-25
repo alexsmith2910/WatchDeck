@@ -80,20 +80,13 @@ export interface EventMap {
   'system:reset': { timestamp: Date; cleared: Record<string, number> }
 
   // -------------------------------------------------------------------------
-  // Health / maintenance / replay
+  // Health / replay
   // -------------------------------------------------------------------------
   'health:update': {
     timestamp: Date
     component: string
     status: 'healthy' | 'degraded' | 'down'
   }
-  'maintenance:started': {
-    timestamp: Date
-    endpointId: string
-    windowId: string
-    reason: string
-  }
-  'maintenance:ended': { timestamp: Date; endpointId: string; windowId: string }
   'replay:progress': {
     timestamp: Date
     status: 'running' | 'complete' | 'failed'
