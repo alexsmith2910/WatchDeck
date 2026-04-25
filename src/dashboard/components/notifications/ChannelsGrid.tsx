@@ -2,11 +2,12 @@
  * Channels grid — one card per configured channel with a 24h sparkline and
  * inline Test / Pause-Resume / View-log actions.
  *
- * Wiring note: we reuse the existing ChannelEditModal for add + edit. The
- * card's primary icon slot navigates there; the action row covers everyday
+ * Wiring note: the card's primary icon slot navigates to the channel edit
+ * page (`/notifications/channels/:id/edit`); the action row covers everyday
  * operations (test / pause / filter log).
  */
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Button,
   Dropdown,
@@ -49,7 +50,6 @@ import {
   statsByChannel,
   type ChannelUiStatus,
 } from './notificationHelpers'
-import { ChannelEditModal } from './ChannelEditModal'
 
 interface Props {
   channels: ApiChannel[]
@@ -88,8 +88,7 @@ const STATUS_STYLE: Record<ChannelUiStatus, { label: string; chip: string; card:
 
 export function ChannelsGrid({ channels, stats, recentLog, onChanged, onFilterByChannel }: Props) {
   const fmt = useFormat()
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState<ApiChannel | null>(null)
+  const navigate = useNavigate()
   const [deleteTarget, setDeleteTarget] = useState<ApiChannel | null>(null)
 
   const byChannel = useMemo(() => statsByChannel(stats), [stats])
@@ -122,17 +121,10 @@ export function ChannelsGrid({ channels, stats, recentLog, onChanged, onFilterBy
         <Button
           size="sm"
           className="!text-xs !bg-wd-primary !text-white"
-          onPress={() => { setEditing(null); setModalOpen(true) }}
+          onPress={() => navigate('/notifications/channels/new')}
         >
           <Icon icon="solar:add-square-linear" width={16} /> Create Channel
         </Button>
-        <ChannelEditModal
-          open={modalOpen}
-          channel={editing}
-          onClose={() => setModalOpen(false)}
-          onSaved={() => onChanged()}
-          onDeleted={() => onChanged()}
-        />
       </div>
     )
   }
@@ -141,13 +133,13 @@ export function ChannelsGrid({ channels, stats, recentLog, onChanged, onFilterBy
     <>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {channels.map((ch) => {
-          const chStats = byChannel.get(ch._id)
-          const status = deriveChannelStatus(ch, chStats, p95ByChannel.get(ch._id))
-          const lastLog = lastByChannel.get(ch._id) ?? null
-          const spark = channelSparkline(recentLog, ch._id, 24 * 60 * 60 * 1000, 24)
+          const chStats = byChannel.get(ch.id)
+          const status = deriveChannelStatus(ch, chStats, p95ByChannel.get(ch.id))
+          const lastLog = lastByChannel.get(ch.id) ?? null
+          const spark = channelSparkline(recentLog, ch.id, 24 * 60 * 60 * 1000, 24)
           return (
             <ChannelCard
-              key={ch._id}
+              key={ch.id}
               channel={ch}
               status={status}
               sent24h={chStats?.sent ?? 0}
@@ -156,7 +148,7 @@ export function ChannelsGrid({ channels, stats, recentLog, onChanged, onFilterBy
               lastLog={lastLog}
               sparkData={spark}
               sparkLabels={sparkLabels}
-              onEdit={() => { setEditing(ch); setModalOpen(true) }}
+              onEdit={() => navigate(`/notifications/channels/${ch.id}/edit`)}
               onDelete={() => setDeleteTarget(ch)}
               onChanged={onChanged}
               onFilterByChannel={onFilterByChannel}
@@ -164,14 +156,6 @@ export function ChannelsGrid({ channels, stats, recentLog, onChanged, onFilterBy
           )
         })}
       </div>
-
-      <ChannelEditModal
-        open={modalOpen}
-        channel={editing}
-        onClose={() => setModalOpen(false)}
-        onSaved={() => { onChanged(); setModalOpen(false) }}
-        onDeleted={() => { onChanged(); setModalOpen(false) }}
-      />
 
       <DeleteChannelModal
         channel={deleteTarget}
@@ -204,7 +188,7 @@ function DeleteChannelModal({
     if (!channel) return
     setDeleting(true)
     try {
-      const res = await request(`/notifications/channels/${channel._id}`, { method: 'DELETE' })
+      const res = await request(`/notifications/channels/${channel.id}`, { method: 'DELETE' })
       if (res.status >= 400) {
         toast.error('Delete failed', { description: `HTTP ${res.status}` })
         return
@@ -297,7 +281,7 @@ function ChannelCard({
     setBusy('test')
     try {
       const res = await request<{ data: { ok: boolean; reason?: string } }>(
-        `/notifications/channels/${channel._id}/test`,
+        `/notifications/channels/${channel.id}/test`,
         { method: 'POST' },
       )
       if (res.data?.data?.ok) toast.success('Test dispatched', { description: channel.name })
@@ -312,7 +296,7 @@ function ChannelCard({
   async function togglePause() {
     setBusy('pause')
     try {
-      await request(`/notifications/channels/${channel._id}`, {
+      await request(`/notifications/channels/${channel.id}`, {
         method: 'PUT',
         body: { enabled: !channel.enabled },
       })
@@ -436,11 +420,6 @@ function ChannelCard({
           {channel.rateLimit && (
             <Chip icon="solar:bolt-outline" tone="muted"><span className="font-mono">{channel.rateLimit.maxPerMinute}/min</span></Chip>
           )}
-          {channel.quietHours && (
-            <Chip icon="solar:moon-outline" tone="muted">
-              <span className="font-mono">{channel.quietHours.start}–{channel.quietHours.end}</span>
-            </Chip>
-          )}
           {!channel.retryOnFailure && (
             <Chip icon="solar:refresh-circle-outline" tone="warning">No retry</Chip>
           )}
@@ -464,7 +443,7 @@ function ChannelCard({
           <IconAction
             icon="solar:clipboard-text-outline"
             title="Filter delivery log by this channel"
-            onClick={() => onFilterByChannel(channel._id)}
+            onClick={() => onFilterByChannel(channel.id)}
           />
         </div>
       </div>

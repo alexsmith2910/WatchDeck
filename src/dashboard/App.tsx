@@ -8,6 +8,7 @@ import EndpointDetailPage from './pages/EndpointDetailPage'
 import IncidentsPage from './pages/IncidentsPage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
 import NotificationsPage from './pages/NotificationsPage'
+import ChannelFormPage from './pages/AddChannelPage'
 import SettingsPage from './pages/SettingsPage'
 import HealthPage from './pages/HealthPage'
 import DocsPage from './pages/DocsPage'
@@ -24,6 +25,8 @@ export default function App() {
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/notifications/channels/new" element={<ChannelFormPage />} />
+        <Route path="/notifications/channels/:id/edit" element={<ChannelFormPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/health" element={<HealthPage />} />
         <Route path="/docs" element={<DocsPage />} />
