@@ -80,10 +80,19 @@ const BASE = '/api/mx'
 // ---------------------------------------------------------------------------
 
 const dbUri = process.env.MX_DB_URI
+// MongoDBAdapter-only test — skip cleanly on non-Mongo URIs so local dev
+// against Postgres doesn't trip the scheme check.
+const isMongo = dbUri?.startsWith('mongodb://') || dbUri?.startsWith('mongodb+srv://')
 
 if (!dbUri) {
   section('SSE tests  (SKIPPED — MX_DB_URI not set)')
   console.log('  ℹ  Run from a directory with .env to enable SSE tests')
+  console.log(`\n── Results: ${passed} passed, ${failed} failed\n`)
+  process.exit(0)
+}
+if (!isMongo) {
+  section('SSE tests  (SKIPPED — non-Mongo URI)')
+  console.log('  ℹ  Switch MX_DB_URI to a mongodb:// URI to run this test')
   console.log(`\n── Results: ${passed} passed, ${failed} failed\n`)
   process.exit(0)
 }
@@ -94,7 +103,7 @@ const testConfig: WatchDeckConfig = {
   ...(defaults as unknown as WatchDeckConfig),
   apiBasePath: BASE,
   sse: { heartbeatInterval: 2 },
-  modules: { discord: true, slack: true, sslChecks: false, portChecks: true, bodyValidation: true },
+  modules: { sslChecks: false, portChecks: true },
   rateLimits: { ...(defaults as unknown as WatchDeckConfig).rateLimits, maxEventListeners: 50 },
   authMiddleware: null,
 }
@@ -249,7 +258,7 @@ sseText = ''
 
 eventBus.emit('incident:opened', {
   timestamp: new Date(),
-  incident: { _id: 'inc-test-001', status: 'active' } as any,
+  incident: { id: 'inc-test-001', status: 'active' } as any,
 })
 
 await sleep(200)
@@ -260,7 +269,7 @@ const incidentMsg = liveMessages.find((m) => m.event === 'incident:opened')
 assert(incidentMsg !== undefined, 'Live incident:opened received over SSE')
 if (incidentMsg) {
   const data = JSON.parse(incidentMsg.data)
-  assert(data.incident?._id === 'inc-test-001', 'incident._id matches')
+  assert(data.incident?.id === 'inc-test-001', 'incident.id matches')
 }
 
 // replay:progress

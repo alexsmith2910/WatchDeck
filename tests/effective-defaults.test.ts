@@ -19,7 +19,6 @@ import type {
   HourlySummaryDoc,
   IncidentDoc,
   InternalIncidentDoc,
-  MaintenanceWindow,
   NotificationChannelDoc,
   NotificationLogDoc,
   NotificationMuteDoc,
@@ -83,7 +82,7 @@ class FakeAdapter extends StorageAdapter {
   listEnabledEndpoints(): never { throw new Error('unused') }
   getEndpointById(_: string): never { throw new Error('unused') }
   updateEndpoint(): never { throw new Error('unused') }
-  createEndpoint(_: Omit<EndpointDoc, '_id' | 'createdAt' | 'updatedAt'>): never { throw new Error('unused') }
+  createEndpoint(_: Omit<EndpointDoc, 'id' | 'createdAt' | 'updatedAt'>): never { throw new Error('unused') }
   deleteEndpoint(_: string): never { throw new Error('unused') }
   updateEndpointAfterCheck(): never { throw new Error('unused') }
   getLatestCheckForEndpoint(): never { throw new Error('unused') }
@@ -102,15 +101,12 @@ class FakeAdapter extends StorageAdapter {
   updateIncident(): never { throw new Error('unused') }
   getActiveIncidentForEndpoint(): never { throw new Error('unused') }
   getIncidentStats(): never { throw new Error('unused') }
-  addMaintenanceWindow(_: MaintenanceWindow): never { throw new Error('unused') }
-  listMaintenanceWindows(): never { throw new Error('unused') }
-  removeMaintenanceWindow(): never { throw new Error('unused') }
   listNotificationChannels(): never { throw new Error('unused') }
   getNotificationChannelById(): never { throw new Error('unused') }
-  createNotificationChannel(_: Omit<NotificationChannelDoc, '_id'>): never { throw new Error('unused') }
+  createNotificationChannel(_: Omit<NotificationChannelDoc, 'id'>): never { throw new Error('unused') }
   updateNotificationChannel(): never { throw new Error('unused') }
   deleteNotificationChannel(): never { throw new Error('unused') }
-  appendNotificationLog(_: Omit<NotificationLogDoc, '_id'>): never { throw new Error('unused') }
+  appendNotificationLog(_: Omit<NotificationLogDoc, 'id'>): never { throw new Error('unused') }
   getNotificationLog(): never { throw new Error('unused') }
   getNotificationLogById(): never { throw new Error('unused') }
   getNotificationStats(): never { throw new Error('unused') }
@@ -118,12 +114,12 @@ class FakeAdapter extends StorageAdapter {
   getNotificationPreferences(): never { throw new Error('unused') }
   updateNotificationPreferences(): never { throw new Error('unused') }
   listNotificationMutes(): never { throw new Error('unused') }
-  createNotificationMute(_: Omit<NotificationMuteDoc, '_id'>): never { throw new Error('unused') }
+  createNotificationMute(_: Omit<NotificationMuteDoc, 'id'>): never { throw new Error('unused') }
   deleteNotificationMute(): never { throw new Error('unused') }
   findActiveNotificationMute(): never { throw new Error('unused') }
   deleteDailySummariesBefore(): never { throw new Error('unused') }
   getEndpointIdsWithChecks(): never { throw new Error('unused') }
-  saveHealthState(_: Omit<HealthStateDoc, '_id'>): never { throw new Error('unused') }
+  saveHealthState(_: Omit<HealthStateDoc, 'id'>): never { throw new Error('unused') }
   loadHealthState(): never { throw new Error('unused') }
   listInternalIncidents(): never { throw new Error('unused') }
   upsertInternalIncident(_: InternalIncidentDoc): never { throw new Error('unused') }
@@ -151,11 +147,9 @@ const baseConfig: Pick<WatchDeckConfig, 'defaults' | 'slo'> = {
       sendOpen: true,
       sendResolved: true,
       sendEscalation: true,
-      alertDuringMaintenance: false,
       retryOnFailure: true,
       retryBackoffMs: [2000, 8000, 30000],
       coalescing: { enabled: true, windowSeconds: 60, minBurstCount: 3, bypassSeverity: 'critical' },
-      quietHours: null,
       channelDefaults: {
         discord: { rateLimitPerMinute: 30 },
         slack: { rateLimitPerMinute: 30 },
@@ -172,7 +166,7 @@ async function main(): Promise<void> {
 
   // Empty override → everything passes through.
   {
-    const adapter = new FakeAdapter({ _id: 'global' })
+    const adapter = new FakeAdapter({ id: 'global' })
     const d = await adapter.getEffectiveDefaults(baseConfig as WatchDeckConfig)
     assert(d.checkInterval === 60, 'empty override: checkInterval falls through', String(d.checkInterval))
     assert(d.timeout === 10_000, 'empty override: timeout falls through', String(d.timeout))
@@ -186,7 +180,7 @@ async function main(): Promise<void> {
   // Partial override → only named keys replace, rest pass through.
   {
     const adapter = new FakeAdapter({
-      _id: 'global',
+      id: 'global',
       defaults: { checkInterval: 30, recoveryAlert: false },
     })
     const d = await adapter.getEffectiveDefaults(baseConfig as WatchDeckConfig)
@@ -199,7 +193,7 @@ async function main(): Promise<void> {
   // Full override → every key lifts off config.
   {
     const adapter = new FakeAdapter({
-      _id: 'global',
+      id: 'global',
       defaults: {
         checkInterval: 120,
         timeout: 20_000,

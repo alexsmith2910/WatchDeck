@@ -8,8 +8,12 @@
 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ObjectId } from 'mongodb'
+import { randomBytes } from 'node:crypto'
 import dotenv from 'dotenv'
+
+function fakeObjectIdHex(): string {
+  return randomBytes(12).toString('hex')
+}
 
 import { evaluateStatus } from '../src/checks/evaluators/statusEval.js'
 import { runHttpCheck } from '../src/checks/httpCheck.js'
@@ -59,7 +63,7 @@ function section(title: string): void {
 
 function makeEndpoint(overrides?: Partial<EndpointDoc>): EndpointDoc {
   return {
-    _id: new ObjectId(),
+    id: fakeObjectIdHex(),
     name: 'Test endpoint',
     type: 'http',
     url: 'https://httpbin.org/status/200',
@@ -78,7 +82,6 @@ function makeEndpoint(overrides?: Partial<EndpointDoc>): EndpointDoc {
     recoveryAlert: true,
     escalationDelay: 1_800,
     notificationChannelIds: [],
-    maintenanceWindows: [],
     consecutiveFailures: 0,
     consecutiveHealthy: 0,
     createdAt: new Date(),
@@ -93,7 +96,7 @@ const testConfig: WatchDeckConfig = {
   apiBasePath: '/api/mx',
   dashboardRoute: '/dashboard',
   dashboardMode: 'standalone',
-  modules: { discord: true, slack: true, sslChecks: false, portChecks: true, bodyValidation: true },
+  modules: { sslChecks: false, portChecks: true },
   defaults: {
     checkInterval: 60, timeout: 10_000, expectedStatusCodes: [200],
     latencyThreshold: 5_000, sslWarningDays: 14, failureThreshold: 3,
@@ -258,7 +261,7 @@ section('checkRunner — check:complete event')
   unsub()
 
   assert(received !== null, 'check:complete emitted for HTTP check')
-  assert(received!.endpointId === endpoint._id.toString(), 'endpointId matches')
+  assert(received!.endpointId === endpoint.id, 'endpointId matches')
   assert(['healthy', 'degraded', 'down'].includes(received!.status), `status is valid (got: ${received!.status})`)
   assert(received!.responseTime > 0, `responseTime > 0 (got: ${received!.responseTime})`)
   assert(received!.timestamp instanceof Date, 'timestamp is a Date')
@@ -304,10 +307,18 @@ section('checkRunner — check:complete event')
 
 const dbUri = process.env.MX_DB_URI
 const dbPrefix = process.env.MX_DB_PREFIX ?? 'mx_'
+// This block uses MongoDBAdapter directly. When the env URI points at a
+// non-Mongo backend (e.g. Postgres dev DB) skip cleanly rather than blow up
+// with "expected mongodb://" — the scheduler logic is identical across
+// adapters, so a Mongo box on CI covers what we need.
+const isMongo = dbUri?.startsWith('mongodb://') || dbUri?.startsWith('mongodb+srv://')
 
 if (!dbUri) {
   section('CheckScheduler — DB integration  (SKIPPED — MX_DB_URI not set)')
   console.log('  ℹ  Run from a directory with .env to enable DB tests')
+} else if (!isMongo) {
+  section('CheckScheduler — DB integration  (SKIPPED — non-Mongo URI)')
+  console.log('  ℹ  This test exercises MongoDBAdapter directly; switch MX_DB_URI to a mongodb:// URI to run')
 } else {
   section('CheckScheduler — DB integration')
 
@@ -338,11 +349,11 @@ if (!dbUri) {
     assert(scheduler.queueSize === sizeBefore + 1, `endpoint:created increases queueSize by 1 (${sizeBefore} → ${scheduler.queueSize})`)
 
     // scheduleImmediate finds existing endpoint
-    assert(scheduler.scheduleImmediate(ep._id.toString()) === true, 'scheduleImmediate returns true for known endpoint')
+    assert(scheduler.scheduleImmediate(ep.id) === true, 'scheduleImmediate returns true for known endpoint')
     assert(scheduler.scheduleImmediate('000000000000000000000000') === false, 'scheduleImmediate returns false for unknown endpoint')
 
     // endpoint:deleted removes from queue
-    eventBus.emit('endpoint:deleted', { timestamp: new Date(), endpointId: ep._id.toString(), name: ep.name })
+    eventBus.emit('endpoint:deleted', { timestamp: new Date(), endpointId: ep.id, name: ep.name })
     assert(scheduler.queueSize === sizeBefore, `endpoint:deleted decreases queueSize back (got: ${scheduler.queueSize})`)
 
     // Port checks excluded when module disabled

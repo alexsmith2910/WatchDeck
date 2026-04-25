@@ -125,21 +125,6 @@
 | GET /notifications/log → 200 | 200 | ✅ |
 | notification log has pagination envelope | present | ✅ |
 
-### API routes — maintenance
-
-| Test | Expected | Result |
-|------|----------|--------|
-| POST /maintenance → 201 | 201 | ✅ |
-| POST /maintenance returns array of windows | array | ✅ |
-| one window created for one endpointId | length 1 | ✅ |
-| POST /maintenance with endTime before startTime → 422 | 422 | ✅ |
-| GET /maintenance → 200 | 200 | ✅ |
-| GET /maintenance returns data array | array | ✅ |
-| created window appears in list | present | ✅ |
-| future window has status = "scheduled" | "scheduled" | ✅ |
-| DELETE /maintenance/:id → 204 | 204 | ✅ |
-| DELETE /maintenance/:id already gone → 404 | 404 | ✅ |
-
 ### API routes — settings
 
 | Test | Expected | Result |

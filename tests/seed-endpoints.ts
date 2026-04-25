@@ -186,7 +186,7 @@ for (const ep of endpoints) {
   const { status, data } = await req('POST', '/endpoints', ep)
   if (status === 201) {
     const d = (data as Record<string, unknown>)?.data as Record<string, unknown>
-    console.log(`  ✓  ${ep.name}  (${d?._id})`)
+    console.log(`  ✓  ${ep.name}  (${d?.id})`)
     created++
   } else {
     const d = data as Record<string, unknown>

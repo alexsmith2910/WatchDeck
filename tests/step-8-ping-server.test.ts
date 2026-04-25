@@ -104,16 +104,26 @@ await sleep(DELAY)
   const { status, data } = await req('GET', '/health/ping')
   const d = data as Record<string, unknown>
   assert(status === 200, 'GET /health/ping → 200')
-  assert(d?.status === 'ok', 'body.status = "ok"')
+  // Liveness probe — minimal `{ ok: true }` body is intentional. Anything
+  // richer belongs on /health proper.
+  assert(d?.ok === true, 'body.ok === true')
 }
 await sleep(DELAY)
 
 {
   const { status, data } = await req('GET', '/health')
-  const d = data as Record<string, unknown>
+  // /health is now a probe-registry snapshot under `data.overall` rather than
+  // the flat `{ uptime, db }` shape the original assertion expected. Walk into
+  // overall and check process uptime + the active-incidents count instead.
+  const overall = ((data as Record<string, unknown>)?.data as Record<string, unknown>)
+    ?.overall as Record<string, unknown> | undefined
   assert(status === 200, 'GET /health → 200')
-  assert(typeof d?.uptime === 'number', 'uptime is a number', String(d?.uptime))
-  assert(typeof (d?.db as Record<string, unknown>)?.status === 'string', 'db.status is a string')
+  assert(
+    typeof overall?.processUptimeSeconds === 'number',
+    'overall.processUptimeSeconds is a number',
+    String(overall?.processUptimeSeconds),
+  )
+  assert(typeof overall?.state === 'string', 'overall.state is a string')
 }
 await sleep(DELAY)
 
@@ -141,10 +151,13 @@ await sleep(DELAY)
 await sleep(DELAY)
 
 {
-  const { status, data } = await req('GET', '/endpoints/not-an-objectid')
+  const { status, data } = await req('GET', '/endpoints/not-a-real-uuid')
   const d = data as Record<string, unknown>
-  assert(status === 400, 'GET /endpoints/bad-id → 400')
-  assert(d?.code === 'INVALID_ID', 'code = INVALID_ID')
+  // Endpoint IDs are UUIDv7 strings now (no ObjectId-shaped pre-validation).
+  // Anything that isn't an existing endpoint comes back as a clean 404; we
+  // dropped the eager INVALID_ID 400 to keep the contract simple.
+  assert(status === 404, 'GET /endpoints/bad-id → 404')
+  assert(d?.code === 'NOT_FOUND', 'code = NOT_FOUND')
 }
 await sleep(DELAY)
 
@@ -165,9 +178,9 @@ let endpointId = ''
     enabled: true,
   })
   const d = data as Record<string, unknown>
-  endpointId = (d?.data as Record<string, unknown>)?._id as string ?? ''
+  endpointId = (d?.data as Record<string, unknown>)?.id as string ?? ''
   assert(status === 201, 'POST /endpoints → 201')
-  assert(typeof endpointId === 'string' && endpointId.length > 0, 'got _id back', endpointId)
+  assert(typeof endpointId === 'string' && endpointId.length > 0, 'got id back', endpointId)
 }
 await sleep(DELAY)
 
@@ -262,11 +275,14 @@ let channelId = ''
   const { status, data } = await req('POST', '/notifications/channels', {
     name:             'Ping Test Channel',
     type:             'discord',
-    discordWebhookUrl: 'https://discord.com/api/webhooks/test/ping',
+    // The channel registry now validates Discord webhook URLs against the
+    // real `{id}/{token}` shape. Synthetic IDs/tokens that look right pass
+    // structural checks; the URL is never actually called during this test.
+    discordWebhookUrl: 'https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012345678',
     deliveryPriority: 'standard',
   })
   const d = (data as Record<string, unknown>)?.data as Record<string, unknown>
-  channelId = d?._id as string ?? ''
+  channelId = d?.id as string ?? ''
   assert(status === 201, 'POST /notifications/channels → 201')
   assert(d?.name === 'Ping Test Channel', 'name matches')
 }
@@ -289,7 +305,7 @@ await sleep(DELAY)
   const { status, data } = await req('GET', '/settings')
   const d = (data as Record<string, unknown>)?.data as Record<string, unknown>
   assert(status === 200, 'GET /settings → 200')
-  assert(d?._id === 'global', '_id = "global"')
+  assert(d?.id === 'global', 'id = "global"')
 }
 await sleep(DELAY)
 

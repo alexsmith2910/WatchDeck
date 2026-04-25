@@ -11,8 +11,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { appendFile, unlink, access } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
-import { ObjectId } from 'mongodb'
+import { randomBytes } from 'node:crypto'
 import dotenv from 'dotenv'
+
+function fakeObjectIdHex(): string {
+  return randomBytes(12).toString('hex')
+}
 
 import { MemoryBuffer } from '../src/buffer/memoryBuffer.js'
 import { DiskBuffer } from '../src/buffer/diskBuffer.js'
@@ -63,7 +67,7 @@ function section(title: string): void {
 function makePayload(overrides?: Partial<CheckWritePayload>): CheckWritePayload {
   return {
     timestamp: new Date(),
-    endpointId: new ObjectId().toHexString(),
+    endpointId: fakeObjectIdHex(),
     status: 'healthy',
     responseTime: 42,
     statusCode: 200,
@@ -180,10 +184,16 @@ section('DiskBuffer — corrupted line skipping')
 
 const dbUri = process.env.MX_DB_URI
 const dbPrefix = process.env.MX_DB_PREFIX ?? 'mx_'
+// Replay integration uses MongoDBAdapter directly. Skip cleanly on non-Mongo
+// URIs so local runs against a Postgres dev DB don't trip the scheme check.
+const isMongo = dbUri?.startsWith('mongodb://') || dbUri?.startsWith('mongodb+srv://')
 
 if (!dbUri) {
   section('Replay integration  (SKIPPED — MX_DB_URI not set)')
   console.log('  ℹ  Run from a directory with .env to enable DB tests')
+} else if (!isMongo) {
+  section('Replay integration  (SKIPPED — non-Mongo URI)')
+  console.log('  ℹ  Switch MX_DB_URI to a mongodb:// URI to exercise the replay path')
 } else {
   section('Replay integration')
 
@@ -226,10 +236,20 @@ if (!dbUri) {
 
 const cliBin = path.join(projectRoot, 'dist', 'bin', 'cli.js')
 const testProjectDir = path.resolve(projectRoot, '..', 'test_watchdeck')
-const canObserve = dbUri && await fileExists(cliBin) && await fileExists(testProjectDir)
+// Opt-in: this section spawns the real CLI and races against the disk
+// buffer file. When a dev server is already running locally it holds the
+// same buffer open, so the observation flakes. Set WATCHDECK_OBSERVE=1
+// explicitly when no other instance is running to exercise it.
+const observeOptIn = process.env.WATCHDECK_OBSERVE === '1'
+const canObserve =
+  observeOptIn &&
+  dbUri &&
+  (await fileExists(cliBin)) &&
+  (await fileExists(testProjectDir))
 
 if (!canObserve) {
   section('Startup replay observe  (SKIPPED)')
+  if (!observeOptIn) console.log('  ℹ  Set WATCHDECK_OBSERVE=1 to run (requires no other watchdeck instance running)')
   if (!dbUri) console.log('  ℹ  No MX_DB_URI')
   if (!await fileExists(cliBin)) console.log('  ℹ  No dist/ — run npm run build first')
   if (!await fileExists(testProjectDir)) console.log('  ℹ  No test_watchdeck directory found')

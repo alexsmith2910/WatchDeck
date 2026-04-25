@@ -10,8 +10,12 @@
 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ObjectId } from 'mongodb'
+import { randomBytes } from 'node:crypto'
 import dotenv from 'dotenv'
+
+function fakeObjectIdHex(): string {
+  return randomBytes(12).toString('hex')
+}
 
 import { parsePagination, toEnvelope } from '../src/api/utils/pagination.js'
 import type { DbPage } from '../src/storage/types.js'
@@ -86,8 +90,8 @@ section('Pagination utilities')
 }
 
 {
-  const page: DbPage<{ _id: ObjectId; name: string }> = {
-    items: [{ _id: new ObjectId(), name: 'a' }, { _id: new ObjectId(), name: 'b' }],
+  const page: DbPage<{ id: string; name: string }> = {
+    items: [{ id: fakeObjectIdHex(), name: 'a' }, { id: fakeObjectIdHex(), name: 'b' }],
     total: 10,
     hasMore: true,
     nextCursor: 'cursor-next',
@@ -102,7 +106,7 @@ section('Pagination utilities')
 }
 
 {
-  const page: DbPage<{ _id: ObjectId }> = {
+  const page: DbPage<{ id: string }> = {
     items: [],
     total: 0,
     hasMore: false,
@@ -120,17 +124,23 @@ section('Pagination utilities')
 
 const dbUri = process.env.MX_DB_URI
 const dbPrefix = process.env.MX_DB_PREFIX ?? 'mx_'
+// This block instantiates MongoDBAdapter directly. Skip cleanly on non-Mongo
+// URIs so the test passes locally when MX_DB_URI points at Postgres for dev.
+const isMongo = dbUri?.startsWith('mongodb://') || dbUri?.startsWith('mongodb+srv://')
 
 if (!dbUri) {
   section('API routes  (SKIPPED — MX_DB_URI not set)')
   console.log('  ℹ  Run from a directory with .env to enable server tests')
+} else if (!isMongo) {
+  section('API routes  (SKIPPED — non-Mongo URI)')
+  console.log('  ℹ  Switch MX_DB_URI to a mongodb:// URI to run this section')
 } else {
   section('API routes — setup')
 
   const testConfig: WatchDeckConfig = {
     ...(defaults as unknown as WatchDeckConfig),
     apiBasePath: BASE,
-    modules: { discord: true, slack: true, sslChecks: false, portChecks: true, bodyValidation: true },
+    modules: { sslChecks: false, portChecks: true },
     rateLimits: { ...(defaults as unknown as WatchDeckConfig).rateLimits, maxEventListeners: 50 },
     authMiddleware: null,
   }
@@ -169,7 +179,6 @@ if (!dbUri) {
     // Track created IDs for cleanup
     const createdEndpointIds: string[] = []
     const createdChannelIds: string[] = []
-    const createdWindowIds: string[] = []
 
     // ── Health ──────────────────────────────────────────────────────────────
 
@@ -233,11 +242,11 @@ if (!dbUri) {
         payload: { name: 'Test HTTP', type: 'http', url: 'https://httpbin.org/status/200' },
         headers: { 'content-type': 'application/json' },
       })
-      const body = JSON.parse(res.body) as { data: { _id: string; name: string; checkInterval: number } }
+      const body = JSON.parse(res.body) as { data: { id: string; name: string; checkInterval: number } }
       assert(res.statusCode === 201, 'POST /endpoints (HTTP) → 201')
       assert(body.data.name === 'Test HTTP', 'created endpoint has correct name')
       assert(body.data.checkInterval === defaults.defaults.checkInterval, 'default checkInterval applied')
-      httpEndpointId = body.data._id
+      httpEndpointId = body.data.id
       if (httpEndpointId) createdEndpointIds.push(httpEndpointId)
     }
 
@@ -248,10 +257,10 @@ if (!dbUri) {
         payload: { name: 'Test Port', type: 'port', host: 'example.com', port: 80 },
         headers: { 'content-type': 'application/json' },
       })
-      const body = JSON.parse(res.body) as { data: { _id: string; type: string } }
+      const body = JSON.parse(res.body) as { data: { id: string; type: string } }
       assert(res.statusCode === 201, 'POST /endpoints (port) → 201')
       assert(body.data.type === 'port', 'port endpoint has type = "port"')
-      portEndpointId = body.data._id
+      portEndpointId = body.data.id
       if (portEndpointId) createdEndpointIds.push(portEndpointId)
     }
 
@@ -294,9 +303,9 @@ if (!dbUri) {
 
     {
       const res = await server.inject({ method: 'GET', url: `${BASE}/endpoints/${httpEndpointId}` })
-      const body = JSON.parse(res.body) as { data: { _id: string }; latestCheck: unknown }
+      const body = JSON.parse(res.body) as { data: { id: string }; latestCheck: unknown }
       assert(res.statusCode === 200, 'GET /endpoints/:id → 200')
-      assert(body.data._id === httpEndpointId, 'GET /endpoints/:id returns correct endpoint')
+      assert(body.data.id === httpEndpointId, 'GET /endpoints/:id returns correct endpoint')
       assert('latestCheck' in body, 'GET /endpoints/:id includes latestCheck field')
     }
 
@@ -308,7 +317,7 @@ if (!dbUri) {
     }
 
     {
-      const fakeId = new ObjectId().toHexString()
+      const fakeId = fakeObjectIdHex()
       const res = await server.inject({ method: 'GET', url: `${BASE}/endpoints/${fakeId}` })
       assert(res.statusCode === 404, 'GET /endpoints/:id non-existent → 404')
     }
@@ -425,7 +434,7 @@ if (!dbUri) {
     }
 
     {
-      const fakeId = new ObjectId().toHexString()
+      const fakeId = fakeObjectIdHex()
       const res = await server.inject({ method: 'GET', url: `${BASE}/incidents/${fakeId}` })
       assert(res.statusCode === 404, 'GET /incidents/:id non-existent → 404')
     }
@@ -450,11 +459,11 @@ if (!dbUri) {
         payload: { type: 'discord', name: 'Test Discord', discordWebhookUrl: 'https://discord.com/api/webhooks/test' },
         headers: { 'content-type': 'application/json' },
       })
-      const body = JSON.parse(res.body) as { data: { _id: string; type: string; name: string } }
+      const body = JSON.parse(res.body) as { data: { id: string; type: string; name: string } }
       assert(res.statusCode === 201, 'POST /notifications/channels → 201')
       assert(body.data.type === 'discord', 'created channel has correct type')
       assert(body.data.name === 'Test Discord', 'created channel has correct name')
-      channelId = body.data._id
+      channelId = body.data.id
       if (channelId) createdChannelIds.push(channelId)
     }
 
@@ -481,85 +490,15 @@ if (!dbUri) {
       assert(body.pagination !== undefined, 'notification log has pagination envelope')
     }
 
-    // ── Maintenance ───────────────────────────────────────────────────────────
-
-    section('API routes — maintenance')
-
-    let windowId = ''
-
-    {
-      const startTime = new Date(Date.now() + 60_000).toISOString()
-      const endTime = new Date(Date.now() + 3_600_000).toISOString()
-      const res = await server.inject({
-        method: 'POST',
-        url: `${BASE}/maintenance`,
-        payload: {
-          endpointIds: [httpEndpointId],
-          startTime,
-          endTime,
-          reason: 'Test maintenance',
-        },
-        headers: { 'content-type': 'application/json' },
-      })
-      const body = JSON.parse(res.body) as { data: Array<{ _id: string }> }
-      assert(res.statusCode === 201, 'POST /maintenance → 201')
-      assert(Array.isArray(body.data), 'POST /maintenance returns array of windows')
-      assert(body.data.length === 1, 'one window created for one endpointId')
-      windowId = body.data[0]?._id ?? ''
-      if (windowId) createdWindowIds.push(windowId)
-    }
-
-    {
-      const res = await server.inject({
-        method: 'POST',
-        url: `${BASE}/maintenance`,
-        payload: {
-          endpointIds: [httpEndpointId],
-          startTime: new Date(Date.now() + 3_600_000).toISOString(),
-          endTime: new Date(Date.now() + 60_000).toISOString(),
-          reason: 'Bad window',
-        },
-        headers: { 'content-type': 'application/json' },
-      })
-      assert(res.statusCode === 422, 'POST /maintenance with endTime before startTime → 422')
-    }
-
-    {
-      const res = await server.inject({ method: 'GET', url: `${BASE}/maintenance` })
-      const body = JSON.parse(res.body) as { data: Array<{ windowId: string; status: string }> }
-      assert(res.statusCode === 200, 'GET /maintenance → 200')
-      assert(Array.isArray(body.data), 'GET /maintenance returns data array')
-      const ourWindow = body.data.find((w) => w.windowId === windowId)
-      assert(ourWindow !== undefined, 'created window appears in list')
-      assert(ourWindow?.status === 'scheduled', 'future window has status = "scheduled"')
-    }
-
-    {
-      const res = await server.inject({
-        method: 'DELETE',
-        url: `${BASE}/maintenance/${windowId}`,
-      })
-      assert(res.statusCode === 204, 'DELETE /maintenance/:id → 204')
-      createdWindowIds.splice(createdWindowIds.indexOf(windowId), 1)
-    }
-
-    {
-      const res = await server.inject({
-        method: 'DELETE',
-        url: `${BASE}/maintenance/${windowId}`,
-      })
-      assert(res.statusCode === 404, 'DELETE /maintenance/:id already gone → 404')
-    }
-
     // ── Settings ──────────────────────────────────────────────────────────────
 
     section('API routes — settings')
 
     {
       const res = await server.inject({ method: 'GET', url: `${BASE}/settings` })
-      const body = JSON.parse(res.body) as { data: { _id: string } }
+      const body = JSON.parse(res.body) as { data: { id: string } }
       assert(res.statusCode === 200, 'GET /settings → 200')
-      assert(body.data._id === 'global', 'settings doc has _id = "global"')
+      assert(body.data.id === 'global', 'settings doc has id = "global"')
     }
 
     {
@@ -678,9 +617,6 @@ if (!dbUri) {
     }
     for (const id of createdChannelIds) {
       await adapter.deleteNotificationChannel(id).catch(() => {})
-    }
-    for (const id of createdWindowIds) {
-      await adapter.removeMaintenanceWindow(id).catch(() => {})
     }
 
     await server.close()
