@@ -46,11 +46,8 @@ export default {
   dashboardRoute: '/dashboard',
   dashboardMode: 'standalone',
   modules: {
-    discord: true,
-    slack: true,
     sslChecks: true,
     portChecks: true,
-    bodyValidation: true,
   },
 }
 ```
